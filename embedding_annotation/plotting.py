@@ -1,7 +1,10 @@
+from collections.abc import Iterable
 from textwrap import wrap
+from typing import Optional, Union
 
-import pandas as pd
+import matplotlib.colors as colors
 import numpy as np
+import pandas as pd
 
 
 def plot_feature(
@@ -99,7 +102,7 @@ def plot_features(
     data: pd.DataFrame,
     embedding: np.ndarray,
     per_row=4,
-    figwidth=16,
+    figwidth=24,
     binary=False,
     s=6,
     alpha=0.1,
@@ -169,6 +172,99 @@ def plot_features(
             ax[idx].set_title(title)
 
         plt.tight_layout()
+
+    if return_ax:
+        return fig, ax
+
+
+def get_cmap_hues(cmap: str):
+    """Extract the hue values from a given colormap."""
+    import matplotlib.cm
+
+    cm = matplotlib.cm.get_cmap(cmap)
+    hues = [c[0] for c in colors.rgb_to_hsv(cm.colors)]
+
+    return np.array(hues)
+
+
+def hue_colormap(
+    hue: float, levels: int = 10, min_saturation: float = 0
+) -> colors.ListedColormap:
+    """Create an HSV colormap with varying saturation levels"""
+    hsv = [[hue, s, 1] for s in np.linspace(min_saturation, 1, num=levels)]
+    rgb = colors.hsv_to_rgb(hsv)
+    cmap = colors.ListedColormap(rgb)
+
+    return cmap
+
+
+def plot_feature_density(
+    grid: np.ndarray,
+    density: np.ndarray,
+    embedding: Optional[np.ndarray] = None,
+    levels: Union[int, np.ndarray] = 5,
+    skip_first: bool = True,
+    ax=None,
+    cmap="RdBu_r",
+):
+    import matplotlib.pyplot as plt
+    import matplotlib.ticker as ticker
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 8))
+
+    n_grid_points = int(np.sqrt(grid.shape[0]))  # always a square grid
+    xs, ys = np.unique(grid[:, 0]), np.unique(grid[:, 1])
+
+    z = density.reshape(n_grid_points, n_grid_points).T
+
+    tck = None
+    if isinstance(levels, Iterable):
+        if skip_first:
+            levels = levels[1:]
+    else:
+        if skip_first:
+            tck = ticker.MaxNLocator(nbins=levels, prune="lower")
+
+    ax.contourf(xs, ys, z, levels=levels, cmap=cmap, zorder=1, locator=tck)
+    ax.contour(
+        xs, ys, z, levels=levels, linewidths=1, colors="k", zorder=1, locator=tck
+    )
+
+    if embedding is not None:
+        ax.scatter(embedding[:, 0], embedding[:, 1], c="k", s=6, zorder=1, alpha=0.1)
+
+    return ax
+
+
+def plot_feature_densities(
+    features: list,
+    grid: np.ndarray,
+    densities: pd.DataFrame,
+    embedding: Optional[np.ndarray] = None,
+    per_row: int = 4,
+    figwidth: int = 24,
+    return_ax: bool = False,
+):
+    import matplotlib.pyplot as plt
+
+    n_rows = len(features) // per_row
+    if len(features) % per_row > 0:
+        n_rows += 1
+
+    figheight = figwidth / per_row * n_rows
+    fig, ax = plt.subplots(nrows=n_rows, ncols=per_row, figsize=(figwidth, figheight))
+
+    ax = ax.ravel()
+    for axi in ax:
+        axi.set_axis_off()
+
+    for idx, feature in enumerate(features):
+        ax[idx].set_title(feature)
+
+        plot_feature_density(grid, densities.loc[feature].values, embedding, ax=ax[idx])
+        # import matplotlib.ticker as ticker
+        # ticker.MaxNLocator(prune="lower")
 
     if return_ax:
         return fig, ax
