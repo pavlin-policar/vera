@@ -1,6 +1,6 @@
 from collections.abc import Iterable
 from textwrap import wrap
-from typing import Optional, Union
+from typing import Optional, Union, Dict
 
 import matplotlib.colors as colors
 import numpy as np
@@ -206,6 +206,9 @@ def plot_feature_density(
     skip_first: bool = True,
     ax=None,
     cmap="RdBu_r",
+    contour_kwargs: Optional[Dict] = {},
+    contourf_kwargs: Optional[Dict] = {},
+    scatter_kwargs: Optional[Dict] = {},
 ):
     import matplotlib.pyplot as plt
     import matplotlib.ticker as ticker
@@ -226,13 +229,21 @@ def plot_feature_density(
         if skip_first:
             tck = ticker.MaxNLocator(nbins=levels, prune="lower")
 
-    ax.contourf(xs, ys, z, levels=levels, cmap=cmap, zorder=1, locator=tck)
-    ax.contour(
-        xs, ys, z, levels=levels, linewidths=1, colors="k", zorder=1, locator=tck
-    )
+    contour_kwargs_ = {"zorder": 1, "linewidths": 1, "colors": "k", **contour_kwargs}
+    contourf_kwargs_ = {"zorder": 1, "alpha": 0.5, **contourf_kwargs}
+
+    ax.contourf(xs, ys, z, levels=levels, cmap=cmap, locator=tck, **contourf_kwargs_)
+    ax.contour(xs, ys, z, levels=levels, locator=tck, **contour_kwargs_)
 
     if embedding is not None:
-        ax.scatter(embedding[:, 0], embedding[:, 1], c="k", s=6, zorder=1, alpha=0.1)
+        scatter_kwargs_ = {
+            "zorder": 1,
+            "c": "k",
+            "s": 6,
+            "alpha": 0.1,
+            **scatter_kwargs,
+        }
+        ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_)
 
     return ax
 
@@ -242,6 +253,8 @@ def plot_feature_densities(
     grid: np.ndarray,
     densities: pd.DataFrame,
     embedding: Optional[np.ndarray] = None,
+    levels: Union[int, np.ndarray] = 5,
+    skip_first: bool = True,
     per_row: int = 4,
     figwidth: int = 24,
     return_ax: bool = False,
@@ -262,9 +275,14 @@ def plot_feature_densities(
     for idx, feature in enumerate(features):
         ax[idx].set_title(feature)
 
-        plot_feature_density(grid, densities.loc[feature].values, embedding, ax=ax[idx])
-        # import matplotlib.ticker as ticker
-        # ticker.MaxNLocator(prune="lower")
+        plot_feature_density(
+            grid,
+            densities.loc[feature].values,
+            embedding,
+            levels=levels,
+            skip_first=skip_first,
+            ax=ax[idx],
+        )
 
     if return_ax:
         return fig, ax
