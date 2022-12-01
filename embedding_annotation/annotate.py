@@ -180,6 +180,17 @@ def group_similar_features_dendrogram(
     return clusts, clust_densities
 
 
+def optimize_layout(densities: pd.DataFrame, overlap_threshold=0.5) -> list[list[str]]:
+    distances = pdist(densities.values, metric=overlap_index)
+    graph = g.distances_to_graph(distances, threshold=overlap_threshold)
+    node_labels = dict(enumerate(densities.index.values))
+    graph = g.label_nodes(graph, node_labels)
+
+    independent_sets = g.independent_sets(graph)
+
+    return independent_sets
+
+
 def highest_density_interval(density: np.ndarray, hdi: float = 0.95) -> np.ndarray:
     """Zero out values that are not in the highest density interval."""
     sorted_vals = sorted(density, reverse=True)
