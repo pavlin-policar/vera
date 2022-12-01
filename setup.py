@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(
-    name="erecept",
+    name="embedding_annotation",
     version="0.0.1",
     packages=["embedding_annotation"],
 )
