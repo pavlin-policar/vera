@@ -1,3 +1,4 @@
+import warnings
 from collections.abc import Iterable
 from textwrap import wrap
 from typing import Optional, Union, Dict
@@ -232,8 +233,10 @@ def plot_feature_density(
     contour_kwargs_ = {"zorder": 1, "linewidths": 1, "colors": "k", **contour_kwargs}
     contourf_kwargs_ = {"zorder": 1, "alpha": 0.5, **contourf_kwargs}
 
-    ax.contourf(xs, ys, z, levels=levels, cmap=cmap, locator=tck, **contourf_kwargs_)
-    ax.contour(xs, ys, z, levels=levels, locator=tck, **contour_kwargs_)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=UserWarning)
+        ax.contourf(xs, ys, z, levels=levels, cmap=cmap, locator=tck, **contourf_kwargs_)
+        ax.contour(xs, ys, z, levels=levels, locator=tck, **contour_kwargs_)
 
     if embedding is not None:
         scatter_kwargs_ = {

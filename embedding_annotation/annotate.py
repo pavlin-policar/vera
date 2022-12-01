@@ -1,6 +1,6 @@
 import functools
 from itertools import cycle
-from typing import Union, Callable, Tuple, Dict, Optional
+from typing import Callable, Optional
 
 import numpy as np
 import pandas as pd
@@ -9,6 +9,7 @@ from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import pdist
 
 import embedding_annotation.plotting as pl
+import embedding_annotation.graph as g
 
 
 def _ensure_normed(p: np.ndarray) -> np.ndarray:
@@ -68,9 +69,9 @@ def estimate_feature_densities(
     features: list,
     embedding: np.ndarray,
     feature_matrix: pd.DataFrame,
-    log=False,
+    log: bool = False,
     n_grid_points: int = 100,
-) -> Tuple[np.ndarray, pd.DataFrame]:
+) -> tuple[np.ndarray, pd.DataFrame]:
     densities = []
 
     for feature in features:
@@ -92,7 +93,40 @@ def estimate_feature_densities(
 def group_similar_features(
     features: list,
     densities: pd.DataFrame,
-    metric: Union[str, Callable] = "js-divergence",
+    overlap_threshold: float = 0.9,
+):
+    # We only care about the densities that appear in the feature list
+    densities = densities.loc[features]
+
+    # Create a similarity weighted graph with edges appearing only if they have
+    # overlap > overlap_threshold
+    distances = pdist(densities.values, metric=overlap_index)
+    graph = g.distances_to_graph(distances, threshold=overlap_threshold)
+    node_labels = dict(enumerate(densities.index.values))
+    graph = g.label_nodes(graph, node_labels)
+
+    # Once we construct the graph, find the max-cliques. These will serve as our
+    # merged "clusters"
+    # cliques = g.max_cliques(graph)
+    # clusts = {f"Cluster {cid}": vs for cid, vs in enumerate(cliques, start=1)}
+    connected_components = g.connected_components(graph)
+    clusts = {
+        f"Cluster {cid}": list(c) for cid, c in enumerate(connected_components, start=1)
+    }
+
+    # Sum together the feature densities to obtain the cluster density
+    clust_densities = pd.DataFrame(
+        {cid: densities.loc[features].sum(axis=0) for cid, features in clusts.items()},
+    ).T
+    clust_densities = clust_densities / clust_densities.sum(axis=1).values[:, None]
+
+    return clusts, clust_densities
+
+
+def group_similar_features_dendrogram(
+    features: list,
+    densities: pd.DataFrame,
+    metric: str | Callable = "js-divergence",
     similarity_threshold: float = 0.1,
     plot_dendrogram: bool = False,
 ):
@@ -154,34 +188,97 @@ def highest_density_interval(density: np.ndarray, hdi: float = 0.95) -> np.ndarr
     return density
 
 
+def readonly_array(x: np.ndarray) -> np.ndarray:
+    """Ensure that the arrays are readonly and can't be changed later on."""
+    if not isinstance(x, np.ndarray):
+        return x
+    if x.flags.writeable:
+        x = x.copy()
+        x.setflags(write=False)
+
+    return x
+
+
+class ReadonlyDict(dict):
+    def __setitem__(self, key, value):
+        raise TypeError()
+
+    def __delitem__(self, key):
+        raise TypeError()
+
+    def clear(self):
+        raise TypeError()
+
+    def popitem(self):
+        raise TypeError()
+
+    def update(self, *args, **kwargs):
+        raise TypeError()
+
+
 class AnnotationMap:
     def __init__(
         self,
         grid: np.ndarray,
-        embedding: Optional[np.ndarray] = None,
-        densities: Optional[Dict[str, np.ndarray]] = None,
+        embedding: np.ndarray,
+        densities: dict[str, np.ndarray] = None,
     ):
-        self.grid = grid
-        self.embedding = embedding
+        self.grid = readonly_array(grid)
+        self.embedding = readonly_array(embedding)
 
-        self._densities = {}
-        self._scaled_densities = {}
+        if densities is None:
+            densities = {}
 
-        if densities is not None:
-            for k, d in densities.items():
-                self.add(k, d)
+        self.densities = ReadonlyDict({
+            k: readonly_array(v) for k, v in densities.items()
+        })
+        self.scaled_densities = ReadonlyDict({
+            k: readonly_array(v / v.max()) for k, v in self.densities.items()
+        })
 
     def add(self, name: str, density: np.ndarray):
-        if name in self._densities:
+        if name in self.densities:
             raise KeyError(f"Density `{name}` already exists!")
-        self._densities[name] = density
-        self._scaled_densities[name] = density / density.max()
+
+        # Create new annotation map object=
+        new_densities = self.densities.copy() | {name: density}  # create shallow copy
+        new_annmap = AnnotationMap(self.grid, self.embedding, new_densities)
+
+        return new_annmap
 
     def remove(self, name: str):
-        del self._densities[name]
-        del self._scaled_densities[name]
+        new_densities = self.densities.copy()  # create shallow copy
+        del new_densities[name]
+        return AnnotationMap(self.grid, self.embedding, new_densities)
 
-    def plot_annotation(self, levels: int = 5, cmap: str = "tab10", ax=None):
+    def __len__(self):
+        return len(self.densities)
+
+    def __contains__(self, item):
+        return item in self.densities
+
+    @staticmethod
+    def _density_dict_to_array(d: dict) -> np.ndarray:
+        """Convert the dictionary with numpy arrays as values to a stacked array."""
+        return np.vstack(list(d.values()))
+
+    @property
+    def joint_density(self):
+        """Calculate the joint density of the scaled densities."""
+        if not self.densities:
+            return np.zeros(self.grid.shape[0])
+        vals = np.sum(self._density_dict_to_array(self.scaled_densities), axis=0)
+        return vals / vals.sum()
+
+    def plot_annotation(
+        self,
+        levels: int = 5,
+        cmap: str = "tab10",
+        ax=None,
+        contour_kwargs: Optional[dict] = {},
+        contourf_kwargs: Optional[dict] = {},
+        scatter_kwargs: Optional[dict] = {},
+    ):
         import matplotlib.pyplot as plt
 
         if ax is None:
@@ -190,7 +287,7 @@ class AnnotationMap:
         hues = iter(cycle(pl.get_cmap_hues(cmap)))
         levels_ = np.linspace(0, 1, num=levels)  # scaled densities always in [0, 1]
 
-        for key, density in self._scaled_densities.items():
+        for key, density in self.scaled_densities.items():
             pl.plot_feature_density(
                 self.grid,
                 density,
@@ -198,35 +295,30 @@ class AnnotationMap:
                 skip_first=True,
                 cmap=pl.hue_colormap(next(hues), levels=levels, min_saturation=0.1),
                 ax=ax,
+                contourf_kwargs=contourf_kwargs,
+                contour_kwargs=contour_kwargs,
             )
 
         if self.embedding is not None:
-            ax.scatter(
-                self.embedding[:, 0],
-                self.embedding[:, 1],
-                c="k",
-                s=6,
-                zorder=1,
-                alpha=0.1,
-            )
+            scatter_kwargs_ = {
+                "zorder": 1,
+                "c": "k",
+                "s": 6,
+                "alpha": 0.1,
+                **scatter_kwargs,
+            }
+            ax.scatter(self.embedding[:, 0], self.embedding[:, 1], **scatter_kwargs_)
 
         return ax
-
-    @staticmethod
-    def _density_dict_to_array(d: dict) -> np.ndarray:
-        """Convert the dictionary with numpy arrays as values to a stacked array."""
-        return np.vstack(list(d.values()))
 
     def rank_overlap_densities(self, densities: pd.DataFrame) -> pd.DataFrame:
         results = []
         for name, new_d in densities.iterrows():
-            worst_overlap = 0
-            for existing_d in self._densities.values():
-                score = overlap_index(existing_d, new_d)
-                if score > worst_overlap:
-                    worst_overlap = score
+            total_overlap = 0  # the overlap will be the sum of overlaps with each density
+            for existing_d in self.densities.values():
+                total_overlap += overlap_index(existing_d, new_d)
 
-            results.append({"feature": name, "score": worst_overlap})
+            results.append({"feature": name, "score": total_overlap})
 
         return pd.DataFrame(results)
 
@@ -239,13 +331,15 @@ class AnnotationMap:
         ax=None,
     ):
         if plot_annotations:
-            ax = self.plot_annotation(levels=levels, cmap=cmap, ax=ax)
+            ax = self.plot_annotation(
+                levels=levels, cmap=cmap, ax=ax, contourf_kwargs={"alpha": 0}
+            )
 
         density_scaled = density / density.max()
 
         worst_overlap = 0
         worst_density = np.zeros_like(density)
-        for existing_d in self._scaled_densities.values():
+        for existing_d in self.scaled_densities.values():
             p_overlap = np.minimum(existing_d, density_scaled)
             score = np.sum(p_overlap)
             if score > worst_overlap:
