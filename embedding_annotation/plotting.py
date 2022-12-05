@@ -1,11 +1,17 @@
 import warnings
 from collections.abc import Iterable
+from itertools import cycle
 from textwrap import wrap
 from typing import Optional, Union, Dict
 
+import matplotlib.colors as clr
 import matplotlib.colors as colors
+import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 import numpy as np
 import pandas as pd
+
+from embedding_annotation.annotate import Density
 
 
 def plot_feature(
@@ -23,9 +29,6 @@ def plot_feature(
     ax=None,
     agg="max",
 ):
-    import matplotlib.pyplot as plt
-    import matplotlib.colors as clr
-
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 8))
 
@@ -114,8 +117,6 @@ def plot_features(
     zorder=1,
     agg="max",
 ):
-    import matplotlib.pyplot as plt
-
     n_rows = len(features) // per_row
     if len(features) % per_row > 0:
         n_rows += 1
@@ -200,8 +201,7 @@ def hue_colormap(
 
 
 def plot_feature_density(
-    grid: np.ndarray,
-    density: np.ndarray,
+    density: Density,
     embedding: Optional[np.ndarray] = None,
     levels: Union[int, np.ndarray] = 5,
     skip_first: bool = True,
@@ -211,16 +211,8 @@ def plot_feature_density(
     contourf_kwargs: Optional[Dict] = {},
     scatter_kwargs: Optional[Dict] = {},
 ):
-    import matplotlib.pyplot as plt
-    import matplotlib.ticker as ticker
-
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 8))
-
-    n_grid_points = int(np.sqrt(grid.shape[0]))  # always a square grid
-    xs, ys = np.unique(grid[:, 0]), np.unique(grid[:, 1])
-
-    z = density.reshape(n_grid_points, n_grid_points).T
 
     tck = None
     if isinstance(levels, Iterable):
@@ -233,10 +225,11 @@ def plot_feature_density(
     contour_kwargs_ = {"zorder": 1, "linewidths": 1, "colors": "k", **contour_kwargs}
     contourf_kwargs_ = {"zorder": 1, "alpha": 0.5, **contourf_kwargs}
 
+    x, y, z = density.get_xyz(scaled=True)
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UserWarning)
-        ax.contourf(xs, ys, z, levels=levels, cmap=cmap, locator=tck, **contourf_kwargs_)
-        ax.contour(xs, ys, z, levels=levels, locator=tck, **contour_kwargs_)
+        ax.contourf(x, y, z, levels=levels, cmap=cmap, locator=tck, **contourf_kwargs_)
+        ax.contour(x, y, z, levels=levels, locator=tck, **contour_kwargs_)
 
     if embedding is not None:
         scatter_kwargs_ = {
@@ -252,9 +245,8 @@ def plot_feature_density(
 
 
 def plot_feature_densities(
-    features: list,
-    grid: np.ndarray,
-    densities: pd.DataFrame,
+    features: list[str],
+    densities: dict[str, Density],
     embedding: Optional[np.ndarray] = None,
     levels: Union[int, np.ndarray] = 5,
     skip_first: bool = True,
@@ -262,7 +254,6 @@ def plot_feature_densities(
     figwidth: int = 24,
     return_ax: bool = False,
 ):
-    import matplotlib.pyplot as plt
 
     n_rows = len(features) // per_row
     if len(features) % per_row > 0:
@@ -279,8 +270,7 @@ def plot_feature_densities(
         ax[idx].set_title(feature)
 
         plot_feature_density(
-            grid,
-            densities.loc[feature].values,
+            densities[feature],
             embedding,
             levels=levels,
             skip_first=skip_first,
@@ -289,3 +279,43 @@ def plot_feature_densities(
 
     if return_ax:
         return fig, ax
+
+
+def plot_annotation(
+    densities: dict[str, Density],
+    embedding: np.ndarray,
+    levels: int = 5,
+    cmap: str = "tab10",
+    ax=None,
+    contour_kwargs: Optional[dict] = {},
+    contourf_kwargs: Optional[dict] = {},
+    scatter_kwargs: Optional[dict] = {},
+):
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 8))
+
+    hues = iter(cycle(get_cmap_hues(cmap)))
+    levels_ = np.linspace(0, 1, num=levels)  # scaled densities always in [0, 1]
+
+    for key, density in densities.items():
+        plot_feature_density(
+            density,
+            levels=levels_,
+            skip_first=True,
+            cmap=hue_colormap(next(hues), levels=levels, min_saturation=0.1),
+            ax=ax,
+            contourf_kwargs=contourf_kwargs,
+            contour_kwargs=contour_kwargs,
+        )
+
+    if embedding is not None:
+        scatter_kwargs_ = {
+            "zorder": 1,
+            "c": "k",
+            "s": 6,
+            "alpha": 0.1,
+            **scatter_kwargs,
+        }
+        ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_)
+
+    return ax

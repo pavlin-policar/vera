@@ -1,14 +1,14 @@
 import functools
-from itertools import cycle
-from typing import Callable, Optional
+from typing import Callable
 
+import contourpy
+import shapely.geometry as geom
 import numpy as np
 import pandas as pd
 from KDEpy import FFTKDE
 from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import pdist
 
-import embedding_annotation.plotting as pl
 import embedding_annotation.graph as g
 
 
@@ -52,7 +52,8 @@ def overlap_index(p1, p2):
 
 def overlap_distance(p1, p2):
     p1, p2 = _ensure_normed(p1), _ensure_normed(p2)
-    return 1 - (0.5 * np.sum(np.abs(p1 - p2)))
+    return 1 - overlap_index(p1, p2)
+    # return 1 - (0.5 * np.sum(np.abs(p1 - p2)))
 
 
 density_metrics = {
@@ -65,14 +66,89 @@ density_metrics = {
 }
 
 
+class Density:
+    def __init__(self, name: str, grid: np.ndarray, values: np.ndarray):
+        self.name = name
+        self.grid = grid
+        self.values = values / np.sum(values)  # sum to one
+        self.scaled_values = values / values.max()  # max=1
+
+        self._contour_cache = {}
+        self._polygon_cache = {}
+
+    def highest_density_interval(self, hdi: float = 0.95) -> "Density":
+        """Zero out values that are not in the highest density interval."""
+        sorted_vals = sorted(self.values, reverse=True)
+        hdi_idx = np.argwhere(np.cumsum(sorted_vals) >= hdi)[0, 0]
+        density = np.where(self.values > sorted_vals[hdi_idx], self.values, 0)
+        density /= density.sum()  # re-normalize density
+        return Density(f"HDI({self.name}, {hdi:.2f})", self.grid, density)
+
+    def __add__(self, other: "Density"):
+        if not np.allclose(self.grid, other.grid):
+            raise RuntimeError("Grids must match when adding two density objects")
+
+        return CompositeDensity([self.values, other.values])
+
+    def get_xyz(self, scaled: bool = False) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        n_grid_points = int(np.sqrt(self.grid.shape[0]))  # always a square grid
+        x, y = np.unique(self.grid[:, 0]), np.unique(self.grid[:, 1])
+        vals = [self.values, self.scaled_values][scaled]
+        z = vals.reshape(n_grid_points, n_grid_points).T
+        return x, y, z
+
+    def get_contours_at(self, level: float) -> list[np.ndarray]:
+        if level in self._contour_cache:
+            return self._contour_cache[level]
+
+        x, y, z = self.get_xyz(scaled=True)
+
+        contour_generator = contourpy.contour_generator(
+            x, y, z, corner_mask=False, chunk_size=0
+        )
+        self._contour_cache[level] = contour_generator.lines(level)
+
+        return self._contour_cache[level]
+
+    def get_polygons_at(self, level: float) -> geom.MultiPolygon:
+        if level in self._polygon_cache:
+            return self._polygon_cache[level]
+
+        self._polygon_cache[level] = geom.MultiPolygon(
+            [geom.Polygon(c) for c in self.get_contours_at(level)]
+        )
+
+        return self._polygon_cache[level]
+
+
+class CompositeDensity(Density):
+    def __init__(self, name: str, densities: list[Density]):
+        self.name = name or " + ".join(d.name for d in densities)
+        self.grid = densities[0].grid
+
+        self.orig_densities = densities
+        joint_density = np.sum(np.vstack([d.values for d in densities]), axis=0)
+        self.values = joint_density / joint_density.sum()
+        self.scaled_values = joint_density / joint_density.max()
+
+        self._contour_cache = {}
+        self._polygon_cache = {}
+
+
+def contour_overlap_area(d1: Density, d2: Density, level: float = 0.25) -> float:
+    c1: geom.MultiPolygon = d1.get_polygons_at(level)
+    c2: geom.MultiPolygon = d2.get_polygons_at(level)
+    return c1.intersection(c2).area
+
+
 def estimate_feature_densities(
-    features: list,
+    features: list[str],
     embedding: np.ndarray,
     feature_matrix: pd.DataFrame,
     log: bool = False,
     n_grid_points: int = 100,
-) -> tuple[np.ndarray, pd.DataFrame]:
-    densities = []
+) -> dict[str, Density]:
+    densities = {}
 
     for feature in features:
         x = feature_matrix[feature].values
@@ -82,27 +158,30 @@ def estimate_feature_densities(
         kde = FFTKDE().fit(embedding, weights=x)
         grid, points = kde.evaluate(n_grid_points)
 
-        densities.append(points)
+        densities[feature] = Density(feature, grid, points)
 
-    densities = pd.DataFrame(densities, index=features)
-    densities = densities / densities.sum(axis=1).values[:, None]  # normalize to 1
+    return densities
 
-    return grid, densities
+
+def density_dict_to_df(densities: dict[str, Density]) -> pd.DataFrame:
+    x = np.vstack([d.values for d in densities.values()])
+    return pd.DataFrame(x, index=densities.keys())
 
 
 def group_similar_features(
-    features: list,
-    densities: pd.DataFrame,
+    features: list[str],
+    densities: dict[Density],
     overlap_threshold: float = 0.9,
 ):
     # We only care about the densities that appear in the feature list
-    densities = densities.loc[features]
+    densities = {d: v for d, v in densities.items() if d in features}
+    densities_df = density_dict_to_df(densities)
 
     # Create a similarity weighted graph with edges appearing only if they have
     # overlap > overlap_threshold
-    distances = pdist(densities.values, metric=overlap_index)
+    distances = pdist(densities_df.values, metric=overlap_index)
     graph = g.distances_to_graph(distances, threshold=overlap_threshold)
-    node_labels = dict(enumerate(densities.index.values))
+    node_labels = dict(enumerate(densities.keys()))
     graph = g.label_nodes(graph, node_labels)
 
     # Once we construct the graph, find the max-cliques. These will serve as our
@@ -114,11 +193,12 @@ def group_similar_features(
         f"Cluster {cid}": list(c) for cid, c in enumerate(connected_components, start=1)
     }
 
-    # Sum together the feature densities to obtain the cluster density
-    clust_densities = pd.DataFrame(
-        {cid: densities.loc[features].sum(axis=0) for cid, features in clusts.items()},
-    ).T
-    clust_densities = clust_densities / clust_densities.sum(axis=1).values[:, None]
+    clust_densities = {
+        cid: CompositeDensity(name=cid, densities=[
+            d for d in densities.values() if d.name in features
+        ])
+        for cid, features in clusts.items()
+    }
 
     return clusts, clust_densities
 
@@ -131,7 +211,7 @@ def group_similar_features_dendrogram(
     plot_dendrogram: bool = False,
 ):
     # We only care about the densities that appear in the feature list
-    densities = densities.loc[features]
+    densities_df = density_dict_to_df(densities).loc[features]
 
     if isinstance(metric, str):
         if metric not in density_metrics:
@@ -152,7 +232,7 @@ def group_similar_features_dendrogram(
 
     # Perform complete-linkage hierarchical clustering to ensure that all the
     # features have at most the specified threshold distance between them
-    distances = pdist(densities.values, metric=abs_(metric))
+    distances = pdist(densities_df.values, metric=abs_(metric))
     Z = linkage(distances, method="complete")
     cluster_assignment = fcluster(Z, t=similarity_threshold, criterion="distance")
     cluster_assignment = cluster_assignment - 1  # clusters from linkage start at 1
@@ -162,7 +242,7 @@ def group_similar_features_dendrogram(
         from scipy.cluster.hierarchy import dendrogram
 
         fig = plt.figure(figsize=(24, 6))
-        dendrogram(Z, color_threshold=0.1)
+        dendrogram(Z, color_threshold=similarity_threshold)
         ax = fig.get_axes()[0]
         ax.axhline(similarity_threshold, linestyle="dashed", c="k")
 
@@ -171,153 +251,30 @@ def group_similar_features_dendrogram(
         for cid in np.unique(cluster_assignment)
     }
 
-    # Sum together the feature densities to obtain the cluster density
-    clust_densities = pd.DataFrame(
-        {cid: densities.loc[features].sum(axis=0) for cid, features in clusts.items()},
-    ).T
-    clust_densities = clust_densities / clust_densities.sum(axis=1).values[:, None]
+    clust_densities = {
+        cid: CompositeDensity(name=cid, densities=[
+            d for d in densities.values() if d.name in features
+        ])
+        for cid, features in clusts.items()
+    }
 
     return clusts, clust_densities
 
 
-def optimize_layout(densities: pd.DataFrame, overlap_threshold=0.5) -> list[list[str]]:
-    distances = pdist(densities.values, metric=overlap_index)
-    graph = g.distances_to_graph(distances, threshold=overlap_threshold)
-    node_labels = dict(enumerate(densities.index.values))
+def optimize_layout(densities: dict[str, Density], max_overlap: float = 0) -> list[list[str]]:
+    density_names = sorted(list(densities.keys()))
+
+    N = len(densities)
+    overlap = np.zeros((N, N))
+    for i in range(N):
+        for j in range(i + 1, N):
+            overlap[i, j] = overlap[j, i] = contour_overlap_area(
+                densities[density_names[i]], densities[density_names[j]],
+            )
+    graph = g.distances_to_graph(overlap, threshold=max_overlap)
+    node_labels = dict(enumerate(density_names))
     graph = g.label_nodes(graph, node_labels)
 
     independent_sets = g.independent_sets(graph)
 
     return independent_sets
-
-
-def highest_density_interval(density: np.ndarray, hdi: float = 0.95) -> np.ndarray:
-    """Zero out values that are not in the highest density interval."""
-    sorted_vals = sorted(density, reverse=True)
-    hdi_idx = np.argwhere(np.cumsum(sorted_vals) >= (hdi * np.sum(density)))[0, 0]
-    density = np.where(density > sorted_vals[hdi_idx], density, 0)
-    return density
-
-
-def readonly_array(x: np.ndarray) -> np.ndarray:
-    """Ensure that the arrays are readonly and can't be changed later on."""
-    if not isinstance(x, np.ndarray):
-        return x
-    if x.flags.writeable:
-        x = x.copy()
-        x.setflags(write=False)
-
-    return x
-
-
-class ReadonlyDict(dict):
-    def __setitem__(self, key, value):
-        raise TypeError()
-
-    def __delitem__(self, key):
-        raise TypeError()
-
-    def clear(self):
-        raise TypeError()
-
-    def popitem(self):
-        raise TypeError()
-
-    def update(self, *args, **kwargs):
-        raise TypeError()
-
-
-class AnnotationMap:
-    def __init__(
-        self,
-        grid: np.ndarray,
-        embedding: np.ndarray,
-        densities: dict[str, np.ndarray] = None,
-    ):
-        self.grid = readonly_array(grid)
-        self.embedding = readonly_array(embedding)
-
-        if densities is None:
-            densities = {}
-
-        self.densities = ReadonlyDict({
-            k: readonly_array(v) for k, v in densities.items()
-        })
-        self.scaled_densities = ReadonlyDict({
-            k: readonly_array(v / v.max()) for k, v in self.densities.items()
-        })
-
-    def add(self, name: str, density: np.ndarray):
-        if name in self.densities:
-            raise KeyError(f"Density `{name}` already exists!")
-
-        # Create new annotation map object=
-        new_densities = self.densities.copy() | {name: density}  # create shallow copy
-        new_annmap = AnnotationMap(self.grid, self.embedding, new_densities)
-
-        return new_annmap
-
-    def remove(self, name: str):
-        new_densities = self.densities.copy()  # create shallow copy
-        del new_densities[name]
-        return AnnotationMap(self.grid, self.embedding, new_densities)
-
-    def __len__(self):
-        return len(self.densities)
-
-    def __contains__(self, item):
-        return item in self.densities
-
-    @staticmethod
-    def _density_dict_to_array(d: dict) -> np.ndarray:
-        """Convert the dictionary with numpy arrays as values to a stacked array."""
-        return np.vstack(list(d.values()))
-
-    @property
-    def joint_density(self):
-        """Calculate the joint density of the scaled densities."""
-        if not self.densities:
-            return np.zeros(self.grid.shape[0])
-        vals = np.sum(self._density_dict_to_array(self.scaled_densities), axis=0)
-        return vals / vals.sum()
-
-    def plot_annotation(
-        self,
-        levels: int = 5,
-        cmap: str = "tab10",
-        ax=None,
-        contour_kwargs: Optional[dict] = {},
-        contourf_kwargs: Optional[dict] = {},
-        scatter_kwargs: Optional[dict] = {},
-    ):
-        import matplotlib.pyplot as plt
-
-        if ax is None:
-            fig, ax = plt.subplots(figsize=(8, 8))
-
-        hues = iter(cycle(pl.get_cmap_hues(cmap)))
-        levels_ = np.linspace(0, 1, num=levels)  # scaled densities always in [0, 1]
-
-        for key, density in self.scaled_densities.items():
-            pl.plot_feature_density(
-                self.grid,
-                density,
-                levels=levels_,
-                skip_first=True,
-                cmap=pl.hue_colormap(next(hues), levels=levels, min_saturation=0.1),
-                ax=ax,
-                contourf_kwargs=contourf_kwargs,
-                contour_kwargs=contour_kwargs,
-            )
-
-        if self.embedding is not None:
-            scatter_kwargs_ = {
-                "zorder": 1,
-                "c": "k",
-                "s": 6,
-                "alpha": 0.1,
-                **scatter_kwargs,
-            }
-            ax.scatter(self.embedding[:, 0], self.embedding[:, 1], **scatter_kwargs_)
-
-        return ax
