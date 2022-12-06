@@ -241,6 +241,9 @@ def plot_feature_density(
         }
         ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_)
 
+    # Hide ticks and axis
+    ax.axis("equal")
+
     return ax
 
 
@@ -253,8 +256,10 @@ def plot_feature_densities(
     per_row: int = 4,
     figwidth: int = 24,
     return_ax: bool = False,
+    contour_kwargs: Optional[dict] = {},
+    contourf_kwargs: Optional[dict] = {},
+    scatter_kwargs: Optional[dict] = {},
 ):
-
     n_rows = len(features) // per_row
     if len(features) % per_row > 0:
         n_rows += 1
@@ -275,6 +280,9 @@ def plot_feature_densities(
             levels=levels,
             skip_first=skip_first,
             ax=ax[idx],
+            contour_kwargs=contour_kwargs,
+            contourf_kwargs=contourf_kwargs,
+            scatter_kwargs=scatter_kwargs,
         )
 
     if return_ax:

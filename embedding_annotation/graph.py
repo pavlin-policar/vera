@@ -43,7 +43,8 @@ def edgelist_to_graph(v: NodeList, e: EdgeList) -> Graph:
     return Graph(g)
 
 
-def distances_to_graph(dists: np.ndarray, threshold: float = 0.9) -> Graph:
+def similarities_to_graph(dists: np.ndarray, threshold: float = 0.9) -> Graph:
+    """Create a graph connecting nodes where their similarity is above a given threshold."""
     if dists.ndim == 1:
         dists = squareform(dists)
     elif dists.ndim != 2:
@@ -51,6 +52,17 @@ def distances_to_graph(dists: np.ndarray, threshold: float = 0.9) -> Graph:
 
     overlap_sp = sp.csr_matrix(dists > threshold)
     return matrix_to_graph(overlap_sp)
+
+
+def distances_to_graph(dists: np.ndarray, threshold: float = 0.1) -> Graph:
+    """Create a graph connecting nodes where their distance is below a given threshold."""
+    if dists.ndim == 1:
+        dists = squareform(dists)
+    elif dists.ndim != 2:
+        raise ValueError("`dists` can only be 1- or 2-dimensional!")
+
+    dists_sp = sp.csr_matrix(dists < threshold)
+    return matrix_to_graph(dists_sp)
 
 
 def label_nodes(graph: Graph, labels: dict[T, T]) -> Graph:

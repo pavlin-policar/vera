@@ -1,69 +1,16 @@
 import functools
+from collections import Counter
 from typing import Callable
 
 import contourpy
-import shapely.geometry as geom
 import numpy as np
 import pandas as pd
+import shapely.geometry as geom
 from KDEpy import FFTKDE
 from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import pdist
 
 import embedding_annotation.graph as g
-
-
-def _ensure_normed(p: np.ndarray) -> np.ndarray:
-    """Ensure that a vector is a valid probability distribution and sums to 1."""
-    if not np.allclose(np.sum(p), 1):
-        p = p / p.sum()
-    return p
-
-
-def kl_divergence(p1, p2):
-    p1, p2 = _ensure_normed(p1), _ensure_normed(p2)
-    return np.sum(p1 * np.log(p1 / np.maximum(p2, 1e-8)))
-
-
-def jeffreys_divergence(p1, p2):
-    return 0.5 * kl_divergence(p1, p2) + 0.5 * kl_divergence(p2, p1)
-
-
-def jensen_shannon_divergence(p1, p2):
-    p1, p2 = _ensure_normed(p1), _ensure_normed(p2)
-
-    m = 0.5 * (p1 + p2)
-    return 0.5 * kl_divergence(p1, m) + 0.5 * kl_divergence(p2, m)
-
-
-def hellinger_distance(p1, p2):
-    p1, p2 = _ensure_normed(p1), _ensure_normed(p2)
-    return 1 / np.sqrt(2) * np.linalg.norm(np.sqrt(p1) - np.sqrt(p2))
-
-
-def bhattacharyya_distance(p1, p2):
-    p1, p2 = _ensure_normed(p1), _ensure_normed(p2)
-    return -np.log(np.sum(np.sqrt(p1) * np.sqrt(p2)))
-
-
-def overlap_index(p1, p2):
-    p1, p2 = _ensure_normed(p1), _ensure_normed(p2)
-    return np.sum(np.minimum(p1, p2))
-
-
-def overlap_distance(p1, p2):
-    p1, p2 = _ensure_normed(p1), _ensure_normed(p2)
-    return 1 - overlap_index(p1, p2)
-    # return 1 - (0.5 * np.sum(np.abs(p1 - p2)))
-
-
-density_metrics = {
-    "sym-kl": jeffreys_divergence,
-    "jeffreys-divergence": jeffreys_divergence,
-    "js-divergence": jensen_shannon_divergence,
-    "hellinger": hellinger_distance,
-    "bhattacharyya": bhattacharyya_distance,
-    "overlap": overlap_distance,
-}
 
 
 class Density:
@@ -135,10 +82,30 @@ class CompositeDensity(Density):
         self._polygon_cache = {}
 
 
-def contour_overlap_area(d1: Density, d2: Density, level: float = 0.25) -> float:
+def _density_pdist(densities: dict[str, Density], f: Callable):
+    densities = list(densities.values())
+
+    n = len(densities)
+    out_size = (n * (n - 1)) // 2
+    result = np.zeros(out_size, dtype=np.float64)
+    k = 0
+    for i in range(n - 1):
+        for j in range(i + 1, n):
+            result[k] = f(densities[i], densities[j])
+            k += 1
+    return result
+
+
+def intersection_area(d1: Density, d2: Density, level: float = 0.25) -> float:
     c1: geom.MultiPolygon = d1.get_polygons_at(level)
     c2: geom.MultiPolygon = d2.get_polygons_at(level)
     return c1.intersection(c2).area
+
+
+def intersection_over_union(d1: Density, d2: Density, level: float = 0.25) -> float:
+    c1: geom.MultiPolygon = d1.get_polygons_at(level)
+    c2: geom.MultiPolygon = d2.get_polygons_at(level)
+    return c1.intersection(c2).area / c1.union(c2).area
 
 
 def estimate_feature_densities(
@@ -171,27 +138,28 @@ def density_dict_to_df(densities: dict[str, Density]) -> pd.DataFrame:
 def group_similar_features(
     features: list[str],
     densities: dict[Density],
-    overlap_threshold: float = 0.9,
+    threshold: float = 0.9,
 ):
     # We only care about the densities that appear in the feature list
     densities = {d: v for d, v in densities.items() if d in features}
-    densities_df = density_dict_to_df(densities)
+    # densities_df = density_dict_to_df(densities)
 
     # Create a similarity weighted graph with edges appearing only if they have
     # overlap > overlap_threshold
-    distances = pdist(densities_df.values, metric=overlap_index)
-    graph = g.distances_to_graph(distances, threshold=overlap_threshold)
+    # distances = pdist(densities_df.values, metric=overlap_index)
+    distances = _density_pdist(densities, intersection_over_union)
+    graph = g.similarities_to_graph(distances, threshold=threshold)
     node_labels = dict(enumerate(densities.keys()))
     graph = g.label_nodes(graph, node_labels)
 
     # Once we construct the graph, find the max-cliques. These will serve as our
     # merged "clusters"
-    # cliques = g.max_cliques(graph)
-    # clusts = {f"Cluster {cid}": vs for cid, vs in enumerate(cliques, start=1)}
-    connected_components = g.connected_components(graph)
-    clusts = {
-        f"Cluster {cid}": list(c) for cid, c in enumerate(connected_components, start=1)
-    }
+    cliques = g.max_cliques(graph)
+    clusts = {f"Cluster {cid}": vs for cid, vs in enumerate(cliques, start=1)}
+    # connected_components = g.connected_components(graph)
+    # clusts = {
+    #     f"Cluster {cid}": list(c) for cid, c in enumerate(connected_components, start=1)
+    # }
 
     clust_densities = {
         cid: CompositeDensity(name=cid, densities=[
@@ -206,45 +174,32 @@ def group_similar_features(
 def group_similar_features_dendrogram(
     features: list,
     densities: pd.DataFrame,
-    metric: str | Callable = "js-divergence",
-    similarity_threshold: float = 0.1,
+    threshold: float = 0.1,
     plot_dendrogram: bool = False,
 ):
     # We only care about the densities that appear in the feature list
-    densities_df = density_dict_to_df(densities).loc[features]
-
-    if isinstance(metric, str):
-        if metric not in density_metrics:
-            raise ValueError(
-                f"Unrecognized distance metric `{metric}`. Available metrics are "
-                f"{', '.join(density_metrics.keys())}."
-            )
-        metric = density_metrics[metric]
-
-    # Return the absolute function of a wrapper. Needed because, for some reason,
-    # the probability metrics sometimes return negative numbers (e.g. -0).
-    def abs_(f):
-        @functools.wraps(f)
-        def _f(*args, **kwargs):
-            return np.abs(f(*args, **kwargs))
-
-        return _f
+    densities = {k: d for k, d in densities.items() if k in features}
 
     # Perform complete-linkage hierarchical clustering to ensure that all the
     # features have at most the specified threshold distance between them
-    distances = pdist(densities_df.values, metric=abs_(metric))
+    distances = _density_pdist(densities, lambda x, y: 1 - intersection_over_union(x, y))
     Z = linkage(distances, method="complete")
-    cluster_assignment = fcluster(Z, t=similarity_threshold, criterion="distance")
+    cluster_assignment = fcluster(Z, t=threshold, criterion="distance")
     cluster_assignment = cluster_assignment - 1  # clusters from linkage start at 1
+
+    # Re-label the clusters so clusters with more elements come first
+    cluster_counts = Counter(cluster_assignment)
+    cluster_mapping = {k: i for i, (k, _) in enumerate(cluster_counts.most_common())}
+    cluster_assignment = np.array([cluster_mapping[c] for c in cluster_assignment])
 
     if plot_dendrogram:
         import matplotlib.pyplot as plt
         from scipy.cluster.hierarchy import dendrogram
 
         fig = plt.figure(figsize=(24, 6))
-        dendrogram(Z, color_threshold=similarity_threshold)
+        dendrogram(Z, color_threshold=threshold)
         ax = fig.get_axes()[0]
-        ax.axhline(similarity_threshold, linestyle="dashed", c="k")
+        ax.axhline(threshold, linestyle="dashed", c="k")
 
     clusts = {
         f"Cluster {cid}": np.array(features)[cluster_assignment == cid].tolist()
@@ -262,16 +217,10 @@ def group_similar_features_dendrogram(
 
 
 def optimize_layout(densities: dict[str, Density], max_overlap: float = 0) -> list[list[str]]:
-    density_names = sorted(list(densities.keys()))
+    density_names = list(densities.keys())
 
-    N = len(densities)
-    overlap = np.zeros((N, N))
-    for i in range(N):
-        for j in range(i + 1, N):
-            overlap[i, j] = overlap[j, i] = contour_overlap_area(
-                densities[density_names[i]], densities[density_names[j]],
-            )
-    graph = g.distances_to_graph(overlap, threshold=max_overlap)
+    overlap = _density_pdist(densities, intersection_area)
+    graph = g.similarities_to_graph(overlap, threshold=max_overlap)
     node_labels = dict(enumerate(density_names))
     graph = g.label_nodes(graph, node_labels)
 
