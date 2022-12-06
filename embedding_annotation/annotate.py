@@ -1,4 +1,3 @@
-import functools
 from collections import Counter
 from typing import Callable
 
@@ -8,7 +7,6 @@ import pandas as pd
 import shapely.geometry as geom
 from KDEpy import FFTKDE
 from scipy.cluster.hierarchy import linkage, fcluster
-from scipy.spatial.distance import pdist
 
 import embedding_annotation.graph as g
 
@@ -108,6 +106,12 @@ def intersection_over_union(d1: Density, d2: Density, level: float = 0.25) -> fl
     return c1.intersection(c2).area / c1.union(c2).area
 
 
+def intersection_over_union_dist(d1: Density, d2: Density, level: float = 0.25) -> float:
+    c1: geom.MultiPolygon = d1.get_polygons_at(level)
+    c2: geom.MultiPolygon = d2.get_polygons_at(level)
+    return 1 - (c1.intersection(c2).area / c1.union(c2).area)
+
+
 def estimate_feature_densities(
     features: list[str],
     embedding: np.ndarray,
@@ -139,14 +143,13 @@ def group_similar_features(
     features: list[str],
     densities: dict[Density],
     threshold: float = 0.9,
+    method: str = "max-cliques",
 ):
     # We only care about the densities that appear in the feature list
-    densities = {d: v for d, v in densities.items() if d in features}
-    # densities_df = density_dict_to_df(densities)
+    densities = {k: d for k, d in densities.items() if k in features}
 
     # Create a similarity weighted graph with edges appearing only if they have
-    # overlap > overlap_threshold
-    # distances = pdist(densities_df.values, metric=overlap_index)
+    # IoU > threshold
     distances = _density_pdist(densities, intersection_over_union)
     graph = g.similarities_to_graph(distances, threshold=threshold)
     node_labels = dict(enumerate(densities.keys()))
@@ -154,12 +157,19 @@ def group_similar_features(
 
     # Once we construct the graph, find the max-cliques. These will serve as our
     # merged "clusters"
-    cliques = g.max_cliques(graph)
-    clusts = {f"Cluster {cid}": vs for cid, vs in enumerate(cliques, start=1)}
-    # connected_components = g.connected_components(graph)
-    # clusts = {
-    #     f"Cluster {cid}": list(c) for cid, c in enumerate(connected_components, start=1)
-    # }
+    if method == "max-cliques":
+        cliques = g.max_cliques(graph)
+        clusts = {f"Cluster {cid}": vs for cid, vs in enumerate(cliques, start=1)}
+    elif method == "connected-components":
+        connected_components = g.connected_components(graph)
+        clusts = {
+            f"Cluster {cid}": list(c) for cid, c in enumerate(connected_components, start=1)
+        }
+    else:
+        raise ValueError(
+            f"Unrecognized method `{method}`. Can be one of `max-cliques`, "
+            f"`connected-components`"
+        )
 
     clust_densities = {
         cid: CompositeDensity(name=cid, densities=[
@@ -182,7 +192,7 @@ def group_similar_features_dendrogram(
 
     # Perform complete-linkage hierarchical clustering to ensure that all the
     # features have at most the specified threshold distance between them
-    distances = _density_pdist(densities, lambda x, y: 1 - intersection_over_union(x, y))
+    distances = _density_pdist(densities, intersection_over_union_dist)
     Z = linkage(distances, method="complete")
     cluster_assignment = fcluster(Z, t=threshold, criterion="distance")
     cluster_assignment = cluster_assignment - 1  # clusters from linkage start at 1
