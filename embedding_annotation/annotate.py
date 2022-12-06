@@ -134,11 +134,6 @@ def estimate_feature_densities(
     return densities
 
 
-def density_dict_to_df(densities: dict[str, Density]) -> pd.DataFrame:
-    x = np.vstack([d.values for d in densities.values()])
-    return pd.DataFrame(x, index=densities.keys())
-
-
 def group_similar_features(
     features: list[str],
     densities: dict[Density],
