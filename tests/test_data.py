@@ -176,3 +176,91 @@ class TestOneHotEncoding(unittest.TestCase):
         df = data._discretize(data.ingest(self.df[["cont1", "cont2"]]))
         df_encoded = data._one_hot(df)
         self.assertTrue(df.equals(df_encoded))
+
+
+class TestIntervalRule(unittest.TestCase):
+    def test_can_merge_with_non_interval_rules(self):
+        r1 = data.IntervalRule(0, 5)
+        r2 = data.EqualityRule(5)
+
+        self.assertFalse(r1.can_merge_with(r2))
+        self.assertFalse(r2.can_merge_with(r1))
+
+    def test_can_merge_with_other_discretized_interval_rules(self):
+        r1 = data.IntervalRule(0, 5)
+        r2 = data.IntervalRule(5, 10)
+        r3 = data.IntervalRule(10, 15)
+
+        self.assertTrue(r1.can_merge_with(r2))
+        self.assertTrue(r2.can_merge_with(r1))
+        self.assertTrue(r2.can_merge_with(r3))
+        self.assertTrue(r3.can_merge_with(r2))
+        self.assertFalse(r1.can_merge_with(r3))
+        self.assertFalse(r3.can_merge_with(r1))
+
+    def test_can_merge_with_overlapping_interval_rules(self):
+        r1 = data.IntervalRule(0, 6)
+        r2 = data.IntervalRule(4, 10)
+        r3 = data.IntervalRule(9, 15)
+        r4 = data.IntervalRule(1, 4)
+
+        self.assertTrue(r1.can_merge_with(r2))
+        self.assertTrue(r2.can_merge_with(r1))
+        self.assertTrue(r2.can_merge_with(r3))
+        self.assertTrue(r3.can_merge_with(r2))
+        # One contained within the other
+        self.assertTrue(r1.can_merge_with(r4))
+        self.assertTrue(r4.can_merge_with(r1))
+        # Disjoint
+        self.assertFalse(r1.can_merge_with(r3))
+        self.assertFalse(r3.can_merge_with(r1))
+
+    def test_merge_with_non_interval_rule(self):
+        r1 = data.IntervalRule(0, 5)
+        r2 = data.EqualityRule(5)
+
+        with self.assertRaises(data.IncompatibleRuleError):
+            r1.merge_with(r2)
+        with self.assertRaises(data.IncompatibleRuleError):
+            r2.merge_with(r1)
+
+    def test_merge_with_other_discretized_interval_rules(self):
+        r1 = data.IntervalRule(0, 5)
+        r2 = data.IntervalRule(5, 10)
+        r3 = data.IntervalRule(10, 15)
+
+        self.assertEqual(r1.merge_with(r1), r1)
+
+        self.assertEqual(r1.merge_with(r2), data.IntervalRule(0, 10))
+        self.assertEqual(r2.merge_with(r1), data.IntervalRule(0, 10))
+
+        self.assertEqual(r2.merge_with(r3), data.IntervalRule(5, 15))
+        self.assertEqual(r3.merge_with(r2), data.IntervalRule(5, 15))
+
+        with self.assertRaises(data.IncompatibleRuleError):
+            r1.merge_with(r3)
+        with self.assertRaises(data.IncompatibleRuleError):
+            r3.merge_with(r1)
+
+    def test_merge_with_overlapping_interval_rules(self):
+        r1 = data.IntervalRule(0, 6)
+        r2 = data.IntervalRule(4, 10)
+        r3 = data.IntervalRule(9, 15)
+        r4 = data.IntervalRule(1, 4)
+
+        self.assertEqual(r1.merge_with(r2), data.IntervalRule(0, 10))
+        self.assertEqual(r2.merge_with(r1), data.IntervalRule(0, 10))
+
+        self.assertEqual(r2.merge_with(r3), data.IntervalRule(4, 15))
+        self.assertEqual(r3.merge_with(r2), data.IntervalRule(4, 15))
+
+        # One contained within the other
+        self.assertEqual(r1.merge_with(r4), data.IntervalRule(0, 6))
+        self.assertEqual(r4.merge_with(r1), data.IntervalRule(0, 6))
+
+        # Disjoint
+        with self.assertRaises(data.IncompatibleRuleError):
+            r1.merge_with(r3)
+        with self.assertRaises(data.IncompatibleRuleError):
+            r3.merge_with(r1)
+

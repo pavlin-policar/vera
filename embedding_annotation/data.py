@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 
 
 class Variable:
@@ -64,8 +65,16 @@ class ContinuousVariable(Variable):
         return hash((self.__class__.__name__, self.name))
 
 
-class Rule:
+class IncompatibleRuleError(ValueError):
     pass
+
+
+class Rule:
+    def can_merge_with(self, other: "Rule") -> bool:
+        raise NotImplementedError()
+
+    def merge_with(self, other: "Rule") -> "Rule":
+        raise NotImplementedError()
 
 
 class IntervalRule(Rule):
@@ -80,6 +89,30 @@ class IntervalRule(Rule):
         self.lower = lower
         self.upper = upper
         self.value_name = value_name
+
+    def can_merge_with(self, other: Rule) -> bool:
+        if not isinstance(other, IntervalRule):
+            return False
+        if np.isclose(self.lower, other.upper):  # edges match
+            return True
+        if np.isclose(self.upper, other.lower):  # edges match
+            return True
+        if self.lower <= other.upper <= self.upper:  # other.upper in interval
+            return True
+        if self.lower <= other.lower <= self.upper:  # other.lower in interval
+            return True
+        if other.lower <= self.lower <= other.upper:  # my.lower in interval
+            return True
+        if other.lower <= self.upper <= other.upper:  # my.upper in interval
+            return True
+        return False
+
+    def merge_with(self, other: "Rule") -> "Rule":
+        if not self.can_merge_with(other):
+            raise IncompatibleRuleError(other)
+        lower = min(self.lower, other.lower)
+        upper = max(self.upper, other.upper)
+        return self.__class__(lower=lower, upper=upper, value_name=self.value_name)
 
     def __str__(self):
         if self.lower is not None and self.upper is not None:
@@ -107,6 +140,16 @@ class EqualityRule(Rule):
     def __init__(self, value, value_name: str = "x"):
         self.value = value
         self.value_name = value_name
+
+    def can_merge_with(self, other: Rule) -> bool:
+        if not isinstance(other, EqualityRule):
+            return False
+
+        return False
+
+    def merge_with(self, other: "Rule") -> "Rule":
+        if not self.can_merge_with(other):
+            raise IncompatibleRuleError(other)
 
     def __str__(self):
         return f"{self.value_name} == {repr(self.value)}"
