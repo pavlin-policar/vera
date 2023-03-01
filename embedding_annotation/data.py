@@ -268,7 +268,7 @@ def _pd_dtype_to_variable(col_name: str | Variable, col_type) -> Variable:
     if isinstance(col_name, Variable):
         return col_name
 
-    if pd.api.types.is_categorical(col_type):
+    if pd.api.types.is_categorical_dtype(col_type):
         variable = DiscreteVariable(
             col_name,
             values=col_type.categories.tolist(),
