@@ -267,6 +267,8 @@ def plot_feature_densities(
     figheight = figwidth / per_row * n_rows
     fig, ax = plt.subplots(nrows=n_rows, ncols=per_row, figsize=(figwidth, figheight))
 
+    if len(features) == 1:
+        ax = np.array([ax])
     ax = ax.ravel()
     for axi in ax:
         axi.set_axis_off()
