@@ -94,19 +94,23 @@ class TestDiscretize(unittest.TestCase):
         df_discretized = data._discretize(self.df)
         self.assertFalse(
             any(isinstance(c, data.ContinuousVariable) for c in df_discretized.columns),
-            "Discretized dataframe contains continuous variables!"
+            "Discretized dataframe contains continuous variables!",
         )
 
         self.assertTrue(
-            any(isinstance(c, data.ExplanatoryVariable) for c in df_discretized.columns),
-            "Discretized dataframe contains no explanatory variables!"
+            any(
+                isinstance(c, data.ExplanatoryVariable) for c in df_discretized.columns
+            ),
+            "Discretized dataframe contains no explanatory variables!",
         )
 
     def test_discretization_on_only_continuous_variables(self):
         df_discretized = data._discretize(self.df[["cont1", "cont2"]])
         self.assertTrue(
-            all(isinstance(c, data.ExplanatoryVariable) for c in df_discretized.columns),
-            "Discretized dataframe should contain only explanatory variables!"
+            all(
+                isinstance(c, data.ExplanatoryVariable) for c in df_discretized.columns
+            ),
+            "Discretized dataframe should contain only explanatory variables!",
         )
 
 
@@ -147,7 +151,7 @@ class TestOneHotEncoding(unittest.TestCase):
 
         self.assertTrue(
             all(isinstance(c, data.ExplanatoryVariable) for c in df_encoded.columns),
-            "Encoded dataframe should contain only explanatory variables!"
+            "Encoded dataframe should contain only explanatory variables!",
         )
 
     def test_one_hot_encoding_on_mixed_type(self):
@@ -156,12 +160,12 @@ class TestOneHotEncoding(unittest.TestCase):
 
         self.assertFalse(
             any(type(c) is data.DiscreteVariable for c in df_encoded.columns),
-            "Encoded dataframe contains discrete variables!"
+            "Encoded dataframe contains discrete variables!",
         )
 
         self.assertTrue(
             any(isinstance(c, data.ExplanatoryVariable) for c in df_encoded.columns),
-            "Encoded dataframe contains no explanatory variables!"
+            "Encoded dataframe contains no explanatory variables!",
         )
 
     def test_one_hot_encoding_with_no_discrete_variables(self):

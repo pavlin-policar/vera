@@ -8,7 +8,6 @@ import numpy as np
 import openTSNE
 import pandas as pd
 from sklearn import datasets
-from sklearn.preprocessing import KBinsDiscretizer
 
 import embedding_annotation as annotate
 
@@ -34,7 +33,7 @@ class TestDataset:
         if not path.exists(features_fname):
             raise FileNotFoundError(features_fname)
 
-        embedding = pd.read_csv(embedding_fname, header=None).categories
+        embedding = pd.read_csv(embedding_fname, header=None).values
         features = pd.read_csv(features_fname)
 
         return cls(name, embedding, features)
@@ -57,11 +56,10 @@ class TestDataset:
 def prepare_iris():
     iris = datasets.load_iris()
     x = pd.DataFrame(iris["data"], columns=iris["feature_names"])
-    features = annotate.d.generate_explanatory_variables(x)
 
     embedding = openTSNE.TSNE(metric="cosine", perplexity=30).fit(x.values)
 
-    return TestDataset("iris", embedding, features)
+    return TestDataset("iris", embedding, x)
 
 
 class TestAnnotator(unittest.TestCase):
@@ -74,7 +72,8 @@ class TestAnnotator(unittest.TestCase):
             cls.iris.save(force=True)
 
     def test_bla(self):
-        embedding, features = self.iris.embedding, self.iris.features
+        embedding, x = self.iris.embedding, self.iris.features
+        features = annotate.d.generate_explanatory_features(x)
         candidates = annotate.fs.morans_i(embedding, features)
         feature_densities = annotate.an.estimate_feature_densities(
             candidates["feature"].tolist(),
@@ -99,7 +98,6 @@ class TestAnnotator(unittest.TestCase):
             figwidth=4,
         )
         import matplotlib.pyplot as plt
+
         plt.tight_layout()
         plt.show()
-
-

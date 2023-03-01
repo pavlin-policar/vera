@@ -1,4 +1,3 @@
-import numpy as np
 import pandas as pd
 
 
@@ -20,6 +19,14 @@ class Variable:
     def __str__(self):
         return f"{self.name} ({'d' if self.is_discrete else 'c'})"
 
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        return self.name == other.name
+
+    def __hash__(self):
+        raise NotImplementedError()
+
 
 class DiscreteVariable(Variable):
     def __init__(self, name, values: list, ordered: bool = False):
@@ -30,6 +37,21 @@ class DiscreteVariable(Variable):
     def __repr__(self):
         return f"{self.__class__.__name__}(name={repr(self.name)}, values={repr(self.categories)} ordered={self.ordered})"
 
+    def __eq__(self, other):
+        if not isinstance(other, DiscreteVariable):
+            return False
+        return (
+            self.name == other.name
+            and self.categories == other.categories
+            and self.ordered
+            and other.ordered
+        )
+
+    def __hash__(self):
+        return hash(
+            (self.__class__.__name__, self.name, tuple(self.categories), self.ordered)
+        )
+
 
 class ContinuousVariable(Variable):
     def __init__(self, name):
@@ -37,6 +59,9 @@ class ContinuousVariable(Variable):
 
     def __repr__(self):
         return f"{self.__class__.__name__}(name={repr(self.name)})"
+
+    def __hash__(self):
+        return hash((self.__class__.__name__, self.name))
 
 
 class Rule:
@@ -64,6 +89,19 @@ class IntervalRule(Rule):
         elif self.lower is None and self.upper is not None:
             return f"x < {self.upper:.2f}"
 
+    def __repr__(self):
+        attrs = ["lower", "upper", "value_name"]
+        attrs_str = ", ".join(f"{attr}={repr(getattr(self, attr))}" for attr in attrs)
+        return f"{self.__class__.__name__}({attrs_str})"
+
+    def __eq__(self, other):
+        if not isinstance(other, IntervalRule):
+            return False
+        return self.lower == other.lower and self.upper == other.upper
+
+    def __hash__(self):
+        return hash((self.__class__.__name__, self.lower, self.upper))
+
 
 class EqualityRule(Rule):
     def __init__(self, value, value_name: str = "x"):
@@ -72,6 +110,19 @@ class EqualityRule(Rule):
 
     def __str__(self):
         return f"{self.value_name} == {repr(self.value)}"
+
+    def __repr__(self):
+        attrs = ["value", "value_name"]
+        attrs_str = ", ".join(f"{attr}={repr(getattr(self, attr))}" for attr in attrs)
+        return f"{self.__class__.__name__}({attrs_str})"
+
+    def __eq__(self, other):
+        if not isinstance(other, IntervalRule):
+            return False
+        return self.value == other.value
+
+    def __hash__(self):
+        return hash((self.__class__.__name__, self.value))
 
 
 class ExplanatoryVariable(DiscreteVariable):
@@ -89,15 +140,32 @@ class ExplanatoryVariable(DiscreteVariable):
     def name(self):
         return str(self.rule)
 
+    def __repr__(self):
+        attrs = ["base_variable", "rule", "discretization_indices"]
+        attrs_str = ", ".join(f"{attr}={repr(getattr(self, attr))}" for attr in attrs)
+        return f"{self.__class__.__name__}({attrs_str})"
+
     def __str__(self):
         return f"{self.rule} (x)"
 
-    def __repr__(self):
-        attrs = ["base_variable", "rule", "discretization_indices"]
-        attrs_str = ", ".join(
-            f"{attr}={repr(getattr(self, attr))}" for attr in attrs
+    def __eq__(self, other):
+        if not isinstance(other, ExplanatoryVariable):
+            return False
+        return (
+            self.base_variable == other.base_variable
+            and self.rule == other.rule
+            and self.discretization_indices == other.discretization_indices
         )
-        return f"{self.__class__.__name__}({attrs_str})"
+
+    def __hash__(self):
+        return hash(
+            (
+                self.__class__.__name__,
+                self.base_variable,
+                self.rule,
+                tuple(self.discretization_indices),
+            )
+        )
 
 
 def _pd_dtype_to_variable(col_name: str | Variable, col_type) -> Variable:
@@ -126,8 +194,7 @@ def _pd_dtype_to_variable(col_name: str | Variable, col_type) -> Variable:
         variable = ContinuousVariable(col_name)
     else:
         raise ValueError(
-            f"Only categorical and numeric dtypes supported! Got "
-            f"`{col_type.name}`."
+            f"Only categorical and numeric dtypes supported! Got " f"`{col_type.name}`."
         )
 
     return variable
@@ -187,9 +254,7 @@ def _discretize(df: pd.DataFrame) -> pd.DataFrame:
     # Use k-means for discretization
     from sklearn.preprocessing import KBinsDiscretizer
 
-    discretizer = KBinsDiscretizer(
-        n_bins=5, strategy="kmeans", encode="onehot-dense"
-    )
+    discretizer = KBinsDiscretizer(n_bins=5, strategy="kmeans", encode="onehot-dense")
     x_discretized = discretizer.fit_transform(df_cont.values)
 
     # Create derived features
@@ -200,8 +265,9 @@ def _discretize(df: pd.DataFrame) -> pd.DataFrame:
             v = ExplanatoryVariable(variable, rule, discretization_indices=[idx])
             derived_features.append(v)
 
-    assert len(derived_features) == len(discretizer.get_feature_names_out()), \
-        "The number of derived features do not match discretization output!"
+    assert len(derived_features) == len(
+        discretizer.get_feature_names_out()
+    ), "The number of derived features do not match discretization output!"
 
     df_cont = pd.DataFrame(x_discretized, columns=derived_features, index=df.index)
     return pd.concat([df_disc, df_cont], axis=1)
@@ -230,13 +296,14 @@ def _one_hot(df: pd.DataFrame) -> pd.DataFrame:
             v = ExplanatoryVariable(variable, rule)
             derived_features.append(v)
 
-    assert len(derived_features) == x_onehot.shape[1], \
-        "The number of derived features do not match one-hot output!"
+    assert (
+        len(derived_features) == x_onehot.shape[1]
+    ), "The number of derived features do not match one-hot output!"
 
     df_disc = pd.DataFrame(x_onehot, columns=derived_features, index=df.index)
     return pd.concat([df_othr, df_disc], axis=1)
 
 
-def generate_explanatory_variables(df: pd.DataFrame) -> pd.DataFrame:
+def generate_explanatory_features(df: pd.DataFrame) -> pd.DataFrame:
     """Convert the data frame with mixed features into explanatory features."""
     return _one_hot(_discretize(ingest(df)))
