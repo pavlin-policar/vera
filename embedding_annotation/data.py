@@ -107,7 +107,7 @@ class IntervalRule(Rule):
             return True
         return False
 
-    def merge_with(self, other: "Rule") -> "Rule":
+    def merge_with(self, other: Rule) -> Rule:
         if not self.can_merge_with(other):
             raise IncompatibleRuleError(other)
         lower = min(self.lower, other.lower)
@@ -147,7 +147,7 @@ class EqualityRule(Rule):
 
         return False
 
-    def merge_with(self, other: "Rule") -> "Rule":
+    def merge_with(self, other: Rule) -> Rule:
         if not self.can_merge_with(other):
             raise IncompatibleRuleError(other)
 
@@ -177,11 +177,52 @@ class ExplanatoryVariable(DiscreteVariable):
     ):
         self.base_variable = base_variable
         self.rule = rule
-        self.discretization_indices = discretization_indices
+        self.discretization_indices = sorted(discretization_indices)
 
     @property
     def name(self):
         return str(self.rule)
+
+    def can_merge_with(self, other: "ExplanatoryVariable") -> bool:
+        if not isinstance(other, ExplanatoryVariable):
+            return False
+        # The variables must match on their base variable
+        if self.base_variable != other.base_variable:
+            return False
+
+        # The merged discretization bins must form a contiguous sequence
+        my_bins = set(self.discretization_indices)
+        other_bins = set(other.discretization_indices)
+        bins = sorted(list(my_bins | other_bins))
+        if all(i == j for i, j in zip(range(bins[0], bins[-1] + 1), bins)):
+            return True
+
+        return False
+
+    def merge_with(self, other: "ExplanatoryVariable") -> "ExplanatoryVariable":
+        if not isinstance(other, ExplanatoryVariable):
+            raise ValueError(
+                f"Cannot merge `{self.__class__.__name__}` with  `{other}`!"
+            )
+
+        if not self.can_merge_with(other):
+            raise ValueError(
+                f"Cannot merge explanatory variables `{self}` and {other}!"
+            )
+
+        assert self.rule.can_merge_with(other.rule)
+        merged_rule = self.rule.merge_with(other.rule)
+
+        discretization_indices = set(
+            self.discretization_indices + other.discretization_indices
+        )
+        discretization_indices = sorted(list(discretization_indices))
+
+        return self.__class__(
+            base_variable=self.base_variable,
+            rule=merged_rule,
+            discretization_indices=discretization_indices,
+        )
 
     def __repr__(self):
         attrs = ["base_variable", "rule", "discretization_indices"]

@@ -1,5 +1,6 @@
 import unittest
 
+import numpy as np
 import pandas as pd
 from embedding_annotation import data
 
@@ -264,3 +265,53 @@ class TestIntervalRule(unittest.TestCase):
         with self.assertRaises(data.IncompatibleRuleError):
             r3.merge_with(r1)
 
+
+class TestExplanatoryVariable(unittest.TestCase):
+    def test_can_merge_with_discretized_variables(self):
+        x = np.random.normal(0, 1, size=50)
+        df = pd.DataFrame(x, columns=["x"])
+        df_discretized = data.generate_explanatory_features(df)
+
+        variables = df_discretized.columns
+        assert len(variables) >= 3, "Too few discretized bins to perform test"
+        v1, v2, v3, *_ = variables
+
+        self.assertTrue(v1.can_merge_with(v1))
+
+        self.assertTrue(v1.can_merge_with(v2))
+        self.assertTrue(v2.can_merge_with(v1))
+
+        self.assertTrue(v2.can_merge_with(v3))
+        self.assertTrue(v3.can_merge_with(v2))
+
+        self.assertFalse(v1.can_merge_with(v3))
+        self.assertFalse(v3.can_merge_with(v1))
+
+    def test_merge_with_discretized_variables(self):
+        x = np.random.normal(0, 1, size=50)
+        df = pd.DataFrame(x, columns=["x"])
+        df_discretized = data.generate_explanatory_features(df)
+
+        variables = df_discretized.columns
+        assert len(variables) >= 3, "Too few discretized bins to perform test"
+        v1, v2, v3, *_ = variables
+
+        v1v2 = v1.merge_with(v2)
+        self.assertIsInstance(v1v2, data.ExplanatoryVariable)
+        self.assertEqual(v1v2.rule.lower, v1.rule.lower)
+        self.assertEqual(v1v2.rule.upper, v2.rule.upper)
+        self.assertEqual(v1v2.discretization_indices, [0, 1])
+
+        v2v1 = v2.merge_with(v1)
+        self.assertEqual(v1v2, v2v1)
+
+        # Test that we can merge a variable already contained into the interval
+        v_combined = v1.merge_with(v2)
+        v_combined_2 = v_combined.merge_with(v2)
+        self.assertEqual(v_combined, v_combined_2)
+
+        # Test that we can't merge non-neighboirng discretization indices
+        with self.assertRaises(ValueError):
+            v1.merge_with(v3)
+        with self.assertRaises(ValueError):
+            v3.merge_with(v1)
