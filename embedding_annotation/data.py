@@ -18,7 +18,7 @@ class Variable:
         return isinstance(self, ContinuousVariable)
 
     def __str__(self):
-        return f"{self.name} ({'d' if self.is_discrete else 'c'})"
+        return str(self.name)
 
     def __eq__(self, other):
         if not isinstance(other, self.__class__):
@@ -36,7 +36,7 @@ class DiscreteVariable(Variable):
         self.ordered = ordered
 
     def __repr__(self):
-        return f"{self.__class__.__name__}(name={repr(self.name)}, values={repr(self.categories)} ordered={self.ordered})"
+        return f"{self.__class__.__name__}(name={repr(self.name)}, values={repr(self.categories)}, ordered={self.ordered})"
 
     def __eq__(self, other):
         if not isinstance(other, DiscreteVariable):
@@ -230,7 +230,7 @@ class ExplanatoryVariable(DiscreteVariable):
         return f"{self.__class__.__name__}({attrs_str})"
 
     def __str__(self):
-        return f"{self.rule} (x)"
+        return f"{self.rule}"
 
     def __eq__(self, other):
         if not isinstance(other, ExplanatoryVariable):
