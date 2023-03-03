@@ -184,7 +184,13 @@ class ExplanatoryVariable(DiscreteVariable):
     ):
         self.base_variable = base_variable
         self.rule = rule
-        self.discretization_indices = sorted(discretization_indices)
+        self.discretization_indices = discretization_indices
+        if self.discretization_indices is not None:
+            self.discretization_indices = sorted(self.discretization_indices)
+
+    @property
+    def is_discretized(self):
+        return self.discretization_indices is not None
 
     @property
     def name(self):
@@ -197,12 +203,13 @@ class ExplanatoryVariable(DiscreteVariable):
         if self.base_variable != other.base_variable:
             return False
 
-        # The merged discretization bins must form a contiguous sequence
-        my_bins = set(self.discretization_indices)
-        other_bins = set(other.discretization_indices)
-        bins = sorted(list(my_bins | other_bins))
-        if all(i == j for i, j in zip(range(bins[0], bins[-1] + 1), bins)):
-            return True
+        if self.is_discretized and other.is_discretized:
+            # The merged discretization bins must form a contiguous sequence
+            my_bins = set(self.discretization_indices)
+            other_bins = set(other.discretization_indices)
+            bins = sorted(list(my_bins | other_bins))
+            if all(i == j for i, j in zip(range(bins[0], bins[-1] + 1), bins)):
+                return True
 
         return False
 
@@ -220,10 +227,14 @@ class ExplanatoryVariable(DiscreteVariable):
         assert self.rule.can_merge_with(other.rule)
         merged_rule = self.rule.merge_with(other.rule)
 
-        discretization_indices = set(
-            self.discretization_indices + other.discretization_indices
-        )
-        discretization_indices = sorted(list(discretization_indices))
+        if self.is_discretized:
+            assert other.is_discretized
+            discretization_indices = set(
+                self.discretization_indices + other.discretization_indices
+            )
+            discretization_indices = sorted(list(discretization_indices))
+        else:
+            discretization_indices = None
 
         return self.__class__(
             base_variable=self.base_variable,
@@ -249,12 +260,15 @@ class ExplanatoryVariable(DiscreteVariable):
         )
 
     def __hash__(self):
+        discretization_indices = self.discretization_indices
+        if discretization_indices is not None:
+            discretization_indices = tuple(discretization_indices)
         return hash(
             (
                 self.__class__.__name__,
                 self.base_variable,
                 self.rule,
-                tuple(self.discretization_indices),
+                discretization_indices,
             )
         )
 
