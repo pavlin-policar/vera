@@ -158,6 +158,7 @@ def estimate_feature_densities(
     log: bool = False,
     n_grid_points: int = 100,
     kernel: str = "gaussian",
+    bw: float = 1,
 ) -> dict[Any, Density]:
     densities = {}
 
@@ -166,7 +167,7 @@ def estimate_feature_densities(
         if log:
             x = np.log1p(x)
 
-        kde = FFTKDE(kernel=kernel).fit(embedding, weights=x)
+        kde = FFTKDE(kernel=kernel, bw=bw).fit(embedding, weights=x)
         grid, points = kde.evaluate(n_grid_points)
 
         densities[feature] = Density(grid, points)
