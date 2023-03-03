@@ -310,7 +310,10 @@ def plot_region(
     fill_alpha=0.25,
     edge_alpha=1,
     lw=1,
+    draw_label=False,
     scatter_kwargs: dict = {},
+    label_kwargs: dict = {},
+    detail_kwargs: dict = {},
 ):
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 8))
@@ -340,6 +343,39 @@ def plot_region(
         )
         ax.add_patch(polygon)
 
+    if draw_label:
+        # Draw the lable on the largest polygon in the region
+        largest_polygon = max(region.polygon.geoms, key=lambda x: x.area)
+        label_kwargs_ = {
+            "ha": "center",
+            "va": "bottom",
+            "fontsize": 12,
+            "fontweight": "bold",
+        }
+        label_kwargs_.update(label_kwargs)
+        x, y = largest_polygon.centroid.coords[0]
+        label = ax.text(
+            x,
+            y,
+            region.plot_label,
+            **label_kwargs_
+        )
+        if region.plot_detail is not None:
+            detail_kwargs_ = {
+                "ha": "center",
+                "va": "top",
+                "fontsize": 9,
+                "fontweight": "normal",
+            }
+            detail_kwargs_.update(detail_kwargs)
+            label = ax.text(
+                x,
+                y,
+                region.plot_detail,
+                **detail_kwargs_
+            )
+        # label.set_bbox(dict(facecolor="white", alpha=0.75, edgecolor="white"))
+
     if embedding is not None:
         scatter_kwargs_ = {
             "zorder": 1,
@@ -368,7 +404,10 @@ def plot_regions(
     fill_alpha=0.25,
     edge_alpha=1,
     lw=1,
+    draw_labels=False,
     scatter_kwargs: dict = {},
+    label_kwargs: dict = {},
+    detail_kwargs: dict = {},
 ):
     n_rows = len(regions) // per_row
     if len(regions) % per_row > 0:
@@ -395,7 +434,10 @@ def plot_regions(
             fill_alpha=fill_alpha,
             edge_alpha=edge_alpha,
             lw=lw,
+            draw_label=draw_labels,
             scatter_kwargs=scatter_kwargs,
+            label_kwargs=label_kwargs,
+            detail_kwargs=detail_kwargs,
         )
 
     if return_ax:
@@ -421,6 +463,7 @@ def plot_annotation(
             density,
             fill_color=next(hues),
             ax=ax,
+            draw_label=True,
         )
 
     if embedding is not None:

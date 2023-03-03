@@ -78,6 +78,16 @@ class Region:
     def num_parts(self):
         return len(self.region_parts)
 
+    @property
+    def plot_label(self) -> str:
+        """The main label to be shown in a plot."""
+        return str(self.feature)
+
+    @property
+    def plot_detail(self) -> str:
+        """Region details to be shown in a plot."""
+        return None
+
     @staticmethod
     def _ensure_multipolygon(polygon):
         if not isinstance(polygon, geom.MultiPolygon):
@@ -88,7 +98,9 @@ class Region:
         if not np.allclose(self.density.grid, other.density.grid):
             raise RuntimeError("Grids must match when adding two density objects")
 
-        return CompositeRegion([self.density, other.density])
+        return CompositeRegion(
+            [self.feature, other.feature], [self.density, other.density]
+        )
 
     def __repr__(self):
         n = self.num_parts
@@ -104,10 +116,15 @@ class Region:
         """Hashing only on the basis of the variable."""
         return hash(self.feature)
 
+    @property
+    def contained_features(self) -> list[Variable]:
+        """Return all the features contained within this region"""
+        return [self.feature]
+
 
 class CompositeRegion(Region):
-    def __init__(self, feature: str, regions: list[Region]):
-        self.feature = feature or " + ".join(d.feature for d in regions)
+    def __init__(self, feature: str | list[Any], regions: list[Region]):
+        self.feature = feature or " + ".join(str(r.feature) for r in regions)
         self.level = regions[0].level
         if not all(r.level == self.level for r in regions):
             raise RuntimeError(
@@ -120,6 +137,18 @@ class CompositeRegion(Region):
 
         polygon = reduce(operator.or_, [r.polygon for r in regions])
         self.polygon = self._ensure_multipolygon(polygon)
+
+    @property
+    def plot_label(self) -> str:
+        return str(self.feature)
+
+    @property
+    def plot_detail(self) -> str:
+        return "\n".join(str(f) for f in self.contained_features)
+
+    @property
+    def contained_features(self) -> list[Variable]:
+        return reduce(operator.add, [r.contained_features for r in self.base_regions])
 
 
 def estimate_feature_densities(
