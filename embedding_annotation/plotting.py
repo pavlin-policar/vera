@@ -449,9 +449,9 @@ def plot_annotation(
     embedding: np.ndarray,
     cmap: str = "tab10",
     ax=None,
-    density_name_mapping: dict = {},
-    scatter_kwargs: Optional[dict] = {},
-    label_kwargs: Optional[dict] = {},
+    scatter_kwargs: dict = {},
+    label_kwargs: dict = {},
+    detail_kwargs: dict = {},
 ):
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 8))
@@ -464,6 +464,8 @@ def plot_annotation(
             fill_color=next(hues),
             ax=ax,
             draw_label=True,
+            label_kwargs=label_kwargs,
+            detail_kwargs=detail_kwargs,
         )
 
     if embedding is not None:
@@ -477,7 +479,7 @@ def plot_annotation(
         ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_)
 
     # Hide ticks and axis
-    ax.set_axis_off()
+    ax.set_xticks([]), ax.set_yticks([])
     ax.axis("equal")
 
     return ax
