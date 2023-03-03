@@ -257,7 +257,8 @@ def stage_1_merge_candidates(
             )
 
     df = pd.DataFrame(result)
-    df = df.loc[df["overlap"] >= overlap_threshold]
+    if len(df):
+        df = df.loc[df["overlap"] >= overlap_threshold]
     return df
 
 
