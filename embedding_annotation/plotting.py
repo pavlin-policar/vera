@@ -8,10 +8,11 @@ import matplotlib.colors as clr
 import matplotlib.colors as colors
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
+import matplotlib.patches as patches
 import numpy as np
 import pandas as pd
 
-from embedding_annotation.annotate import Density
+from embedding_annotation.annotate import Density, Region
 
 
 def plot_feature(
@@ -92,9 +93,9 @@ def plot_feature(
     # Hide ticks and axis
     ax.set_xticks([]), ax.set_yticks([]), ax.axis("equal")
 
-    marker_str = ", ".join(feature_names)
+    marker_str = ", ".join(map(str, feature_names))
     if title is None:
-        ax.set_title("\n".join(wrap(marker_str, 30)))
+        ax.set_title("\n".join(wrap(marker_str, 40)))
     else:
         ax.set_title(title)
 
@@ -190,10 +191,15 @@ def get_cmap_hues(cmap: str):
 
 
 def hue_colormap(
-    hue: float, levels: int = 10, min_saturation: float = 0
+    hue: float, levels: Iterable | int = 10, min_saturation: float = 0
 ) -> colors.ListedColormap:
     """Create an HSV colormap with varying saturation levels"""
-    hsv = [[hue, s, 1] for s in np.linspace(min_saturation, 1, num=levels)]
+    if isinstance(levels, Iterable):
+        hsv = [[hue, (s + min_saturation) / (1 + min_saturation), 1] for s in levels]
+    else:
+        num_levels = len(levels) if isinstance(levels, Iterable) else levels
+        hsv = [[hue, s, 1] for s in np.linspace(min_saturation, 1, num=num_levels)]
+
     rgb = colors.hsv_to_rgb(hsv)
     cmap = colors.ListedColormap(rgb)
 
@@ -202,14 +208,14 @@ def hue_colormap(
 
 def plot_feature_density(
     density: Density,
-    embedding: Optional[np.ndarray] = None,
-    levels: Union[int, np.ndarray] = 5,
+    embedding: np.ndarray = None,
+    levels: int | np.ndarray = 5,
     skip_first: bool = True,
     ax=None,
     cmap="RdBu_r",
-    contour_kwargs: Optional[Dict] = {},
-    contourf_kwargs: Optional[Dict] = {},
-    scatter_kwargs: Optional[Dict] = {},
+    contour_kwargs: dict = {},
+    contourf_kwargs: dict = {},
+    scatter_kwargs: dict = {},
 ):
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 8))
@@ -225,7 +231,7 @@ def plot_feature_density(
     contour_kwargs_ = {"zorder": 1, "linewidths": 1, "colors": "k", **contour_kwargs}
     contourf_kwargs_ = {"zorder": 1, "alpha": 0.5, **contourf_kwargs}
 
-    x, y, z = density.get_xyz(scaled=True)
+    x, y, z = density._get_xyz(scaled=True)
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UserWarning)
         ax.contourf(x, y, z, levels=levels, cmap=cmap, locator=tck, **contourf_kwargs_)
@@ -237,8 +243,8 @@ def plot_feature_density(
             "c": "k",
             "s": 6,
             "alpha": 0.1,
-            **scatter_kwargs,
         }
+        scatter_kwargs_.update(scatter_kwargs)
         ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_)
 
     # Hide ticks and axis
@@ -250,15 +256,15 @@ def plot_feature_density(
 def plot_feature_densities(
     features: list[str],
     densities: dict[str, Density],
-    embedding: Optional[np.ndarray] = None,
-    levels: Union[int, np.ndarray] = 5,
+    embedding: np.ndarray = None,
+    levels: int | np.ndarray = 5,
     skip_first: bool = True,
     per_row: int = 4,
     figwidth: int = 24,
     return_ax: bool = False,
-    contour_kwargs: Optional[dict] = {},
-    contourf_kwargs: Optional[dict] = {},
-    scatter_kwargs: Optional[dict] = {},
+    contour_kwargs: dict = {},
+    contourf_kwargs: dict = {},
+    scatter_kwargs: dict = {},
 ):
     n_rows = len(features) // per_row
     if len(features) % per_row > 0:
@@ -291,15 +297,117 @@ def plot_feature_densities(
         return fig, ax
 
 
+def plot_region(
+    region: Region,
+    embedding: np.ndarray = None,
+    ax=None,
+    fill_color="tab:blue",
+    edge_color=None,
+    fill_alpha=0.25,
+    edge_alpha=1,
+    lw=1,
+    scatter_kwargs: dict = {},
+):
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 8))
+
+    # If no edge color is specified, use the same color as the fill
+    if edge_color is None:
+        edge_color = fill_color
+
+    for geom in region.polygon.geoms:
+        points = np.array(geom.exterior.coords)
+        # Draw fill
+        polygon = patches.Polygon(
+            points,
+            color=fill_color,
+            alpha=fill_alpha,
+            zorder=1,
+        )
+        ax.add_patch(polygon)
+        # Draw boundary line
+        polygon = patches.Polygon(
+            points,
+            fill=False,
+            lw=lw,
+            edgecolor=edge_color,
+            alpha=edge_alpha,
+            zorder=2,
+        )
+        ax.add_patch(polygon)
+
+    if embedding is not None:
+        scatter_kwargs_ = {
+            "zorder": 1,
+            "c": "k",
+            "s": 6,
+            "alpha": 0.1,
+        }
+        scatter_kwargs_.update(scatter_kwargs)
+        ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_)
+
+    # Hide ticks and axis
+    ax.axis("equal")
+
+    return ax
+
+
+def plot_regions(
+    regions: list[Region],
+    embedding: np.ndarray = None,
+    per_row: int = 4,
+    figwidth: int = 24,
+    return_ax: bool = False,
+    fill_color="tab:blue",
+    edge_color=None,
+    fill_alpha=0.25,
+    edge_alpha=1,
+    lw=1,
+    scatter_kwargs: dict = {},
+):
+    n_rows = len(regions) // per_row
+    if len(regions) % per_row > 0:
+        n_rows += 1
+
+    figheight = figwidth / per_row * n_rows
+    fig, ax = plt.subplots(nrows=n_rows, ncols=per_row, figsize=(figwidth, figheight))
+
+    if len(regions) == 1:
+        ax = np.array([ax])
+    ax = ax.ravel()
+    for axi in ax:
+        axi.set_axis_off()
+
+    for idx, region in enumerate(regions):
+        ax[idx].set_title(str(region.feature))
+
+        plot_region(
+            region,
+            embedding,
+            ax=ax[idx],
+            fill_color=fill_color,
+            edge_color=edge_color,
+            fill_alpha=fill_alpha,
+            edge_alpha=edge_alpha,
+            lw=lw,
+            scatter_kwargs=scatter_kwargs,
+        )
+
+    if return_ax:
+        return fig, ax
+
+
 def plot_annotation(
-    densities: dict[str, Density],
+    densities: dict[str, Region],
     embedding: np.ndarray,
     levels: int = 5,
     cmap: str = "tab10",
     ax=None,
+    density_name_mapping: dict = {},
     contour_kwargs: Optional[dict] = {},
     contourf_kwargs: Optional[dict] = {},
     scatter_kwargs: Optional[dict] = {},
+    label_kwargs: Optional[dict] = {},
 ):
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 8))
@@ -318,6 +426,23 @@ def plot_annotation(
             contour_kwargs=contour_kwargs,
         )
 
+        # Plot label on top of the largest part of the contour
+        label_text = density_name_mapping.get(key, key)
+        label_kwargs_ = {
+            "ha": "center",
+            "va": "center",
+            "fontsize": 12,
+            "fontweight": "bold",
+            **label_kwargs,
+        }
+        for polygon in density._get_polygons_at(0.25).geoms:
+            x, y = polygon.centroid.coords[0]
+            ax.text(x, y, label_text, **label_kwargs_)
+        # largest_polygon = max(density.get_polygons_at(0.25).geoms, key=lambda x: x.area)
+        # x, y = largest_polygon.centroid.coords[0]
+        # label = ax.text(x, y, key, ha="center", va="center", fontsize=12, fontweight="bold")
+        # label.set_bbox(dict(facecolor="white", alpha=0.75, edgecolor="white"))
+
     if embedding is not None:
         scatter_kwargs_ = {
             "zorder": 1,
@@ -327,5 +452,9 @@ def plot_annotation(
             **scatter_kwargs,
         }
         ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_)
+
+    # Hide ticks and axis
+    ax.set_axis_off()
+    ax.axis("equal")
 
     return ax
