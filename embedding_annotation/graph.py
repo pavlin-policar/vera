@@ -20,7 +20,7 @@ def matrix_to_graph(mtx: sp.csr_matrix | sp.csc_matrix) -> Graph:
     knng = mtx.tocsr()
     for i in range(len(mtx.indptr) - 1):
         g[i]  # access to ensure empty list
-        for j in mtx.indices[knng.indptr[i]: mtx.indptr[i + 1]]:
+        for j in mtx.indices[knng.indptr[i] : mtx.indptr[i + 1]]:
             g[i].add(j)
 
     return Graph(dict(g))
@@ -142,10 +142,7 @@ def max_cliques(g: Graph) -> list[NodeList]:
 
         return result
 
-    cliques = []
-    # Find cliques in each connected component independently
-    for component in connected_components(g):
-        cliques.extend(_bron_kerbosch(component, set(), set(component.keys()), set()))
+    cliques = _bron_kerbosch(g, set(), set(g.keys()), set())
 
     cliques = list(map(NodeList, map(list, cliques)))
     cliques = sorted(cliques, key=len, reverse=True)
@@ -157,8 +154,9 @@ def independent_sets(g: Graph) -> list[NodeList]:
     return max_cliques(graph_complement(g))
 
 
-def graph_coloring_greedy(g: Graph, node_ordering: NodeList | str = "degree") -> dict[T, int]:
-
+def graph_coloring_greedy(
+    g: Graph, node_ordering: NodeList | str = "degree"
+) -> dict[T, int]:
     def _next_available_color(g, colors, v):
         neighboring_colors = {colors[u] for u in g[v]}
         i = 0
@@ -193,7 +191,9 @@ def plot_graph(coords, e: EdgeList, vc="tab:blue", edge_alpha=0.25, ax=None):
     lines = []
     for i, j in e:
         lines.append([coords[i], coords[j]])
-    line_collection = mcollections.LineCollection(lines, zorder=1, color="k", alpha=edge_alpha)
+    line_collection = mcollections.LineCollection(
+        lines, zorder=1, color="k", alpha=edge_alpha
+    )
     ax.add_collection(line_collection)
 
     return ax

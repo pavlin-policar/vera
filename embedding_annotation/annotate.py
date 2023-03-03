@@ -20,7 +20,9 @@ class Density:
         self.values = values / values.sum()
         self.values_scaled = values / values.max()
 
-    def _get_xyz(self, scaled: bool = False) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def _get_xyz(
+        self, scaled: bool = False
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         n_grid_points = int(np.sqrt(self.grid.shape[0]))  # always a square grid
         x, y = np.unique(self.grid[:, 0]), np.unique(self.grid[:, 1])
         vals = [self.values, self.values_scaled][scaled]
@@ -36,9 +38,7 @@ class Density:
         return contour_generator.lines(level)
 
     def get_polygons_at(self, level: float) -> geom.MultiPolygon:
-        return geom.MultiPolygon(
-            [geom.Polygon(c) for c in self.get_contours_at(level)]
-        )
+        return geom.MultiPolygon([geom.Polygon(c) for c in self.get_contours_at(level)])
 
     def __add__(self, other: "Density") -> "CompositeDensity":
         if not isinstance(other, Density):
@@ -218,11 +218,13 @@ def stage_1_merge_candidates(
             overlap_ji = p2.intersection(p1).area / p2.area
             overlap = max(overlap_ij, overlap_ji)
 
-            result.append({
-                "feature_1": region_keys[i],
-                "feature_2": region_keys[j],
-                "overlap": overlap,
-            })
+            result.append(
+                {
+                    "feature_1": region_keys[i],
+                    "feature_2": region_keys[j],
+                    "overlap": overlap,
+                }
+            )
 
     df = pd.DataFrame(result)
     df = df.loc[df["overlap"] >= overlap_threshold]
@@ -271,10 +273,14 @@ def stage_1_merge_regions(
 
     if merge_features is not None:
         if isinstance(merge_features, pd.DataFrame):
-            merge_features = merge_features[["feature_1", "feature_2"]].itertuples(index=False)
+            merge_features = merge_features[["feature_1", "feature_2"]].itertuples(
+                index=False
+            )
         _merge_regions(merge_features)
     else:
-        while (merge_features := stage_1_merge_candidates(regions, overlap_threshold)).shape[0] > 0:
+        while (
+            merge_features := stage_1_merge_candidates(regions, overlap_threshold)
+        ).shape[0] > 0:
             _merge_regions(
                 merge_features[["feature_1", "feature_2"]].itertuples(index=False)
             )
@@ -362,7 +368,8 @@ def group_similar_features_dendrogram(
 
     clust_densities = {
         cid: CompositeRegion(
-            feature=cid, regions=[d for d in densities.values() if d.feature in features]
+            feature=cid,
+            regions=[d for d in densities.values() if d.feature in features],
         )
         for cid, features in clusts.items()
     }
@@ -370,7 +377,9 @@ def group_similar_features_dendrogram(
     return clusts, clust_densities
 
 
-def optimize_layout(regions: dict[Any, Region], max_overlap: float = 0) -> list[list[Any]]:
+def optimize_layout(
+    regions: dict[Any, Region], max_overlap: float = 0
+) -> list[list[Any]]:
     density_names = list(regions.keys())
 
     overlap = _dict_pdist(regions, intersection_area)
