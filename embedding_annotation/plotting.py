@@ -2,7 +2,7 @@ import warnings
 from collections.abc import Iterable
 from itertools import cycle
 from textwrap import wrap
-from typing import Optional, Union, Dict
+from typing import Optional, Union, Dict, Any
 
 import matplotlib.colors as clr
 import matplotlib.colors as colors
@@ -16,7 +16,7 @@ from embedding_annotation.annotate import Density, Region
 
 
 def plot_feature(
-    feature_names,
+    feature_names: Any | list[Any],
     df: pd.DataFrame,
     embedding: np.ndarray,
     binary=False,
@@ -103,7 +103,7 @@ def plot_feature(
 
 
 def plot_features(
-    features,
+    features: list[Any] | dict[str, list[Any]],
     data: pd.DataFrame,
     embedding: np.ndarray,
     per_row=4,
@@ -180,12 +180,16 @@ def plot_features(
         return fig, ax
 
 
-def get_cmap_hues(cmap: str):
-    """Extract the hue values from a given colormap."""
+def get_cmap_colors(cmap: str):
     import matplotlib.cm
 
-    cm = matplotlib.cm.get_cmap(cmap)
-    hues = [c[0] for c in colors.rgb_to_hsv(cm.colors)]
+    return matplotlib.cm.get_cmap(cmap).colors
+
+
+def get_cmap_hues(cmap: str):
+    """Extract the hue values from a given colormap."""
+    colors = get_cmap_colors(cmap)
+    hues = [c[0] for c in colors.rgb_to_hsv(colors)]
 
     return np.array(hues)
 
@@ -254,8 +258,8 @@ def plot_feature_density(
 
 
 def plot_feature_densities(
-    features: list[str],
-    densities: dict[str, Density],
+    features: list[Any],
+    densities: dict[Any, Density],
     embedding: np.ndarray = None,
     levels: int | np.ndarray = 5,
     skip_first: bool = True,
@@ -353,7 +357,8 @@ def plot_region(
 
 
 def plot_regions(
-    regions: list[Region],
+    features: list[Any],
+    regions: dict[Any, Region],
     embedding: np.ndarray = None,
     per_row: int = 4,
     figwidth: int = 24,
@@ -378,11 +383,11 @@ def plot_regions(
     for axi in ax:
         axi.set_axis_off()
 
-    for idx, region in enumerate(regions):
-        ax[idx].set_title(str(region.feature))
+    for idx, feature in enumerate(features):
+        ax[idx].set_title(str(feature))
 
         plot_region(
-            region,
+            regions[feature],
             embedding,
             ax=ax[idx],
             fill_color=fill_color,
@@ -400,48 +405,23 @@ def plot_regions(
 def plot_annotation(
     densities: dict[str, Region],
     embedding: np.ndarray,
-    levels: int = 5,
     cmap: str = "tab10",
     ax=None,
     density_name_mapping: dict = {},
-    contour_kwargs: Optional[dict] = {},
-    contourf_kwargs: Optional[dict] = {},
     scatter_kwargs: Optional[dict] = {},
     label_kwargs: Optional[dict] = {},
 ):
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 8))
 
-    hues = iter(cycle(get_cmap_hues(cmap)))
-    levels_ = np.linspace(0, 1, num=levels)  # scaled densities always in [0, 1]
+    hues = iter(cycle(get_cmap_colors(cmap)))
 
     for key, density in densities.items():
-        plot_feature_density(
+        plot_region(
             density,
-            levels=levels_,
-            skip_first=True,
-            cmap=hue_colormap(next(hues), levels=levels, min_saturation=0.1),
+            fill_color=next(hues),
             ax=ax,
-            contourf_kwargs=contourf_kwargs,
-            contour_kwargs=contour_kwargs,
         )
-
-        # Plot label on top of the largest part of the contour
-        label_text = density_name_mapping.get(key, key)
-        label_kwargs_ = {
-            "ha": "center",
-            "va": "center",
-            "fontsize": 12,
-            "fontweight": "bold",
-            **label_kwargs,
-        }
-        for polygon in density._get_polygons_at(0.25).geoms:
-            x, y = polygon.centroid.coords[0]
-            ax.text(x, y, label_text, **label_kwargs_)
-        # largest_polygon = max(density.get_polygons_at(0.25).geoms, key=lambda x: x.area)
-        # x, y = largest_polygon.centroid.coords[0]
-        # label = ax.text(x, y, key, ha="center", va="center", fontsize=12, fontweight="bold")
-        # label.set_bbox(dict(facecolor="white", alpha=0.75, edgecolor="white"))
 
     if embedding is not None:
         scatter_kwargs_ = {

@@ -1,4 +1,6 @@
+import operator
 from collections import Counter
+from functools import reduce
 from typing import Callable, Any
 
 import contourpy
@@ -52,8 +54,12 @@ class CompositeDensity(Density):
         self.base_densities = densities
         joint_density = np.sum(np.vstack([d.values for d in densities]), axis=0)
         grid = densities[0].grid
-        # TODO: Check grids
         super().__init__(grid, joint_density)
+        if not all(np.allclose(d.grid, self.grid) for d in densities):
+            raise RuntimeError(
+                "All densities must have the same grid when constructing "
+                "composite density!"
+            )
 
 
 class Region:
@@ -71,6 +77,12 @@ class Region:
     @property
     def num_parts(self):
         return len(self.region_parts)
+
+    @staticmethod
+    def _ensure_multipolygon(polygon):
+        if not isinstance(polygon, geom.MultiPolygon):
+            polygon = geom.MultiPolygon([polygon])
+        return polygon
 
     def __add__(self, other: "Region"):
         if not np.allclose(self.density.grid, other.density.grid):
@@ -95,13 +107,19 @@ class Region:
 
 class CompositeRegion(Region):
     def __init__(self, feature: str, regions: list[Region]):
-        self.name = feature or " + ".join(d.feature for d in regions)
-        self.grid = regions[0].grid
+        self.feature = feature or " + ".join(d.feature for d in regions)
+        self.level = regions[0].level
+        if not all(r.level == self.level for r in regions):
+            raise RuntimeError(
+                "All regions must have the same level when constructing "
+                "composite region!"
+            )
+        self.density = CompositeDensity([r.density for r in regions])
 
-        self._base_densities = regions
-        joint_density = np.sum(np.vstack([d.density.values for d in regions]), axis=0)
-        self._density = joint_density / joint_density.sum()
-        self._density_scaled = joint_density / joint_density.max()
+        self.base_regions = regions
+
+        polygon = reduce(operator.or_, [r.polygon for r in regions])
+        self.polygon = self._ensure_multipolygon(polygon)
 
 
 def estimate_feature_densities(
@@ -130,24 +148,24 @@ def estimate_feature_densities(
 def find_regions(
     densities: dict[Variable, Density],
     level: float = 0.25,
-) -> list[Region]:
+) -> dict[Any, Region]:
     """Identify regions for each feature at a specified contour level."""
-    return [
-        Region(variable, density, level=level)
+    return {
+        variable: Region(variable, density, level=level)
         for variable, density in densities.items()
-    ]
+    }
 
 
-def _density_pdist(densities: dict[str, Region], f: Callable):
-    densities = list(densities.values())
+def _dict_pdist(d: dict[Any, Any], metric: Callable):
+    d = list(d.values())
 
-    n = len(densities)
+    n = len(d)
     out_size = (n * (n - 1)) // 2
     result = np.zeros(out_size, dtype=np.float64)
     k = 0
     for i in range(n - 1):
         for j in range(i + 1, n):
-            result[k] = f(densities[i], densities[j])
+            result[k] = metric(d[i], d[j])
             k += 1
     return result
 
@@ -181,13 +199,16 @@ def inbetween_convex_hull_ratio(r1: Region, r2: Region) -> float:
 
 
 def stage_1_merge_candidates(
-    regions: list[Region],
+    regions: dict[Any, Region],
     overlap_threshold: float = 0.75,
-):
+) -> pd.DataFrame:
+    region_keys = list(regions.keys())
+    region_values = list(regions.values())
+
     result = []
-    for i in range(len(regions)):
-        for j in range(i + 1, len(regions)):
-            r1, r2 = regions[i], regions[j]
+    for i in range(len(region_values)):
+        for j in range(i + 1, len(region_values)):
+            r1, r2 = region_values[i], region_values[j]
             if not r1.feature.can_merge_with(r2.feature):
                 continue
 
@@ -197,7 +218,11 @@ def stage_1_merge_candidates(
             overlap_ji = p2.intersection(p1).area / p2.area
             overlap = max(overlap_ij, overlap_ji)
 
-            result.append({"region_1": r1, "region_2": r2, "overlap": overlap})
+            result.append({
+                "feature_1": region_keys[i],
+                "feature_2": region_keys[j],
+                "overlap": overlap,
+            })
 
     df = pd.DataFrame(result)
     df = df.loc[df["overlap"] >= overlap_threshold]
@@ -205,8 +230,8 @@ def stage_1_merge_candidates(
 
 
 def stage_1_merge_regions(
-    regions: list[Region],
-    merge_features = None,
+    regions: dict[Any, Region],
+    merge_features: pd.DataFrame = None,
     overlap_threshold: float = 0.75,
 ) -> list[Region]:
     """
@@ -226,42 +251,51 @@ def stage_1_merge_regions(
         A new list of regions, where similar regions have been merged.
     """
     # Create copy, we don't want to modify the original list
-    regions = list(regions)
+    regions = dict(regions)
 
-    def _merge_regions(merge_features: tuple[Region, Region]):
+    def _merge_regions(merge_features: tuple[Any, Any]):
         """Merge all the regions in the list of tuples."""
-        for r1, r2 in merge_features:
+        # Sometimes, a feature should be merged more than once, so we can't
+        # remove it immediately after merge
+        features_to_remove = set()
+        for f1, f2 in merge_features:
+            r1, r2 = regions[f1], regions[f2]
             new_region = Region(
                 r1.feature.merge_with(r2.feature), r1.density + r2.density
             )
-            regions.remove(r1), regions.remove(r2), regions.append(new_region)
+            features_to_remove.update([f1, f2])
+            regions[new_region.feature] = new_region
+
+        for feature in features_to_remove:
+            del regions[feature]
 
     if merge_features is not None:
-        # TODO: This won't work,
+        if isinstance(merge_features, pd.DataFrame):
+            merge_features = merge_features[["feature_1", "feature_2"]].itertuples(index=False)
         _merge_regions(merge_features)
     else:
         while (merge_features := stage_1_merge_candidates(regions, overlap_threshold)).shape[0] > 0:
             _merge_regions(
-                merge_features[["region_1", "region_2"]].itertuples(index=False)
+                merge_features[["feature_1", "feature_2"]].itertuples(index=False)
             )
 
     return regions
 
 
 def group_similar_features(
-    features: list[str],
-    densities: dict[Region],
+    features: list[Any],
+    regions: dict[Any, Region],
     threshold: float = 0.9,
     method: str = "max-cliques",
 ):
-    # We only care about the densities that appear in the feature list
-    densities = {k: d for k, d in densities.items() if k in features}
+    # We only care about the regions that appear in the feature list
+    regions = {k: d for k, d in regions.items() if k in features}
 
     # Create a similarity weighted graph with edges appearing only if they have
     # IoU > threshold
-    distances = _density_pdist(densities, intersection_over_union)
+    distances = _dict_pdist(regions, intersection_over_union)
     graph = g.similarities_to_graph(distances, threshold=threshold)
-    node_labels = dict(enumerate(densities.keys()))
+    node_labels = dict(enumerate(regions.keys()))
     graph = g.label_nodes(graph, node_labels)
 
     # Once we construct the graph, find the max-cliques. These will serve as our
@@ -283,7 +317,7 @@ def group_similar_features(
 
     clust_densities = {
         cid: CompositeRegion(
-            feature=cid, regions=[d for d in densities.values() if d.feature in features]
+            feature=cid, regions=[d for d in regions.values() if d.feature in features]
         )
         for cid, features in clusts.items()
     }
@@ -302,7 +336,7 @@ def group_similar_features_dendrogram(
 
     # Perform complete-linkage hierarchical clustering to ensure that all the
     # features have at most the specified threshold distance between them
-    distances = _density_pdist(densities, intersection_over_union_dist)
+    distances = _dict_pdist(densities, intersection_over_union_dist)
     Z = linkage(distances, method="complete")
     cluster_assignment = fcluster(Z, t=threshold, criterion="distance")
     cluster_assignment = cluster_assignment - 1  # clusters from linkage start at 1
@@ -336,12 +370,10 @@ def group_similar_features_dendrogram(
     return clusts, clust_densities
 
 
-def optimize_layout(
-    densities: dict[str, Region], max_overlap: float = 0
-) -> list[list[str]]:
-    density_names = list(densities.keys())
+def optimize_layout(regions: dict[Any, Region], max_overlap: float = 0) -> list[list[Any]]:
+    density_names = list(regions.keys())
 
-    overlap = _density_pdist(densities, intersection_area)
+    overlap = _dict_pdist(regions, intersection_area)
     graph = g.similarities_to_graph(overlap, threshold=max_overlap)
     node_labels = dict(enumerate(density_names))
     graph = g.label_nodes(graph, node_labels)
