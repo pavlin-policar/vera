@@ -80,8 +80,8 @@ class Rule:
 class IntervalRule(Rule):
     def __init__(
         self,
-        lower: float = None,
-        upper: float = None,
+        lower: float = -np.inf,
+        upper: float = np.inf,
         value_name: str = "x",
     ):
         if lower is None and upper is None:
@@ -115,6 +115,13 @@ class IntervalRule(Rule):
         return self.__class__(lower=lower, upper=upper, value_name=self.value_name)
 
     def __str__(self):
+        s = ""
+        if np.isfinite(self.lower):
+            s += f"{self.lower:.2f} < "
+        s += str(self.value_name)
+        if np.isfinite(self.upper):
+            s += f" < {self.upper:.2f}"
+        return s
         if self.lower is not None and self.upper is not None:
             return f"{self.lower:.2f} < {self.value_name} < {self.upper:.2f}"
         elif self.lower is not None and self.upper is None:
@@ -343,7 +350,12 @@ def _discretize(df: pd.DataFrame) -> pd.DataFrame:
 
     # Create derived features
     derived_features = []
+
     for variable, bin_edges in zip(cont_cols, discretizer.bin_edges_):
+        # Ensure open intervals
+        bin_edges = np.array(bin_edges)
+        bin_edges[0], bin_edges[-1] = -np.inf, np.inf
+
         for idx, (lower, upper) in enumerate(zip(bin_edges, bin_edges[1:])):
             rule = IntervalRule(lower, upper, value_name=variable.name)
             v = ExplanatoryVariable(variable, rule, discretization_indices=[idx])

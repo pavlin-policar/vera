@@ -216,6 +216,22 @@ class TestIntervalRule(unittest.TestCase):
         self.assertFalse(r1.can_merge_with(r3))
         self.assertFalse(r3.can_merge_with(r1))
 
+    def test_can_merge_with_open_intervals(self):
+        r1 = data.IntervalRule(upper=6)
+        r2 = data.IntervalRule(lower=5, upper=10)
+        r3 = data.IntervalRule(lower=9)
+
+        self.assertTrue(r1.can_merge_with(r1))
+        self.assertTrue(r2.can_merge_with(r2))
+        self.assertTrue(r3.can_merge_with(r3))
+
+        self.assertTrue(r1.can_merge_with(r2))
+        self.assertTrue(r2.can_merge_with(r1))
+        self.assertTrue(r2.can_merge_with(r3))
+        self.assertTrue(r3.can_merge_with(r2))
+        self.assertFalse(r1.can_merge_with(r3))
+        self.assertFalse(r3.can_merge_with(r1))
+
     def test_merge_with_non_interval_rule(self):
         r1 = data.IntervalRule(0, 5)
         r2 = data.EqualityRule(5)
@@ -260,6 +276,26 @@ class TestIntervalRule(unittest.TestCase):
         self.assertEqual(r4.merge_with(r1), data.IntervalRule(0, 6))
 
         # Disjoint
+        with self.assertRaises(data.IncompatibleRuleError):
+            r1.merge_with(r3)
+        with self.assertRaises(data.IncompatibleRuleError):
+            r3.merge_with(r1)
+
+    def test_merge_open_intervals(self):
+        r1 = data.IntervalRule(upper=6)
+        r2 = data.IntervalRule(lower=5, upper=10)
+        r3 = data.IntervalRule(lower=9)
+
+        self.assertEqual(r1.merge_with(r1), r1)
+        self.assertEqual(r2.merge_with(r2), r2)
+        self.assertEqual(r3.merge_with(r3), r3)
+
+        self.assertEqual(r1.merge_with(r2), data.IntervalRule(upper=10))
+        self.assertEqual(r2.merge_with(r1), data.IntervalRule(upper=10))
+
+        self.assertEqual(r2.merge_with(r3), data.IntervalRule(lower=5))
+        self.assertEqual(r3.merge_with(r2), data.IntervalRule(lower=5))
+
         with self.assertRaises(data.IncompatibleRuleError):
             r1.merge_with(r3)
         with self.assertRaises(data.IncompatibleRuleError):
