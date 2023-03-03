@@ -1,5 +1,5 @@
 from collections import Counter
-from typing import Callable
+from typing import Callable, Any
 
 import contourpy
 import numpy as np
@@ -9,78 +9,136 @@ from KDEpy import FFTKDE
 from scipy.cluster.hierarchy import linkage, fcluster
 
 import embedding_annotation.graph as g
+from embedding_annotation.data import Variable
 
 
 class Density:
-    def __init__(self, name: str, grid: np.ndarray, values: np.ndarray):
-        self.name = name
+    def __init__(self, grid: np.ndarray, values: np.ndarray):
         self.grid = grid
-        self.values = values / np.sum(values)  # sum to one
-        self.scaled_values = values / values.max()  # max=1
+        self.values = values / values.sum()
+        self.values_scaled = values / values.max()
 
-        self._contour_cache = {}
-        self._polygon_cache = {}
-
-    def highest_density_interval(self, hdi: float = 0.95) -> "Density":
-        """Zero out values that are not in the highest density interval."""
-        sorted_vals = sorted(self.values, reverse=True)
-        hdi_idx = np.argwhere(np.cumsum(sorted_vals) >= hdi)[0, 0]
-        density = np.where(self.values > sorted_vals[hdi_idx], self.values, 0)
-        density /= density.sum()  # re-normalize density
-        return Density(f"HDI({self.name}, {hdi:.2f})", self.grid, density)
-
-    def __add__(self, other: "Density"):
-        if not np.allclose(self.grid, other.grid):
-            raise RuntimeError("Grids must match when adding two density objects")
-
-        return CompositeDensity([self.values, other.values])
-
-    def get_xyz(self, scaled: bool = False) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def _get_xyz(self, scaled: bool = False) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         n_grid_points = int(np.sqrt(self.grid.shape[0]))  # always a square grid
         x, y = np.unique(self.grid[:, 0]), np.unique(self.grid[:, 1])
-        vals = [self.values, self.scaled_values][scaled]
+        vals = [self.values, self.values_scaled][scaled]
         z = vals.reshape(n_grid_points, n_grid_points).T
         return x, y, z
 
     def get_contours_at(self, level: float) -> list[np.ndarray]:
-        if level in self._contour_cache:
-            return self._contour_cache[level]
-
-        x, y, z = self.get_xyz(scaled=True)
+        x, y, z = self._get_xyz(scaled=True)
 
         contour_generator = contourpy.contour_generator(
             x, y, z, corner_mask=False, chunk_size=0
         )
-        self._contour_cache[level] = contour_generator.lines(level)
-
-        return self._contour_cache[level]
+        return contour_generator.lines(level)
 
     def get_polygons_at(self, level: float) -> geom.MultiPolygon:
-        if level in self._polygon_cache:
-            return self._polygon_cache[level]
-
-        self._polygon_cache[level] = geom.MultiPolygon(
+        return geom.MultiPolygon(
             [geom.Polygon(c) for c in self.get_contours_at(level)]
         )
 
-        return self._polygon_cache[level]
+    def __add__(self, other: "Density") -> "CompositeDensity":
+        if not isinstance(other, Density):
+            raise ValueError(
+                f"Cannot merge `{self.__class__.__name__}` with object of type "
+                f"`{other.__class__.__name__}`"
+            )
+        return CompositeDensity([self, other])
 
 
 class CompositeDensity(Density):
-    def __init__(self, name: str, densities: list[Density]):
-        self.name = name or " + ".join(d.name for d in densities)
-        self.grid = densities[0].grid
-
-        self.orig_densities = densities
+    def __init__(self, densities: list[Density]):
+        self.base_densities = densities
         joint_density = np.sum(np.vstack([d.values for d in densities]), axis=0)
-        self.values = joint_density / joint_density.sum()
-        self.scaled_values = joint_density / joint_density.max()
-
-        self._contour_cache = {}
-        self._polygon_cache = {}
+        grid = densities[0].grid
+        # TODO: Check grids
+        super().__init__(grid, joint_density)
 
 
-def _density_pdist(densities: dict[str, Density], f: Callable):
+class Region:
+    def __init__(self, feature: Variable, density: Density, level: float = 0.25):
+        self.feature = feature
+        self.level = level
+        self.density = density
+
+        self.polygon = density.get_polygons_at(level)
+
+    @property
+    def region_parts(self):
+        return self.polygon.geoms
+
+    @property
+    def num_parts(self):
+        return len(self.region_parts)
+
+    def __add__(self, other: "Region"):
+        if not np.allclose(self.density.grid, other.density.grid):
+            raise RuntimeError("Grids must match when adding two density objects")
+
+        return CompositeRegion([self.density, other.density])
+
+    def __repr__(self):
+        n = self.num_parts
+        return f"Region: `{str(self.feature)}`, {n} part{'s'[:n^1]}"
+
+    def __eq__(self, other: "Region") -> bool:
+        """We will check for equality only on the basis of the variable."""
+        if not isinstance(other, Region):
+            return False
+        return self.feature == other.feature
+
+    def __hash__(self):
+        """Hashing only on the basis of the variable."""
+        return hash(self.feature)
+
+
+class CompositeRegion(Region):
+    def __init__(self, feature: str, regions: list[Region]):
+        self.name = feature or " + ".join(d.feature for d in regions)
+        self.grid = regions[0].grid
+
+        self._base_densities = regions
+        joint_density = np.sum(np.vstack([d.density.values for d in regions]), axis=0)
+        self._density = joint_density / joint_density.sum()
+        self._density_scaled = joint_density / joint_density.max()
+
+
+def estimate_feature_densities(
+    features: list[Any],
+    embedding: np.ndarray,
+    feature_matrix: pd.DataFrame,
+    log: bool = False,
+    n_grid_points: int = 100,
+    kernel: str = "gaussian",
+) -> dict[Any, Density]:
+    densities = {}
+
+    for feature in features:
+        x = feature_matrix[feature].values
+        if log:
+            x = np.log1p(x)
+
+        kde = FFTKDE(kernel=kernel).fit(embedding, weights=x)
+        grid, points = kde.evaluate(n_grid_points)
+
+        densities[feature] = Density(grid, points)
+
+    return densities
+
+
+def find_regions(
+    densities: dict[Variable, Density],
+    level: float = 0.25,
+) -> list[Region]:
+    """Identify regions for each feature at a specified contour level."""
+    return [
+        Region(variable, density, level=level)
+        for variable, density in densities.items()
+    ]
+
+
+def _density_pdist(densities: dict[str, Region], f: Callable):
     densities = list(densities.values())
 
     n = len(densities)
@@ -94,49 +152,105 @@ def _density_pdist(densities: dict[str, Density], f: Callable):
     return result
 
 
-def intersection_area(d1: Density, d2: Density, level: float = 0.25) -> float:
-    c1: geom.MultiPolygon = d1.get_polygons_at(level)
-    c2: geom.MultiPolygon = d2.get_polygons_at(level)
-    return c1.intersection(c2).area
+def intersection_area(r1: Region, r2: Region) -> float:
+    p1, p2 = r1.polygon, r2.polygon
+    return p1.intersection(p2).area
 
 
-def intersection_over_union(d1: Density, d2: Density, level: float = 0.25) -> float:
-    c1: geom.MultiPolygon = d1.get_polygons_at(level)
-    c2: geom.MultiPolygon = d2.get_polygons_at(level)
-    return c1.intersection(c2).area / c1.union(c2).area
+def intersection_over_union(r1: Region, r2: Region) -> float:
+    p1, p2 = r1.polygon, r2.polygon
+    return p1.intersection(p2).area / p1.union(p2).area
 
 
-def intersection_over_union_dist(d1: Density, d2: Density, level: float = 0.25) -> float:
-    c1: geom.MultiPolygon = d1.get_polygons_at(level)
-    c2: geom.MultiPolygon = d2.get_polygons_at(level)
-    return 1 - (c1.intersection(c2).area / c1.union(c2).area)
+def intersection_over_union_dist(r1: Region, r2: Region) -> float:
+    return 1 - intersection_over_union(r1, r2)
 
 
-def estimate_feature_densities(
-    features: list[str],
-    embedding: np.ndarray,
-    feature_matrix: pd.DataFrame,
-    log: bool = False,
-    n_grid_points: int = 100,
-) -> dict[str, Density]:
-    densities = {}
+def inbetween_convex_hull_ratio(r1: Region, r2: Region) -> float:
+    """Calculate the ratio between the area of the empty space and the polygon
+    areas if we were to compute the convex hull around both p1 and p2"""
+    p1, p2 = r1.polygon, r2.polygon
 
-    for feature in features:
-        x = feature_matrix[feature].values
-        if log:
-            x = np.log1p(x)
+    total = (p1 | p2).convex_hull
+    # Remove convex hulls of p1 and p2 from total area
+    inbetween = total - p1.convex_hull - p2.convex_hull
+    # Re-add p1 and p2 to total_area
+    total = inbetween | p1 | p2
 
-        kde = FFTKDE().fit(embedding, weights=x)
-        grid, points = kde.evaluate(n_grid_points)
+    return inbetween.area / total.area
 
-        densities[feature] = Density(feature, grid, points)
 
-    return densities
+def stage_1_merge_candidates(
+    regions: list[Region],
+    overlap_threshold: float = 0.75,
+):
+    result = []
+    for i in range(len(regions)):
+        for j in range(i + 1, len(regions)):
+            r1, r2 = regions[i], regions[j]
+            if not r1.feature.can_merge_with(r2.feature):
+                continue
+
+            p1, p2 = r1.polygon, r2.polygon
+
+            overlap_ij = p1.intersection(p2).area / p1.area
+            overlap_ji = p2.intersection(p1).area / p2.area
+            overlap = max(overlap_ij, overlap_ji)
+
+            result.append({"region_1": r1, "region_2": r2, "overlap": overlap})
+
+    df = pd.DataFrame(result)
+    df = df.loc[df["overlap"] >= overlap_threshold]
+    return df
+
+
+def stage_1_merge_regions(
+    regions: list[Region],
+    merge_features = None,
+    overlap_threshold: float = 0.75,
+) -> list[Region]:
+    """
+
+    Parameters
+    ----------
+    regions: list[Region]
+        The regions to be merged. This list can contain regions that should not
+        be merged as well.
+    merge_features
+    overlap_threshold: float
+        If merge candidates are provided, this value is ignored.
+
+    Returns
+    -------
+    list[Region]
+        A new list of regions, where similar regions have been merged.
+    """
+    # Create copy, we don't want to modify the original list
+    regions = list(regions)
+
+    def _merge_regions(merge_features: tuple[Region, Region]):
+        """Merge all the regions in the list of tuples."""
+        for r1, r2 in merge_features:
+            new_region = Region(
+                r1.feature.merge_with(r2.feature), r1.density + r2.density
+            )
+            regions.remove(r1), regions.remove(r2), regions.append(new_region)
+
+    if merge_features is not None:
+        # TODO: This won't work,
+        _merge_regions(merge_features)
+    else:
+        while (merge_features := stage_1_merge_candidates(regions, overlap_threshold)).shape[0] > 0:
+            _merge_regions(
+                merge_features[["region_1", "region_2"]].itertuples(index=False)
+            )
+
+    return regions
 
 
 def group_similar_features(
     features: list[str],
-    densities: dict[Density],
+    densities: dict[Region],
     threshold: float = 0.9,
     method: str = "max-cliques",
 ):
@@ -158,7 +272,8 @@ def group_similar_features(
     elif method == "connected-components":
         connected_components = g.connected_components(graph)
         clusts = {
-            f"Cluster {cid}": list(c) for cid, c in enumerate(connected_components, start=1)
+            f"Cluster {cid}": list(c)
+            for cid, c in enumerate(connected_components, start=1)
         }
     else:
         raise ValueError(
@@ -167,9 +282,9 @@ def group_similar_features(
         )
 
     clust_densities = {
-        cid: CompositeDensity(name=cid, densities=[
-            d for d in densities.values() if d.name in features
-        ])
+        cid: CompositeRegion(
+            feature=cid, regions=[d for d in densities.values() if d.feature in features]
+        )
         for cid, features in clusts.items()
     }
 
@@ -212,16 +327,18 @@ def group_similar_features_dendrogram(
     }
 
     clust_densities = {
-        cid: CompositeDensity(name=cid, densities=[
-            d for d in densities.values() if d.name in features
-        ])
+        cid: CompositeRegion(
+            feature=cid, regions=[d for d in densities.values() if d.feature in features]
+        )
         for cid, features in clusts.items()
     }
 
     return clusts, clust_densities
 
 
-def optimize_layout(densities: dict[str, Density], max_overlap: float = 0) -> list[list[str]]:
+def optimize_layout(
+    densities: dict[str, Region], max_overlap: float = 0
+) -> list[list[str]]:
     density_names = list(densities.keys())
 
     overlap = _density_pdist(densities, intersection_area)
