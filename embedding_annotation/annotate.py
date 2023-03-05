@@ -8,8 +8,12 @@ from scipy.cluster.hierarchy import linkage, fcluster
 
 import embedding_annotation.graph as g
 from embedding_annotation.data import Variable
-from embedding_annotation.metrics import _dict_pdist, intersection_area, intersection_over_union, \
-    intersection_over_union_dist
+from embedding_annotation.metrics import (
+    _dict_pdist,
+    intersection_area,
+    intersection_over_union,
+    intersection_over_union_dist,
+)
 from embedding_annotation.region import Density, Region, CompositeRegion
 
 

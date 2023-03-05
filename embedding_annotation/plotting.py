@@ -357,12 +357,7 @@ def plot_region(
         }
         label_kwargs_.update(label_kwargs)
         x, y = largest_polygon.centroid.coords[0]
-        label = ax.text(
-            x,
-            y,
-            region.plot_label,
-            **label_kwargs_
-        )
+        label = ax.text(x, y, region.plot_label, **label_kwargs_)
         if region.plot_detail is not None:
             detail_kwargs_ = {
                 "ha": "center",
@@ -371,12 +366,7 @@ def plot_region(
                 "fontweight": "normal",
             }
             detail_kwargs_.update(detail_kwargs)
-            label = ax.text(
-                x,
-                y,
-                region.plot_detail,
-                **detail_kwargs_
-            )
+            label = ax.text(x, y, region.plot_detail, **detail_kwargs_)
         # label.set_bbox(dict(facecolor="white", alpha=0.75, edgecolor="white"))
 
     if embedding is not None:
