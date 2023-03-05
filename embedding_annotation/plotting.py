@@ -332,18 +332,19 @@ def plot_region(
             Path(np.asarray(geom.exterior.coords)[:, :2]),
             *[Path(np.asarray(ring.coords)[:, :2]) for ring in geom.interiors],
         )
-        # Edge
+        # Fill
         fill_patch = PathPatch(
             path,
-            fill=fill_color,
+            fill=True,
+            color=fill_color,
             alpha=fill_alpha,
         )
         ax.add_patch(fill_patch)
         # Boundary
-        fill_patch = PathPatch(
-            path, fill=None, edgecolor=edge_color, alpha=edge_alpha, lw=lw
+        edge_patch = PathPatch(
+            path, fill=False, edgecolor=edge_color, alpha=edge_alpha, lw=lw
         )
-        ax.add_patch(fill_patch)
+        ax.add_patch(edge_patch)
 
     if draw_label:
         # Draw the lable on the largest polygon in the region
