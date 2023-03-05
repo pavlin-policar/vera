@@ -116,6 +116,10 @@ class IntervalRule(Rule):
         return self.__class__(lower=lower, upper=upper, value_name=self.value_name)
 
     def __str__(self):
+        # Special handling for `x > 5`. Easier to read
+        if np.isfinite(self.lower) and not np.isfinite(self.upper):
+            return f"{self.value_name} > {self.lower:.2f}"
+
         s = ""
         if np.isfinite(self.lower):
             s += f"{self.lower:.2f} < "
@@ -123,12 +127,6 @@ class IntervalRule(Rule):
         if np.isfinite(self.upper):
             s += f" < {self.upper:.2f}"
         return s
-        if self.lower is not None and self.upper is not None:
-            return f"{self.lower:.2f} < {self.value_name} < {self.upper:.2f}"
-        elif self.lower is not None and self.upper is None:
-            return f"{self.lower:.2f} < {self.value_name}"
-        elif self.lower is None and self.upper is not None:
-            return f"x < {self.upper:.2f}"
 
     def __repr__(self):
         attrs = ["lower", "upper", "value_name"]
@@ -165,7 +163,7 @@ class EqualityRule(Rule):
             raise RuntimeError(f"Can't merge with type `{other.__class__.__name__}`")
 
     def __str__(self):
-        return f"{self.value_name} == {repr(self.value)}"
+        return f"{self.value_name} = {repr(self.value)}"
 
     def __repr__(self):
         attrs = ["value", "value_name"]
