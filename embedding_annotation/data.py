@@ -356,6 +356,10 @@ def _discretize(df: pd.DataFrame) -> pd.DataFrame:
     df_cont = df_ingested[cont_cols]
     df_disc = df_ingested[disc_cols]
 
+    # If there are no continuous features to be discretized, return
+    if len(cont_cols) == 0:
+        return df_ingested
+
     # Use k-means for discretization
     from sklearn.preprocessing import KBinsDiscretizer
 

@@ -83,6 +83,11 @@ class TestDiscretize(unittest.TestCase):
         )
         self.df = df
 
+    def test_discretization_with_no_continuous_columns(self):
+        df = self.df[["disc1", "disc2", "disc3"]]
+        df_discretized = data._discretize(df)
+        self.assertEqual(df.shape, df_discretized.shape)
+
     def test_discretization_retains_number_of_samples(self):
         df_discretized = data._discretize(self.df)
         self.assertEqual(
@@ -128,6 +133,11 @@ class TestOneHotEncoding(unittest.TestCase):
             ordered=True,
         )
         self.df = df
+
+    def test_one_hot_encoding_with_no_discrete_columns(self):
+        df = self.df[["cont1", "cont2"]]
+        df_continuized = data._one_hot(df)
+        self.assertEqual(df.shape, df_continuized.shape)
 
     def test_one_hot_encoding_retains_number_of_samples(self):
         df_one_hot = data._one_hot(self.df)
