@@ -203,7 +203,7 @@ class OneOfRule(Rule):
         return self.__class__(new_values, value_name=self.value_name)
 
     def __str__(self):
-        return f"{self.value_name} is in {{{repr(self.value)}}}"
+        return f"{self.value_name} is in {repr(self.values)}"
 
     def __repr__(self):
         attrs = ["values", "value_name"]
@@ -216,7 +216,7 @@ class OneOfRule(Rule):
         return frozenset(self.values) == frozenset(other.values)
 
     def __hash__(self):
-        return hash((self.__class__.__name__, tuple(sorted(tuple(self.value)))))
+        return hash((self.__class__.__name__, tuple(sorted(tuple(self.values)))))
 
 
 class ExplanatoryVariable(DiscreteVariable):
