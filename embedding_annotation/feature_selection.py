@@ -2,13 +2,14 @@ import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 import scipy.stats as stats
-from sklearn.neighbors import kneighbors_graph
+from sklearn.neighbors import kneighbors_graph, radius_neighbors_graph
 
 
 def morans_i(
     embedding: np.ndarray,
     features: pd.DataFrame,
-    k: int = 50,
+    k: int = None,
+    radius: float = None,
     moran_threshold: float = 0.1,
     fdr_threshold: float = 0.01,
     n_jobs: int = 1,
@@ -20,9 +21,27 @@ def morans_i(
         )
 
     # Construct adjacency matrix from the embedding
-    adj = kneighbors_graph(
-        embedding, n_neighbors=k, metric="euclidean", include_self=False, n_jobs=n_jobs
-    )
+    if k is not None:
+        if radius is not None:
+            raise RuntimeError(
+                "Either `k` or `radius` must be provided, but not both!"
+            )
+        adj = kneighbors_graph(
+            embedding, n_neighbors=k, metric="euclidean", include_self=False, n_jobs=n_jobs
+        )
+    elif radius is not None:
+        if k is not None:
+            raise RuntimeError(
+                "Either `k` or `radius` must be provided, but not both!"
+            )
+        adj = radius_neighbors_graph(
+            embedding, radius=radius, metric="euclidean", include_self=False, n_jobs=n_jobs
+        )
+    else:
+        raise RuntimeError(
+            "Either `k` or `radius` must be provided!"
+        )
+
     # Symmetrize matrix
     adj = adj.astype(np.bool)
     adj = adj + adj.T
