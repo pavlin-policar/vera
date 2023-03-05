@@ -22,7 +22,7 @@ class TestIngest(unittest.TestCase):
     def test_ingest_with_raw_dataframe(self):
         result = data.ingest(self.df)
         self.assertTrue(all(isinstance(c, data.Variable) for c in result.columns))
-        self.assertTrue(all(isinstance(c.feature, str) for c in result.columns))
+        self.assertTrue(all(isinstance(c.name, str) for c in result.columns))
 
     def test_ingest_with_mixed_types_dataframe(self):
         df = pd.DataFrame()
@@ -40,13 +40,13 @@ class TestIngest(unittest.TestCase):
 
         result = data.ingest(df)
         self.assertTrue(all(isinstance(c, data.Variable) for c in result.columns))
-        self.assertTrue(all(isinstance(c.feature, str) for c in result.columns))
+        self.assertTrue(all(isinstance(c.name, str) for c in result.columns))
 
     def test_already_ingested_dataframe_does_nothing(self):
         ingested = data.ingest(self.df)
         result = data.ingest(ingested)
         self.assertTrue(all(isinstance(c, data.Variable) for c in result.columns))
-        self.assertTrue(all(isinstance(c.feature, str) for c in result.columns))
+        self.assertTrue(all(isinstance(c.name, str) for c in result.columns))
 
 
 class TestIngestedToPandas(unittest.TestCase):
