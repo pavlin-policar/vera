@@ -15,8 +15,8 @@ from embedding_annotation.region import Density, Region, CompositeRegion
 
 def estimate_feature_densities(
     features: list[Any],
-    embedding: np.ndarray,
     feature_matrix: pd.DataFrame,
+    embedding: np.ndarray,
     log: bool = False,
     n_grid_points: int = 100,
     kernel: str = "gaussian",
