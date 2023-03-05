@@ -24,26 +24,30 @@ class Density:
         z = vals.reshape(n_grid_points, n_grid_points).T
         return x, y, z
 
-    def get_contours_at(self, level: float) -> list[np.ndarray]:
+    def get_polygons_at(self, level: float) -> geom.MultiPolygon:
         x, y, z = self._get_xyz(scaled=True)
 
         contour_generator = contourpy.contour_generator(
-            x, y, z, corner_mask=False, chunk_size=0
+            x,
+            y,
+            z,
+            corner_mask=False,
+            chunk_size=0,
+            fill_type=contourpy.FillType.OuterOffset,
         )
-        return contour_generator.lines(level)
+        contours, chunks = contour_generator.filled(level, 1.01)  # up to >1
 
-    def get_polygons_at(self, level: float) -> geom.MultiPolygon:
-        polygons = [geom.Polygon(c) for c in self.get_contours_at(level)]
-        # Ensure the proper handling of holes
-        # TODO: This probably doesn't work
-        result = polygons[0]
-        for p in polygons[1:]:
-            if result.contains(p):
-                result -= p
-            else:
-                result |= p
+        polygons = []
+        for contour, parts in zip(contours, chunks):
+            geoms = [contour[i:j] for i, j in zip(parts, parts[1:])]
+            # The first chunk is the contour, and should always be present, and
+            # the remaining chunks are the holes
+            polygon, *holes = geoms
 
-        return result
+            polygon = geom.Polygon(polygon, holes=holes)
+            polygons.append(polygon)
+
+        return geom.MultiPolygon(polygons)
 
     def __add__(self, other: "Density") -> "CompositeDensity":
         if not isinstance(other, Density):

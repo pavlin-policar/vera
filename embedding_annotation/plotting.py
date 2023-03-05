@@ -9,10 +9,13 @@ import matplotlib.colors as colors
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import matplotlib.patches as patches
+from matplotlib.path import Path
+from matplotlib.patches import PathPatch
+from matplotlib.collections import PatchCollection
 import numpy as np
 import pandas as pd
 
-from embedding_annotation.annotate import Density, Region
+from embedding_annotation.region import Density, Region
 
 
 def plot_feature(
@@ -323,25 +326,24 @@ def plot_region(
         edge_color = fill_color
 
     for geom in region.polygon.geoms:
-        points = np.array(geom.exterior.coords)
-        # Draw fill
-        polygon = patches.Polygon(
-            points,
-            color=fill_color,
+        # Polygon plotting code taken from
+        # https://stackoverflow.com/questions/55522395/how-do-i-plot-shapely-polygons-and-objects-using-matplotlib
+        path = Path.make_compound_path(
+            Path(np.asarray(geom.exterior.coords)[:, :2]),
+            *[Path(np.asarray(ring.coords)[:, :2]) for ring in geom.interiors],
+        )
+        # Edge
+        fill_patch = PathPatch(
+            path,
+            fill=fill_color,
             alpha=fill_alpha,
-            zorder=1,
         )
-        ax.add_patch(polygon)
-        # Draw boundary line
-        polygon = patches.Polygon(
-            points,
-            fill=False,
-            lw=lw,
-            edgecolor=edge_color,
-            alpha=edge_alpha,
-            zorder=2,
+        ax.add_patch(fill_patch)
+        # Boundary
+        fill_patch = PathPatch(
+            path, fill=None, edgecolor=edge_color, alpha=edge_alpha, lw=lw
         )
-        ax.add_patch(polygon)
+        ax.add_patch(fill_patch)
 
     if draw_label:
         # Draw the lable on the largest polygon in the region
