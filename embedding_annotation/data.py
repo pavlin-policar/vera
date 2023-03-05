@@ -1,3 +1,5 @@
+from collections.abc import Iterable
+
 import pandas as pd
 import numpy as np
 
@@ -44,8 +46,7 @@ class DiscreteVariable(Variable):
         return (
             self.name == other.name
             and self.categories == other.categories
-            and self.ordered
-            and other.ordered
+            and self.ordered == other.ordered
         )
 
     def __hash__(self):
@@ -149,14 +150,19 @@ class EqualityRule(Rule):
         self.value_name = value_name
 
     def can_merge_with(self, other: Rule) -> bool:
-        if not isinstance(other, EqualityRule):
-            return False
-
-        return False
+        return isinstance(other, (EqualityRule, OneOfRule))
 
     def merge_with(self, other: Rule) -> Rule:
         if not self.can_merge_with(other):
             raise IncompatibleRuleError(other)
+
+        if isinstance(other, EqualityRule):
+            new_values = {self.value, other.value}
+            return OneOfRule(new_values, value_name=self.value_name)
+        elif isinstance(other, OneOfRule):
+            return other.merge_with(self)
+        else:
+            raise RuntimeError(f"Can't merge with type `{other.__class__.__name__}`")
 
     def __str__(self):
         return f"{self.value_name} == {repr(self.value)}"
@@ -167,12 +173,50 @@ class EqualityRule(Rule):
         return f"{self.__class__.__name__}({attrs_str})"
 
     def __eq__(self, other):
-        if not isinstance(other, IntervalRule):
+        if not isinstance(other, EqualityRule):
             return False
         return self.value == other.value
 
     def __hash__(self):
         return hash((self.__class__.__name__, self.value))
+
+
+class OneOfRule(Rule):
+    def __init__(self, values: Iterable, value_name: str = "x"):
+        self.values = set(values)
+        self.value_name = value_name
+
+    def can_merge_with(self, other: Rule) -> bool:
+        return isinstance(other, (EqualityRule, OneOfRule))
+
+    def merge_with(self, other: Rule) -> Rule:
+        if not self.can_merge_with(other):
+            raise IncompatibleRuleError(other)
+
+        if isinstance(other, OneOfRule):
+            new_values = self.values | other.values
+        elif isinstance(other, EqualityRule):
+            new_values = self.values | {other.value}
+        else:
+            raise RuntimeError(f"Can't merge with type `{other.__class__.__name__}`")
+
+        return self.__class__(new_values, value_name=self.value_name)
+
+    def __str__(self):
+        return f"{self.value_name} is in {{{repr(self.value)}}}"
+
+    def __repr__(self):
+        attrs = ["values", "value_name"]
+        attrs_str = ", ".join(f"{attr}={repr(getattr(self, attr))}" for attr in attrs)
+        return f"{self.__class__.__name__}({attrs_str})"
+
+    def __eq__(self, other):
+        if not isinstance(other, OneOfRule):
+            return False
+        return frozenset(self.values) == frozenset(other.values)
+
+    def __hash__(self):
+        return hash((self.__class__.__name__, tuple(sorted(tuple(self.value)))))
 
 
 class ExplanatoryVariable(DiscreteVariable):
@@ -210,6 +254,11 @@ class ExplanatoryVariable(DiscreteVariable):
             bins = sorted(list(my_bins | other_bins))
             if all(i == j for i, j in zip(range(bins[0], bins[-1] + 1), bins)):
                 return True
+
+        if all(
+            isinstance(r, (EqualityRule, OneOfRule)) for r in [self.rule, other.rule]
+        ):
+            return True
 
         return False
 

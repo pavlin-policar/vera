@@ -312,6 +312,94 @@ class TestIntervalRule(unittest.TestCase):
             r3.merge_with(r1)
 
 
+class TestEqualityRule(unittest.TestCase):
+    def test_can_merge_with_other_rules(self):
+        r1 = data.EqualityRule(5)
+        r2 = data.IntervalRule(0, 5)
+        r3 = data.OneOfRule({1, 2})
+        r4 = data.EqualityRule(6)
+
+        self.assertTrue(r1.can_merge_with(r1))
+
+        self.assertFalse(r1.can_merge_with(r2))
+        self.assertFalse(r2.can_merge_with(r1))
+
+        self.assertTrue(r1.can_merge_with(r3))
+        self.assertTrue(r3.can_merge_with(r1))
+
+        self.assertTrue(r1.can_merge_with(r4))
+        self.assertTrue(r4.can_merge_with(r1))
+
+    def test_merge_with_incompatible_rules(self):
+        r1 = data.EqualityRule(5)
+        r2 = data.IntervalRule(0, 5)
+
+        with self.assertRaises(data.IncompatibleRuleError):
+            r1.merge_with(r2)
+        with self.assertRaises(data.IncompatibleRuleError):
+            r2.merge_with(r1)
+
+    def test_merge_with_other_equality_rule(self):
+        r1 = data.EqualityRule(3)
+        r2 = data.EqualityRule(5)
+
+        self.assertEqual(r1.merge_with(r2), data.OneOfRule({3, 5}))
+        self.assertEqual(r2.merge_with(r1), data.OneOfRule({3, 5}))
+
+
+class TestOneOfRule(unittest.TestCase):
+    def test_can_merge_with_other_rules(self):
+        r1 = data.OneOfRule({1, 2})
+        r2 = data.IntervalRule(0, 5)
+        r3 = data.EqualityRule(5)
+        r4 = data.EqualityRule({2, 3})
+
+        self.assertTrue(r1.can_merge_with(r1))
+
+        self.assertFalse(r1.can_merge_with(r2))
+        self.assertFalse(r2.can_merge_with(r1))
+
+        self.assertTrue(r1.can_merge_with(r3))
+        self.assertTrue(r3.can_merge_with(r1))
+
+        self.assertTrue(r1.can_merge_with(r4))
+        self.assertTrue(r4.can_merge_with(r1))
+
+    def test_merge_with_incompatible_rules(self):
+        r1 = data.OneOfRule({1, 2})
+        r2 = data.IntervalRule(0, 5)
+
+        with self.assertRaises(data.IncompatibleRuleError):
+            r1.merge_with(r2)
+        with self.assertRaises(data.IncompatibleRuleError):
+            r2.merge_with(r1)
+
+    def test_merge_with_other_oneof_rule(self):
+        r1 = data.OneOfRule({1, 2})
+        r2 = data.OneOfRule({4, 5})
+
+        self.assertEqual(r1.merge_with(r2), data.OneOfRule({1, 2, 4, 5}))
+        self.assertEqual(r2.merge_with(r1), data.OneOfRule({1, 2, 4, 5}))
+
+    def test_merge_with_equality_rule(self):
+        r1 = data.OneOfRule({1, 2})
+        r2 = data.EqualityRule(5)
+
+        self.assertEqual(r1.merge_with(r2), data.OneOfRule({1, 2, 5}))
+        self.assertEqual(r2.merge_with(r1), data.OneOfRule({1, 2, 5}))
+
+    def test_merge_with_ovelapping_values(self):
+        r1 = data.OneOfRule({1, 2, 3})
+        r2 = data.OneOfRule({2, 3, 4})
+        r3 = data.OneOfRule({2, 3})
+
+        self.assertEqual(r1.merge_with(r2), data.OneOfRule({1, 2, 3, 4}))
+        self.assertEqual(r2.merge_with(r1), data.OneOfRule({1, 2, 3, 4}))
+
+        self.assertEqual(r1.merge_with(r3), data.OneOfRule({1, 2, 3}))
+        self.assertEqual(r3.merge_with(r1), data.OneOfRule({1, 2, 3}))
+
+
 class TestExplanatoryVariable(unittest.TestCase):
     def test_can_merge_with_discretized_variables(self):
         x = np.random.normal(0, 1, size=50)
@@ -361,3 +449,49 @@ class TestExplanatoryVariable(unittest.TestCase):
             v1.merge_with(v3)
         with self.assertRaises(ValueError):
             v3.merge_with(v1)
+
+    def test_can_merge_with_one_hot_encoded_features(self):
+        x = ["r", "g", "b"] * 5
+        np.random.shuffle(x)
+
+        df = pd.DataFrame(pd.Categorical(x), columns=["x"])
+        df_encoded = data.generate_explanatory_features(df)
+
+        variables = df_encoded.columns
+        assert len(variables) == 3, "One hot encoding should produce exactly 3 variables"
+        v1, v2, v3 = variables
+
+        self.assertTrue(v1.can_merge_with(v2))
+        self.assertTrue(v1.can_merge_with(v3))
+
+        self.assertTrue(v2.can_merge_with(v1))
+        self.assertTrue(v2.can_merge_with(v3))
+
+        self.assertTrue(v3.can_merge_with(v1))
+        self.assertTrue(v3.can_merge_with(v2))
+
+    def test_merge_with_one_hot_encoded_features(self):
+        x = ["r", "g", "b"] * 5
+        np.random.shuffle(x)
+
+        df = pd.DataFrame(pd.Categorical(x), columns=["x"])
+        df_encoded = data.generate_explanatory_features(df)
+
+        variables = df_encoded.columns
+        assert len(variables) == 3, "One hot encoding should produce exactly 3 variables"
+        v1, v2, v3 = variables
+
+        v1v2 = v1.merge_with(v2)
+        self.assertIsInstance(v1v2, data.ExplanatoryVariable)
+        self.assertEqual(v1v2.rule, data.OneOfRule({v1.rule.value, v2.rule.value}))
+
+        v2v1 = v2.merge_with(v1)
+        self.assertEqual(v1v2, v2v1)
+
+        v1v3 = v1.merge_with(v3)
+        self.assertIsInstance(v1v3, data.ExplanatoryVariable)
+        self.assertEqual(v1v3.rule, data.OneOfRule({v1.rule.value, v3.rule.value}))
+
+        v3v1 = v3.merge_with(v1)
+        self.assertEqual(v1v3, v3v1)
+
