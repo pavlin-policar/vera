@@ -1,14 +1,16 @@
-from collections import Counter
+from collections import Counter, defaultdict
 from typing import Any
 
 import numpy as np
 import pandas as pd
+import scipy.sparse as sp
 from KDEpy import FFTKDE
 from scipy.cluster.hierarchy import linkage, fcluster
 from sklearn import neighbors
 
 import embedding_annotation.graph as g
 from embedding_annotation.data import Variable
+from embedding_annotation.feature_selection import adjacency_matrix
 from embedding_annotation.metrics import (
     _dict_pdist,
     intersection_over_union,
@@ -26,19 +28,25 @@ def feature_merge_candidates(features, adj, merge_threshold=0.05):
     scores = annotate.fs._morans_i(features.values, adj)
     feature_scores = dict(zip(feature_vars, scores))
 
-    candidates = []
-    for i in range(len(feature_vars)):
-        for j in range(i + 1, len(feature_vars)):
-            f1, f2 = feature_vars[i], feature_vars[j]
-            if not f1.can_merge_with(f2):
-                continue
+    feature_groups = defaultdict(list)
+    for f in feature_vars:
+        feature_groups[f.base_variable].append(f)
 
-            # The values should all be binary, one-hot encoded values, so we can
-            # just add them up
-            new_values = np.maximum(features[f1], features[f2])
-            new_score = annotate.fs._morans_i(new_values, adj)
-            gain = new_score / (feature_scores[f1] + feature_scores[f2]) - 1
-            candidates.append({"feature_1": f1, "feature_2": f2, "moran_gain": gain})
+    candidates = []
+    for feature_group in feature_groups.values():
+        for i in range(len(feature_group)):
+            for j in range(i + 1, len(feature_group)):
+                f1, f2 = feature_group[i], feature_group[j]
+                if not f1.can_merge_with(f2):
+                    continue
+                # The values should all be binary, one-hot encoded values, so we can
+                # just add them up
+                new_values = np.maximum(features[f1], features[f2])
+                new_score = annotate.fs._morans_i(new_values, adj)
+                gain = new_score / (feature_scores[f1] + feature_scores[f2]) - 1
+                candidates.append({"feature_1": f1, "feature_2": f2, "moran_gain": gain})
+
+    candidates = pd.DataFrame(candidates)
 
     # If a feature is to be merged with more than one variable, allow only a
     # single merge. Pick the merge with the largest Moran gain
