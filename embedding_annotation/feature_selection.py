@@ -43,7 +43,7 @@ def morans_i(
         )
 
     # Symmetrize matrix
-    adj = adj.astype(np.bool)
+    adj = adj.astype(bool)
     adj = adj + adj.T
     adj = adj.astype(int)
 
@@ -64,7 +64,7 @@ def morans_i(
     df = df.loc[df["fdr"] <= fdr_threshold]
     df = df.loc[df["morans_i"] >= moran_threshold]
 
-    return df
+    return df.reset_index(drop=True)
 
 
 def _morans_i(x: np.ndarray, adj: sp.spmatrix) -> np.ndarray:

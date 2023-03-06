@@ -5,16 +5,81 @@ import numpy as np
 import pandas as pd
 from KDEpy import FFTKDE
 from scipy.cluster.hierarchy import linkage, fcluster
+from sklearn import neighbors
 
 import embedding_annotation.graph as g
 from embedding_annotation.data import Variable
 from embedding_annotation.metrics import (
     _dict_pdist,
-    intersection_area,
     intersection_over_union,
     intersection_over_union_dist,
+    intersection_percentage,
 )
 from embedding_annotation.region import Density, Region, CompositeRegion
+
+
+def feature_merge_candidates(features, adj, merge_threshold=0.05):
+    import embedding_annotation as annotate
+
+    feature_vars = features.columns.tolist()
+
+    scores = annotate.fs._morans_i(features.values, adj)
+    feature_scores = dict(zip(feature_vars, scores))
+
+    merge_candidates = []
+    for i in range(len(feature_vars)):
+        for j in range(i + 1, len(feature_vars)):
+            f1, f2 = feature_vars[i], feature_vars[j]
+            if not f1.can_merge_with(f2):
+                continue
+            merge_candidates.append((f1, f2))
+
+    to_merge = []
+    for f1, f2 in merge_candidates:
+        # The values should all be binary, one-hot encoded values, so we can
+        # just add them up
+        merged_moran = annotate.fs._morans_i(np.maximum(features[f1], features[f2]), adj)
+        moran_gain = merged_moran / (feature_scores[f1] + feature_scores[f2]) - 1
+        to_merge.append({"feature_1": f1, "feature_2": f2, "moran_gain": moran_gain})
+
+    to_merge = pd.DataFrame(to_merge)
+    to_merge = to_merge[to_merge["moran_gain"] >= merge_threshold]
+
+    return to_merge.reset_index(drop=True)
+
+
+def feature_merge(features: pd.DataFrame, embedding: np.ndarray, scale: float, merge_threshold: float = 0.05):
+    adj = radius_neighbors_graph(
+        embedding, radius=scale, metric="euclidean", include_self=False, n_jobs=8
+    )
+
+    # Symmetrize matrix
+    adj = adj.astype(bool)
+    adj = adj + adj.T
+    adj = adj.astype(int)
+
+    # Create copy, we don't want to modify the original list
+    features = features.copy()
+
+    def _merge_regions(merge_features: tuple[Any, Any]):
+        """Merge all the regions in the list of tuples."""
+        # Sometimes, a feature should be merged more than once, so we can't
+        # remove it immediately after merge
+        features_to_remove = set()
+        for f1, f2 in merge_features:
+            features[f1.merge_with(f2)] = np.maximum(features[f1], features[f2])
+            features_to_remove.update([f1, f2])
+
+        features.drop(columns=features_to_remove, inplace=True)
+
+    while (
+        merge_features := feature_merge_candidates(features, adj, merge_threshold)
+    ).shape[0] > 0:
+        _merge_regions(
+            merge_features[["feature_1", "feature_2"]].itertuples(index=False)
+        )
+
+    return features
 
 
 def estimate_feature_densities(
