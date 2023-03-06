@@ -5,6 +5,28 @@ import scipy.stats as stats
 from sklearn.neighbors import kneighbors_graph, radius_neighbors_graph
 
 
+def _gaussian_adjacency_matrix(x, scale):
+    n_samples = x.shape[0]
+
+    nn = neighbors.NearestNeighbors(radius=scale * 3, metric="euclidean")
+    nn.fit(x)
+    neighbor_distances, neighbor_idx = nn.radius_neighbors()
+
+    neighbor_weights = []
+    for row in neighbor_distances:
+        neighbor_weights.append(stats.norm(0, scale).pdf(row))
+
+    indices, weights, indptr = [], [], [0]
+    for idx, w in zip(neighbor_idx, neighbor_weights):
+        assert len(idx) == len(w)
+        indices.extend(idx)
+        weights.extend(w)
+        indptr.append(indptr[-1] + len(idx))
+
+    adj = sp.csr_matrix((weights, indices, indptr), shape=(n_samples, n_samples))
+    return adj
+
+
 def morans_i(
     embedding: np.ndarray,
     features: pd.DataFrame,
