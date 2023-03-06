@@ -26,42 +26,53 @@ def feature_merge_candidates(features, adj, merge_threshold=0.05):
     scores = annotate.fs._morans_i(features.values, adj)
     feature_scores = dict(zip(feature_vars, scores))
 
-    merge_candidates = []
+    candidates = []
     for i in range(len(feature_vars)):
         for j in range(i + 1, len(feature_vars)):
             f1, f2 = feature_vars[i], feature_vars[j]
             if not f1.can_merge_with(f2):
                 continue
-            merge_candidates.append((f1, f2))
 
-    to_merge = []
-    for f1, f2 in merge_candidates:
-        # The values should all be binary, one-hot encoded values, so we can
-        # just add them up
-        merged_moran = annotate.fs._morans_i(np.maximum(features[f1], features[f2]), adj)
-        moran_gain = merged_moran / (feature_scores[f1] + feature_scores[f2]) - 1
-        to_merge.append({"feature_1": f1, "feature_2": f2, "moran_gain": moran_gain})
+            # The values should all be binary, one-hot encoded values, so we can
+            # just add them up
+            new_values = np.maximum(features[f1], features[f2])
+            new_score = annotate.fs._morans_i(new_values, adj)
+            gain = new_score / (feature_scores[f1] + feature_scores[f2]) - 1
+            candidates.append({"feature_1": f1, "feature_2": f2, "moran_gain": gain})
 
-    to_merge = pd.DataFrame(to_merge)
-    to_merge = to_merge[to_merge["moran_gain"] >= merge_threshold]
+    # If a feature is to be merged with more than one variable, allow only a
+    # single merge. Pick the merge with the largest Moran gain
+    candidates = candidates.sort_values("moran_gain", ascending=False)
 
-    return to_merge.reset_index(drop=True)
+    seen, idx_to_drop = set(), []
+    for idx, row in candidates.iterrows():
+        pair = frozenset([row["feature_1"], row["feature_2"]])
+        if any(len(pair & s) > 0 for s in seen):
+            idx_to_drop.append(idx)
+        else:
+            seen.add(pair)
+    candidates.drop(index=idx_to_drop, inplace=True)
+
+    # Keep only the candidas above the merge threshold
+    candidates = candidates[candidates["moran_gain"] >= merge_threshold]
+
+    return candidates.reset_index(drop=True)
 
 
 def feature_merge(features: pd.DataFrame, embedding: np.ndarray, scale: float, merge_threshold: float = 0.05):
-    adj = radius_neighbors_graph(
-        embedding, radius=scale, metric="euclidean", include_self=False, n_jobs=8
-    )
-
-    # Symmetrize matrix
-    adj = adj.astype(bool)
-    adj = adj + adj.T
-    adj = adj.astype(int)
+    # adj = radius_neighbors_graph(
+    #     embedding, radius=scale, metric="euclidean", include_self=False, n_jobs=8
+    # )
+    #
+    # # Symmetrize matrix
+    # adj = adj.astype(bool)
+    # adj = adj + adj.T
+    # adj = adj.astype(int)
 
     # Create copy, we don't want to modify the original list
     features = features.copy()
 
-    def _merge_regions(merge_features: tuple[Any, Any]):
+    def _feature_merge(merge_features: tuple[Any, Any]):
         """Merge all the regions in the list of tuples."""
         # Sometimes, a feature should be merged more than once, so we can't
         # remove it immediately after merge
@@ -75,7 +86,7 @@ def feature_merge(features: pd.DataFrame, embedding: np.ndarray, scale: float, m
     while (
         merge_features := feature_merge_candidates(features, adj, merge_threshold)
     ).shape[0] > 0:
-        _merge_regions(
+        _feature_merge(
             merge_features[["feature_1", "feature_2"]].itertuples(index=False)
         )
 
