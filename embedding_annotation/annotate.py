@@ -1,16 +1,15 @@
-from collections import Counter, defaultdict
+from collections import Counter
 from typing import Any
 
 import numpy as np
 import pandas as pd
-import scipy.sparse as sp
 from KDEpy import FFTKDE
 from scipy.cluster.hierarchy import linkage, fcluster
 from sklearn import neighbors
 
 import embedding_annotation.graph as g
 from embedding_annotation.data import Variable
-from embedding_annotation.feature_selection import adjacency_matrix
+from embedding_annotation.feature_selection import feature_merge
 from embedding_annotation.metrics import (
     _dict_pdist,
     intersection_over_union,
@@ -18,89 +17,6 @@ from embedding_annotation.metrics import (
     intersection_percentage,
 )
 from embedding_annotation.region import Density, Region, CompositeRegion
-
-
-def feature_merge_candidates(features, adj, merge_threshold=0.05):
-    import embedding_annotation as annotate
-
-    feature_vars = features.columns.tolist()
-
-    scores = annotate.fs._morans_i(features.values, adj)
-    feature_scores = dict(zip(feature_vars, scores))
-
-    feature_groups = defaultdict(list)
-    for f in feature_vars:
-        feature_groups[f.base_variable].append(f)
-
-    candidates = []
-    for feature_group in feature_groups.values():
-        for i in range(len(feature_group)):
-            for j in range(i + 1, len(feature_group)):
-                f1, f2 = feature_group[i], feature_group[j]
-                if not f1.can_merge_with(f2):
-                    continue
-                # The values should all be binary, one-hot encoded values, so we can
-                # just add them up
-                new_values = np.maximum(features[f1], features[f2])
-                new_score = annotate.fs._morans_i(new_values, adj)
-                gain = new_score / (feature_scores[f1] + feature_scores[f2]) - 1
-                candidates.append({"feature_1": f1, "feature_2": f2, "moran_gain": gain})
-
-    candidates = pd.DataFrame(candidates)
-
-    # If a feature is to be merged with more than one variable, allow only a
-    # single merge. Pick the merge with the largest Moran gain
-    candidates = candidates.sort_values("moran_gain", ascending=False)
-
-    seen, idx_to_drop = set(), []
-    for idx, row in candidates.iterrows():
-        pair = frozenset([row["feature_1"], row["feature_2"]])
-        if any(len(pair & s) > 0 for s in seen):
-            idx_to_drop.append(idx)
-        else:
-            seen.add(pair)
-    candidates.drop(index=idx_to_drop, inplace=True)
-
-    # Keep only the candidas above the merge threshold
-    candidates = candidates[candidates["moran_gain"] >= merge_threshold]
-
-    return candidates.reset_index(drop=True)
-
-
-def feature_merge(
-    features: pd.DataFrame,
-    embedding: np.ndarray,
-    scale: float,
-    merge_threshold: float = 0.05,
-    adj: sp.csr_matrix = None,
-    n_jobs: int = 1,
-) -> pd.DataFrame:
-    features = features.copy()
-
-    if adj is None:
-        adj = adjacency_matrix(
-            embedding, scale=scale, weighing="gaussian", n_jobs=n_jobs
-        )
-
-    def _feature_merge(merge_features: tuple[Any, Any]):
-        """Merge all the regions in the list of tuples."""
-        # Sometimes, a feature should be merged more than once, so we can't
-        # remove it immediately after merge
-        features_to_remove = set()
-        for f1, f2 in merge_features:
-            features[f1.merge_with(f2)] = np.maximum(features[f1], features[f2])
-            features_to_remove.update([f1, f2])
-
-        features.drop(columns=features_to_remove, inplace=True)
-
-    while (
-        merge_features := feature_merge_candidates(features, adj, merge_threshold)
-    ).shape[0] > 0:
-        _feature_merge(
-            merge_features[["feature_1", "feature_2"]].itertuples(index=False)
-        )
-
-    return features
 
 
 def estimate_feature_densities(

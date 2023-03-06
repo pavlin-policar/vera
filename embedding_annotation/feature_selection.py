@@ -1,7 +1,10 @@
+from collections import defaultdict
+from typing import Any
+
 import numpy as np
 import pandas as pd
-import scipy.sparse as sp
 import scipy.stats as stats
+from scipy import sparse as sp
 from sklearn import neighbors
 from sklearn.neighbors import radius_neighbors_graph
 
@@ -18,14 +21,18 @@ def adjacency_matrix(
         return _uniform_adjacency_matrix(x, scale=scale, n_jobs=n_jobs)
 
 
-def _uniform_adjacency_matrix(x: np.ndarray, scale: float, n_jobs: int = 1) -> sp.csr_matrix:
+def _uniform_adjacency_matrix(
+    x: np.ndarray, scale: float, n_jobs: int = 1
+) -> sp.csr_matrix:
     adj = radius_neighbors_graph(
         x, radius=scale, metric="euclidean", include_self=False, n_jobs=n_jobs
     )
     return adj
 
 
-def _gaussian_adjacency_matrix(x: np.ndarray, scale: float, n_jobs: int = 1) -> sp.csr_matrix:
+def _gaussian_adjacency_matrix(
+    x: np.ndarray, scale: float, n_jobs: int = 1
+) -> sp.csr_matrix:
     n_samples = x.shape[0]
 
     nn = neighbors.NearestNeighbors(
@@ -156,3 +163,86 @@ def FDR(p_values, dependent=False, m=None, ordered=False):
         fdrs[indices] = fdrs.copy()
 
     return fdrs
+
+
+def feature_merge_candidates(features, adj, merge_threshold=0.05):
+    feature_vars = features.columns.tolist()
+
+    scores = _morans_i(features.values, adj)
+    feature_scores = dict(zip(feature_vars, scores))
+
+    feature_groups = defaultdict(list)
+    for f in feature_vars:
+        feature_groups[f.base_variable].append(f)
+
+    candidates = []
+    for feature_group in feature_groups.values():
+        for i in range(len(feature_group)):
+            for j in range(i + 1, len(feature_group)):
+                f1, f2 = feature_group[i], feature_group[j]
+                if not f1.can_merge_with(f2):
+                    continue
+                # The values should all be binary, one-hot encoded values, so we can
+                # just add them up
+                new_values = np.maximum(features[f1], features[f2])
+                new_score = _morans_i(new_values, adj)
+                gain = new_score / (feature_scores[f1] + feature_scores[f2]) - 1
+                candidates.append(
+                    {"feature_1": f1, "feature_2": f2, "moran_gain": gain}
+                )
+
+    candidates = pd.DataFrame(candidates)
+
+    # If a feature is to be merged with more than one variable, allow only a
+    # single merge. Pick the merge with the largest Moran gain
+    candidates = candidates.sort_values("moran_gain", ascending=False)
+
+    seen, idx_to_drop = set(), []
+    for idx, row in candidates.iterrows():
+        pair = frozenset([row["feature_1"], row["feature_2"]])
+        if any(len(pair & s) > 0 for s in seen):
+            idx_to_drop.append(idx)
+        else:
+            seen.add(pair)
+    candidates.drop(index=idx_to_drop, inplace=True)
+
+    # Keep only the candidas above the merge threshold
+    candidates = candidates[candidates["moran_gain"] >= merge_threshold]
+
+    return candidates.reset_index(drop=True)
+
+
+def feature_merge(
+    features: pd.DataFrame,
+    embedding: np.ndarray,
+    scale: float,
+    merge_threshold: float = 0.05,
+    adj: sp.csr_matrix = None,
+    n_jobs: int = 1,
+) -> pd.DataFrame:
+    features = features.copy()
+
+    if adj is None:
+        adj = adjacency_matrix(
+            embedding, scale=scale, weighting="gaussian", n_jobs=n_jobs
+        )
+
+    def _feature_merge(merge_features: tuple[Any, Any]):
+        """Merge all the regions in the list of tuples."""
+        # Sometimes, a feature should be merged more than once, so we can't
+        # remove it immediately after merge
+        features_to_remove = set()
+        for f1, f2 in merge_features:
+            features[f1.merge_with(f2)] = np.maximum(features[f1], features[f2])
+            features_to_remove.update([f1, f2])
+
+        features.drop(columns=features_to_remove, inplace=True)
+
+    while (
+        merge_features := feature_merge_candidates(features, adj, merge_threshold)
+    ).shape[0] > 0:
+        _feature_merge(
+            merge_features[["feature_1", "feature_2"]].itertuples(index=False)
+        )
+
+    return features
