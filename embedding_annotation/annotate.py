@@ -298,11 +298,11 @@ def group_similar_features_dendrogram(
 
 
 def optimize_layout(
-    regions: dict[Any, Region], max_overlap: float = 0
+    regions: dict[Any, Region], max_overlap: float = 0.05
 ) -> list[list[Any]]:
     density_names = list(regions.keys())
 
-    overlap = _dict_pdist(regions, intersection_area)
+    overlap = _dict_pdist(regions, intersection_percentage)
     graph = g.similarities_to_graph(overlap, threshold=max_overlap)
     node_labels = dict(enumerate(density_names))
     graph = g.label_nodes(graph, node_labels)
@@ -310,3 +310,12 @@ def optimize_layout(
     independent_sets = g.independent_sets(graph)
 
     return independent_sets
+
+
+def kth_median_distance(x: np.ndarray, k_neighbors: int):
+    """Find the median distance of each point's k-th nearest neighbor."""
+    nn = neighbors.NearestNeighbors(n_neighbors=k_neighbors)
+    nn.fit(x)
+    distances, indices = nn.kneighbors()
+
+    return np.median(distances[:, -1])

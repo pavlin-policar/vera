@@ -24,12 +24,20 @@ def intersection_area(r1: Region, r2: Region) -> float:
     return p1.intersection(p2).area
 
 
+def intersection_percentage(r1: Region, r2: Region) -> float:
+    """The maximum percentage of the overlap between two regions."""
+    p1, p2 = r1.polygon, r2.polygon
+    i = p1.intersection(p2).area
+    return max(i / p1.area, i / p2.area)
+
+
 def intersection_over_union(r1: Region, r2: Region) -> float:
     p1, p2 = r1.polygon, r2.polygon
     return p1.intersection(p2).area / p1.union(p2).area
 
 
 def intersection_over_union_dist(r1: Region, r2: Region) -> float:
+    """Like intersection over union, but in distance form."""
     return 1 - intersection_over_union(r1, r2)
 
 
