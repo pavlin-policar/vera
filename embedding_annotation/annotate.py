@@ -67,18 +67,20 @@ def feature_merge_candidates(features, adj, merge_threshold=0.05):
     return candidates.reset_index(drop=True)
 
 
-def feature_merge(features: pd.DataFrame, embedding: np.ndarray, scale: float, merge_threshold: float = 0.05):
-    # adj = radius_neighbors_graph(
-    #     embedding, radius=scale, metric="euclidean", include_self=False, n_jobs=8
-    # )
-    #
-    # # Symmetrize matrix
-    # adj = adj.astype(bool)
-    # adj = adj + adj.T
-    # adj = adj.astype(int)
-
-    # Create copy, we don't want to modify the original list
+def feature_merge(
+    features: pd.DataFrame,
+    embedding: np.ndarray,
+    scale: float,
+    merge_threshold: float = 0.05,
+    adj: sp.csr_matrix = None,
+    n_jobs: int = 1,
+) -> pd.DataFrame:
     features = features.copy()
+
+    if adj is None:
+        adj = adjacency_matrix(
+            embedding, scale=scale, weighing="gaussian", n_jobs=n_jobs
+        )
 
     def _feature_merge(merge_features: tuple[Any, Any]):
         """Merge all the regions in the list of tuples."""
@@ -331,9 +333,9 @@ def optimize_layout(
     return independent_sets
 
 
-def kth_median_distance(x: np.ndarray, k_neighbors: int):
+def kth_neighbor_distance(x: np.ndarray, k_neighbors: int, n_jobs: int = 1) -> float:
     """Find the median distance of each point's k-th nearest neighbor."""
-    nn = neighbors.NearestNeighbors(n_neighbors=k_neighbors)
+    nn = neighbors.NearestNeighbors(n_neighbors=k_neighbors, n_jobs=n_jobs)
     nn.fit(x)
     distances, indices = nn.kneighbors()
 

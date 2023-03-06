@@ -2,14 +2,35 @@ import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 import scipy.stats as stats
-from sklearn.neighbors import kneighbors_graph, radius_neighbors_graph
+from sklearn import neighbors
+from sklearn.neighbors import radius_neighbors_graph
 
 
-def _gaussian_adjacency_matrix(x, scale):
+def adjacency_matrix(
+    x: np.ndarray,
+    scale: float,
+    weighting: str = "gaussian",
+    n_jobs: int = 1,
+) -> sp.csr_matrix:
+    if weighting == "gaussian":
+        return _gaussian_adjacency_matrix(x, scale=scale, n_jobs=n_jobs)
+    elif weighting == "uniform":
+        return _uniform_adjacency_matrix(x, scale=scale, n_jobs=n_jobs)
+
+
+def _uniform_adjacency_matrix(x: np.ndarray, scale: float, n_jobs: int = 1) -> sp.csr_matrix:
+    adj = radius_neighbors_graph(
+        x, radius=scale, metric="euclidean", include_self=False, n_jobs=n_jobs
+    )
+    return adj
+
+
+def _gaussian_adjacency_matrix(x: np.ndarray, scale: float, n_jobs: int = 1) -> sp.csr_matrix:
     n_samples = x.shape[0]
 
-    nn = neighbors.NearestNeighbors(radius=scale * 3, metric="euclidean")
-    nn.fit(x)
+    nn = neighbors.NearestNeighbors(
+        radius=scale * 3, metric="euclidean", n_jobs=n_jobs
+    ).fit(x)
     neighbor_distances, neighbor_idx = nn.radius_neighbors()
 
     neighbor_weights = []
@@ -30,11 +51,11 @@ def _gaussian_adjacency_matrix(x, scale):
 def morans_i(
     embedding: np.ndarray,
     features: pd.DataFrame,
-    k: int = None,
-    radius: float = None,
+    scale: float = None,
     moran_threshold: float = 0.1,
     fdr_threshold: float = 0.01,
     n_jobs: int = 1,
+    adj: sp.csr_matrix = None,
 ) -> pd.DataFrame:
     if embedding.shape[0] != features.shape[0]:
         raise ValueError(
@@ -43,31 +64,10 @@ def morans_i(
         )
 
     # Construct adjacency matrix from the embedding
-    if k is not None:
-        if radius is not None:
-            raise RuntimeError(
-                "Either `k` or `radius` must be provided, but not both!"
-            )
-        adj = kneighbors_graph(
-            embedding, n_neighbors=k, metric="euclidean", include_self=False, n_jobs=n_jobs
+    if adj is None:
+        adj = adjacency_matrix(
+            embedding, scale=scale, weighting="gaussian", n_jobs=n_jobs
         )
-    elif radius is not None:
-        if k is not None:
-            raise RuntimeError(
-                "Either `k` or `radius` must be provided, but not both!"
-            )
-        adj = radius_neighbors_graph(
-            embedding, radius=radius, metric="euclidean", include_self=False, n_jobs=n_jobs
-        )
-    else:
-        raise RuntimeError(
-            "Either `k` or `radius` must be provided!"
-        )
-
-    # Symmetrize matrix
-    adj = adj.astype(bool)
-    adj = adj + adj.T
-    adj = adj.astype(int)
 
     # Calculate Moran's I and the associated p-values
     scores = _morans_i(features.values, adj)
