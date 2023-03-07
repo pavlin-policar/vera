@@ -129,8 +129,6 @@ def plot_features(
     fig, ax = plt.subplots(nrows=n_rows, ncols=per_row, figsize=(figwidth, figheight))
 
     ax = ax.ravel()
-    for axi in ax:
-        axi.set_axis_off()
 
     if isinstance(features, dict):
         features_ = features.values()
@@ -255,6 +253,7 @@ def plot_feature_density(
         ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_)
 
     # Hide ticks and axis
+    ax.set_xticks([]), ax.set_yticks([])
     ax.axis("equal")
 
     return ax
@@ -283,8 +282,6 @@ def plot_feature_densities(
     if len(features) == 1:
         ax = np.array([ax])
     ax = ax.ravel()
-    for axi in ax:
-        axi.set_axis_off()
 
     for idx, feature in enumerate(features):
         ax[idx].set_title(feature)
@@ -380,6 +377,7 @@ def plot_region(
         ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_)
 
     # Hide ticks and axis
+    ax.set_xticks([]), ax.set_yticks([])
     ax.axis("equal")
 
     return ax
@@ -412,8 +410,6 @@ def plot_regions(
     if len(regions) == 1:
         ax = np.array([ax])
     ax = ax.ravel()
-    for axi in ax:
-        axi.set_axis_off()
 
     for idx, feature in enumerate(features):
         ax[idx].set_title(str(feature))
