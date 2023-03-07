@@ -59,7 +59,7 @@ def morans_i(
     embedding: np.ndarray,
     features: pd.DataFrame,
     scale: float = None,
-    moran_threshold: float = 0.1,
+    threshold: float = 0.1,
     fdr_threshold: float = 0.01,
     n_jobs: int = 1,
     adj: sp.csr_matrix = None,
@@ -78,20 +78,20 @@ def morans_i(
 
     # Calculate Moran's I and the associated p-values
     scores = _morans_i(features.values, adj)
-    pvals = _analytical_pvals(scores, features.values, adj)
+    pvals = _moran_analytical_pvals(scores, features.values, adj)
     pvals_adjusted = FDR(pvals, m=features.shape[1])
 
     # Perform filtering and prepare final result
     df = pd.DataFrame.from_dict(
         {
             "feature": features.columns,
-            "morans_i": scores,
+            "score": scores,
             "pvalue": pvals,
             "fdr": pvals_adjusted,
         },
     )
     df = df.loc[df["fdr"] <= fdr_threshold]
-    df = df.loc[df["morans_i"] >= moran_threshold]
+    df = df.loc[df["score"] >= threshold]
 
     return df.reset_index(drop=True)
 
@@ -111,7 +111,65 @@ def _morans_i(x: np.ndarray, adj: sp.spmatrix) -> np.ndarray:
     return N / W * n / (d + 1e-16)
 
 
-def _analytical_pvals(
+def gearys_c(
+    embedding: np.ndarray,
+    features: pd.DataFrame,
+    scale: float = None,
+    threshold: float = 1,
+    n_jobs: int = 1,
+    adj: sp.csr_matrix = None,
+) -> pd.DataFrame:
+    if embedding.shape[0] != features.shape[0]:
+        raise ValueError(
+            f"The number of samples in the feature matrix ({features.shape[0]}) does"
+            f" not match the number of samples in the embedding ({embedding.shape[0]})."
+        )
+
+    # Construct adjacency matrix from the embedding
+    if adj is None:
+        adj = adjacency_matrix(
+            embedding, scale=scale, weighting="gaussian", n_jobs=n_jobs
+        )
+
+    # Calculate Geary's C
+    scores = _gearys_c(features.values, adj)
+
+    # Perform filtering and prepare final result
+    df = pd.DataFrame.from_dict(
+        {
+            "feature": features.columns,
+            "score": scores,
+        },
+    )
+    df = df.loc[df["score"] <= threshold]
+
+    return df.reset_index(drop=True)
+
+
+def _gearys_c(x: np.ndarray, adj: sp.spmatrix) -> np.ndarray:
+    assert (
+        x.shape[0] == adj.shape[0]
+    ), "Feature matrix dimensions do not match adjacency matrix."
+
+    N = x.shape[0]
+    W = adj.sum()
+
+    if x.ndim == 1:
+        x = x[:, None]
+
+    n = []
+    for j in range(x.shape[1]):
+        xj = x[:, j]
+        s = np.sum(adj.multiply((xj[:, None] - xj[None, :]) ** 2))
+        n.append(s)
+    n = np.array(n)
+
+    d = np.sum((x - np.mean(x, axis=0)) ** 2, axis=0)
+
+    return (N - 1) / (2 * W) * n / (d + 1e-16)
+
+
+def _moran_analytical_pvals(
     scores: np.ndarray, x: np.ndarray, adj: sp.spmatrix
 ) -> np.ndarray:
     N = float(x.shape[0])
@@ -165,10 +223,25 @@ def FDR(p_values, dependent=False, m=None, ordered=False):
     return fdrs
 
 
-def feature_merge_candidates(features, adj, merge_threshold=0.05):
+def merge_candidates(features, adj, min_gain_pct=0.05, score="moran"):
     feature_vars = features.columns.tolist()
 
-    scores = _morans_i(features.values, adj)
+    def _moran_gain(f1_score, f2_score, merged_score):
+        return merged_score / np.maximum(f1_score, f2_score) - 1
+
+    def _geary_gain(f1_score, f2_score, merged_score):
+        return np.minimum(f1_score, f2_score) / merged_score - 1
+
+    if score == "moran":
+        score_func = _morans_i
+        gain_func = _moran_gain
+    elif score == "geary":
+        score_func = _gearys_c
+        gain_func = _geary_gain
+    else:
+        raise ValueError("`score` must be either `moran` or `geary`!")
+
+    scores = score_func(features.values, adj)
     feature_scores = dict(zip(feature_vars, scores))
 
     feature_groups = defaultdict(list)
@@ -182,20 +255,18 @@ def feature_merge_candidates(features, adj, merge_threshold=0.05):
                 f1, f2 = feature_group[i], feature_group[j]
                 if not f1.can_merge_with(f2):
                     continue
-                # The values should all be binary, one-hot encoded values, so we can
-                # just add them up
                 new_values = np.maximum(features[f1], features[f2])
-                new_score = _morans_i(new_values, adj)
-                gain = new_score / (feature_scores[f1] + feature_scores[f2]) - 1
+                new_score = score_func(new_values, adj)
+                gain = gain_func(feature_scores[f1], feature_scores[f2], new_score)
                 candidates.append(
-                    {"feature_1": f1, "feature_2": f2, "moran_gain": gain}
+                    {"feature_1": f1, "feature_2": f2, "gain": gain}
                 )
 
     candidates = pd.DataFrame(candidates)
 
     # If a feature is to be merged with more than one variable, allow only a
-    # single merge. Pick the merge with the largest Moran gain
-    candidates = candidates.sort_values("moran_gain", ascending=False)
+    # single merge. Pick the merge with the largest gain
+    candidates = candidates.sort_values("gain", ascending=False)
 
     seen, idx_to_drop = set(), []
     for idx, row in candidates.iterrows():
@@ -207,7 +278,7 @@ def feature_merge_candidates(features, adj, merge_threshold=0.05):
     candidates.drop(index=idx_to_drop, inplace=True)
 
     # Keep only the candidas above the merge threshold
-    candidates = candidates[candidates["moran_gain"] >= merge_threshold]
+    candidates = candidates[candidates["gain"] >= min_gain_pct]
 
     return candidates.reset_index(drop=True)
 
@@ -216,9 +287,10 @@ def feature_merge(
     features: pd.DataFrame,
     embedding: np.ndarray,
     scale: float,
-    merge_threshold: float = 0.05,
+    min_pct_gain: float = 0.05,
     adj: sp.csr_matrix = None,
     n_jobs: int = 1,
+    score: str = "moran",
 ) -> pd.DataFrame:
     features = features.copy()
 
@@ -239,7 +311,7 @@ def feature_merge(
         features.drop(columns=features_to_remove, inplace=True)
 
     while (
-        merge_features := feature_merge_candidates(features, adj, merge_threshold)
+        merge_features := merge_candidates(features, adj, min_pct_gain, score)
     ).shape[0] > 0:
         _feature_merge(
             merge_features[["feature_1", "feature_2"]].itertuples(index=False)
