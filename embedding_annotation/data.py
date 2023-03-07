@@ -393,7 +393,7 @@ def ingested_to_pandas(df: pd.DataFrame) -> pd.DataFrame:
     return df_new
 
 
-def _discretize(df: pd.DataFrame) -> pd.DataFrame:
+def _discretize(df: pd.DataFrame, n_bins: int = 5) -> pd.DataFrame:
     """Discretize all continuous variables in the data frame."""
     df_ingested = ingest(df)
 
@@ -410,7 +410,9 @@ def _discretize(df: pd.DataFrame) -> pd.DataFrame:
     # Use k-means for discretization
     from sklearn.preprocessing import KBinsDiscretizer
 
-    discretizer = KBinsDiscretizer(n_bins=5, strategy="kmeans", encode="onehot-dense")
+    discretizer = KBinsDiscretizer(
+        n_bins=n_bins, strategy="kmeans", encode="onehot-dense",
+    )
     x_discretized = discretizer.fit_transform(df_cont.values)
 
     # Create derived features
