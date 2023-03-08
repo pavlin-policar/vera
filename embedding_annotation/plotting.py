@@ -177,6 +177,10 @@ def plot_features(
 
         plt.tight_layout()
 
+    # Hide remaining axes
+    for idx in range(idx + 1, n_rows * per_row):
+        ax[idx].axis("off")
+
     if return_ax:
         return fig, ax
 
@@ -296,6 +300,10 @@ def plot_feature_densities(
             contourf_kwargs=contourf_kwargs,
             scatter_kwargs=scatter_kwargs,
         )
+
+    # Hide remaining axes
+    for idx in range(idx + 1, n_rows * per_row):
+        ax[idx].axis("off")
 
     if return_ax:
         return fig, ax
@@ -428,6 +436,10 @@ def plot_regions(
             label_kwargs=label_kwargs,
             detail_kwargs=detail_kwargs,
         )
+
+    # Hide remaining axes
+    for idx in range(idx + 1, n_rows * per_row):
+        ax[idx].axis("off")
 
     if return_ax:
         return fig, ax
