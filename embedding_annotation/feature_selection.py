@@ -150,20 +150,15 @@ def _gearys_c(x: np.ndarray, adj: sp.spmatrix) -> np.ndarray:
     assert (
         x.shape[0] == adj.shape[0]
     ), "Feature matrix dimensions do not match adjacency matrix."
+    if x.ndim == 1:
+        x = x[:, np.newaxis]
+    adj = adj.tocoo()
 
     N = x.shape[0]
     W = adj.sum()
 
-    if x.ndim == 1:
-        x = x[:, None]
-
-    n = []
-    for j in range(x.shape[1]):
-        xj = x[:, j]
-        s = np.sum(adj.multiply((xj[:, None] - xj[None, :]) ** 2))
-        n.append(s)
-    n = np.array(n)
-
+    diff = (x[adj.row, :] - x[adj.col, :]) ** 2
+    n = adj.data.dot(diff)
     d = np.sum((x - np.mean(x, axis=0)) ** 2, axis=0)
 
     return (N - 1) / (2 * W) * n / (d + 1e-16)
@@ -256,7 +251,7 @@ def merge_candidates(features, adj, min_gain_pct=0.05, score="moran"):
                 if not f1.can_merge_with(f2):
                     continue
                 new_values = np.maximum(features[f1], features[f2])
-                new_score = score_func(new_values, adj)
+                new_score = score_func(new_values.values, adj)
                 gain = gain_func(feature_scores[f1], feature_scores[f2], new_score)
                 candidates.append(
                     {"feature_1": f1, "feature_2": f2, "gain": gain}
