@@ -392,9 +392,9 @@ def plot_region(
 
 
 def plot_regions(
-    features: list[Any],
-    regions: dict[Any, Region],
+    regions: dict[Any, Region] | list[Region],
     embedding: np.ndarray = None,
+    features: list[Any] = None,
     per_row: int = 4,
     figwidth: int = 24,
     return_ax: bool = False,
@@ -408,6 +408,11 @@ def plot_regions(
     label_kwargs: dict = {},
     detail_kwargs: dict = {},
 ):
+    if isinstance(regions, dict):
+        if features is not None:
+            regions = [regions[k] for k in features]
+        regions = list(regions.values())
+
     n_rows = len(regions) // per_row
     if len(regions) % per_row > 0:
         n_rows += 1
@@ -419,11 +424,11 @@ def plot_regions(
         ax = np.array([ax])
     ax = ax.ravel()
 
-    for idx, feature in enumerate(features):
-        ax[idx].set_title(str(feature))
+    for idx, region in enumerate(regions):
+        ax[idx].set_title(str(region.feature))
 
         plot_region(
-            regions[feature],
+            region,
             embedding,
             ax=ax[idx],
             fill_color=fill_color,
