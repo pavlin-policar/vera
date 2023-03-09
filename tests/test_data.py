@@ -311,6 +311,38 @@ class TestIntervalRule(unittest.TestCase):
         with self.assertRaises(data.IncompatibleRuleError):
             r3.merge_with(r1)
 
+    def test_contains_non_interval_rule(self):
+        r1 = data.IntervalRule(0, 5)
+        r2 = data.EqualityRule(5)
+        r3 = data.OneOfRule({1, 2, 3})
+
+        self.assertFalse(r1.contains(r2))
+        self.assertFalse(r1.contains(r3))
+
+    def test_contains(self):
+        r1 = data.IntervalRule(lower=5, upper=10)
+        r2 = data.IntervalRule(lower=7, upper=8)
+        self.assertTrue(r1.contains(r1))
+
+        self.assertTrue(r1.contains(r2))
+        self.assertFalse(r2.contains(r1))
+
+        r1 = data.IntervalRule(lower=5, upper=10)
+        r2 = data.IntervalRule(upper=6)
+        r3 = data.IntervalRule(lower=9)
+        self.assertFalse(r1.contains(r2))
+        self.assertFalse(r1.contains(r3))
+        self.assertFalse(r2.contains(r1))
+        self.assertFalse(r3.contains(r1))
+
+        r1 = data.IntervalRule(lower=5, upper=10)
+        r2 = data.IntervalRule(lower=-50)
+        r3 = data.IntervalRule(upper=50)
+        self.assertTrue(r2.contains(r1))
+        self.assertTrue(r3.contains(r1))
+        self.assertFalse(r1.contains(r2))
+        self.assertFalse(r1.contains(r3))
+
 
 class TestEqualityRule(unittest.TestCase):
     def test_can_merge_with_other_rules(self):
@@ -345,6 +377,25 @@ class TestEqualityRule(unittest.TestCase):
 
         self.assertEqual(r1.merge_with(r2), data.OneOfRule({3, 5}))
         self.assertEqual(r2.merge_with(r1), data.OneOfRule({3, 5}))
+
+    def test_contains_non_equality_rule(self):
+        r1 = data.EqualityRule(5)
+        r2 = data.IntervalRule(0, 5)
+        r3 = data.OneOfRule({1, 2, 3})
+
+        self.assertFalse(r1.contains(r2))
+        self.assertFalse(r1.contains(r3))
+
+    def test_contains(self):
+        r1 = data.EqualityRule(5)
+        r2 = data.EqualityRule(5)
+        r3 = data.EqualityRule(2)
+
+        self.assertTrue(r1.contains(r1))
+        self.assertTrue(r1.contains(r2))
+        self.assertTrue(r2.contains(r1))
+        self.assertFalse(r1.contains(r3))
+        self.assertFalse(r3.contains(r1))
 
 
 class TestOneOfRule(unittest.TestCase):
@@ -398,6 +449,35 @@ class TestOneOfRule(unittest.TestCase):
 
         self.assertEqual(r1.merge_with(r3), data.OneOfRule({1, 2, 3}))
         self.assertEqual(r3.merge_with(r1), data.OneOfRule({1, 2, 3}))
+
+    def test_contains_non_oneof_rule(self):
+        r1 = data.OneOfRule({1, 2, 3})
+        r2 = data.EqualityRule(2)
+        r3 = data.IntervalRule(0, 5)
+
+        self.assertTrue(r1.contains(r2))
+        self.assertFalse(r1.contains(r3))
+
+    def test_contains(self):
+        r1 = data.OneOfRule({1, 2, 3})
+        r2 = data.OneOfRule({1, 2})
+
+        self.assertTrue(r1.contains(r1))
+        self.assertTrue(r1.contains(r2))
+
+        r1 = data.OneOfRule({1, 2, 3})
+        r2 = data.OneOfRule({2, 3, 4})
+        self.assertFalse(r1.contains(r2))
+
+        r1 = data.OneOfRule({1, 2, 3})
+        r2 = data.OneOfRule({7, 8, 9})
+        self.assertFalse(r1.contains(r2))
+
+        r1 = data.OneOfRule({1, 2, 3})
+        r2 = data.EqualityRule(2)
+        r3 = data.EqualityRule(10)
+        self.assertTrue(r1.contains(r2))
+        self.assertFalse(r1.contains(r3))
 
 
 class TestExplanatoryVariable(unittest.TestCase):

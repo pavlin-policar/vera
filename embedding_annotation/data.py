@@ -77,6 +77,10 @@ class Rule:
     def merge_with(self, other: "Rule") -> "Rule":
         raise NotImplementedError()
 
+    def contains(self, other: "Rule") -> "Rule":
+        """Check if a rule is completely encompassed by this rule."""
+        raise NotImplementedError()
+
 
 class IntervalRule(Rule):
     def __init__(
@@ -114,6 +118,12 @@ class IntervalRule(Rule):
         lower = min(self.lower, other.lower)
         upper = max(self.upper, other.upper)
         return self.__class__(lower=lower, upper=upper, value_name=self.value_name)
+
+    def contains(self, other: Rule) -> Rule:
+        if not isinstance(other, IntervalRule):
+            return False
+        return other.lower >= self.lower and other.upper <= self.upper
+
 
     def __str__(self):
         # Special handling for `x > 5`. Easier to read
@@ -162,6 +172,11 @@ class EqualityRule(Rule):
         else:
             raise RuntimeError(f"Can't merge with type `{other.__class__.__name__}`")
 
+    def contains(self, other: Rule) -> Rule:
+        if not isinstance(other, EqualityRule):
+            return False
+        return self.value == other.value
+
     def __str__(self):
         return f"{self.value_name} = {repr(self.value)}"
 
@@ -199,6 +214,15 @@ class OneOfRule(Rule):
             raise RuntimeError(f"Can't merge with type `{other.__class__.__name__}`")
 
         return self.__class__(new_values, value_name=self.value_name)
+
+    def contains(self, other: Rule) -> Rule:
+        if not isinstance(other, (OneOfRule, EqualityRule)):
+            return False
+        if isinstance(other, EqualityRule):
+            values = {other.value}
+        else:
+            values = other.values
+        return all(v in self.values for v in values)
 
     def __str__(self):
         return f"{self.value_name} is in {repr(self.values)}"
