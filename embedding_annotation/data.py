@@ -1,6 +1,6 @@
 import operator
 from collections.abc import Iterable
-from functools import reduce
+from functools import reduce, cached_property
 
 import pandas as pd
 import numpy as np
@@ -296,8 +296,6 @@ class DerivedVariable(Variable):
 
 
 class ExplanatoryVariable(DerivedVariable):
-    __slots__ = DerivedVariable.__slots__ + ["values", "region", "embedding", "scale"]
-
     def __init__(
         self,
         base_variable: Variable,
@@ -367,13 +365,26 @@ class ExplanatoryVariable(DerivedVariable):
     def contained_variables(self):
         return [self]
 
+    @cached_property
+    def contained_samples(self):
+        return self.region.get_contained_samples(self.embedding)
+
+    @cached_property
+    def num_contained_samples(self) -> int:
+        return len(self.contained_samples)
+
+    @cached_property
+    def pct_contained_samples(self) -> float:
+        return self.num_contained_samples / self.embedding.shape[0]
+
+    @cached_property
+    def purity(self):
+        # We only have binary features, so we can just compute the mean
+        return np.mean(self.values[list(self.contained_samples)])
+
 
 class CompositeExplanatoryVariable(ExplanatoryVariable):
-    def __init__(
-        self,
-        variables: list[ExplanatoryVariable],
-        rule: Rule,
-    ):
+    def __init__(self, variables: list[ExplanatoryVariable], rule: Rule):
         self.base_variables = variables
 
         v0 = variables[0]
