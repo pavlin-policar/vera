@@ -1,12 +1,9 @@
 import operator
 from functools import reduce
-from typing import Any
 
 import contourpy
 import numpy as np
 from shapely import geometry as geom
-
-from embedding_annotation.data import Variable
 
 
 class Density:
@@ -49,13 +46,28 @@ class Density:
 
         return geom.MultiPolygon(polygons)
 
-    def __add__(self, other: "Density") -> "CompositeDensity":
-        if not isinstance(other, Density):
-            raise ValueError(
-                f"Cannot merge `{self.__class__.__name__}` with object of type "
-                f"`{other.__class__.__name__}`"
-            )
-        return CompositeDensity([self, other])
+    # def __add__(self, other: "Density") -> "CompositeDensity":
+    #     if not isinstance(other, Density):
+    #         raise ValueError(
+    #             f"Cannot merge `{self.__class__.__name__}` with object of type "
+    #             f"`{other.__class__.__name__}`"
+    #         )
+    #     return CompositeDensity([self, other])
+
+    @classmethod
+    def from_embedding(
+        cls,
+        embedding: np.ndarray,
+        values: np.ndarray,
+        n_grid_points: int = 100,
+        kernel: str = "gaussian",
+        bw: float = 1,
+    ):
+        from KDEpy import FFTKDE
+        kde = FFTKDE(kernel=kernel, bw=bw).fit(embedding, weights=values)
+        grid, points = kde.evaluate(n_grid_points)
+
+        return cls(grid, points)
 
 
 class CompositeDensity(Density):
@@ -71,75 +83,127 @@ class CompositeDensity(Density):
             )
 
 
-class Region:
-    def __init__(self, feature: Variable, density: Density, level: float = 0.25):
-        self.feature = feature
-        self.level = level
-        self.density = density
+# class RegionEmbeddingMixin:
+#     def __init__(self, embedding: np.ndarray, features: pd.DataFrame):
+#         # These members should already be set from the base class, and are here
+#         # only for type hints
+#         self.polygon: geom.MultiPolygon
+#
+#         self.embedding = embedding
+#
+#         # We're only going to store the column that is relevant to us
+#         self.feature_values = None
+#         if isinstance(features, pd.DataFrame):
+#             if self.feature in features.columns:
+#                 self.feature_values = features[self.feature].values
+#         elif isinstance(features, pd.Series):
+#             self.feature_values = features.values
+#         elif isinstance(features, np.ndarray):
+#             assert features.ndim == 1
+#             self.feature_values = features
+#         # Once feature values have been set, ensure they match the embedding shape
+#         if self.feature_values is not None and self.embedding is not None:
+#             if self.feature_values.shape[0] != self.embedding.shape[0]:
+#                 raise ValueError(
+#                     f"The number of samples in the feature values "
+#                     f"({self.feature_values.shape[0]}) does not match the "
+#                     f"number of samples in the embedding "
+#                     f"({self.embedding.shape[0]})."
+#                 )
+#
+#         # Compute metrics from the embedding and features
+#         self.contained_samples = None
+#         self.purity = None
+#         if self.embedding is not None:
+#             self.contained_samples = self.get_contained_samples(self.embedding)
+#             if self.feature_values is not None:
+#                 # We only have binary features, so we can just compute the mean
+#                 self.purity = np.mean(self.feature_values[list(self.contained_samples)])
+#
+#     @property
+#     def num_contained_samples(self) -> int:
+#         if self.contained_samples is not None:
+#             return len(self.contained_samples)
+#
+#     @property
+#     def pct_contained_samples(self) -> float:
+#         if self.contained_samples is not None:
+#             assert self.embedding is not None
+#             return self.num_contained_samples / self.embedding.shape[0]
 
-        self.polygon = self._ensure_multipolygon(density.get_polygons_at(level))
+
+class Region:
+    def __init__(self, density: Density, polygon: geom.MultiPolygon):
+        self.density = density
+        self.polygon = self._ensure_multipolygon(polygon)
 
     @property
-    def region_parts(self):
+    def region_parts(self) -> list[geom.Polygon]:
         return self.polygon.geoms
 
     @property
-    def num_parts(self):
+    def num_parts(self) -> int:
         return len(self.region_parts)
 
-    @property
-    def plot_label(self) -> str:
-        """The main label to be shown in a plot."""
-        return str(self.feature)
-
-    @property
-    def plot_detail(self) -> str:
-        """Region details to be shown in a plot."""
-        return None
+    # @property
+    # def plot_label(self) -> str:
+    #     """The main label to be shown in a plot."""
+    #     return str(self.feature)
+    #
+    # @property
+    # def plot_detail(self) -> str:
+    #     """Region details to be shown in a plot."""
+    #     return None
 
     @staticmethod
-    def _ensure_multipolygon(polygon):
+    def _ensure_multipolygon(polygon) -> geom.MultiPolygon:
         if not isinstance(polygon, geom.MultiPolygon):
             polygon = geom.MultiPolygon([polygon])
         return polygon
 
-    def __add__(self, other: "Region"):
-        if not np.allclose(self.density.grid, other.density.grid):
-            raise RuntimeError("Grids must match when adding two density objects")
+    def get_contained_samples(self, embedding: np.ndarray) -> set[int]:
+        """Get the indices of the contained samples within the region.s"""
+        embedding_points = [geom.Point(p) for p in embedding]
 
-        return CompositeRegion(
-            [self.feature, other.feature], [self.density, other.density]
-        )
+        contained_indices = set()
+        for i in range(len(embedding_points)):
+            if self.polygon.contains(embedding_points[i]):
+                contained_indices.add(i)
+
+        return contained_indices
+
+    def __add__(self, other: "Region") -> "CompositeRegion":
+        if not isinstance(other, Region):
+            raise NotImplementedError()
+        return CompositeRegion([self, other])
 
     def __repr__(self):
         n = self.num_parts
-        return f"Region: `{str(self.feature)}`, {n} part{'s'[:n^1]}"
+        return f"{self.__class__.__name__}: {n} part{'s'[:n^1]}"
 
-    def __eq__(self, other: "Region") -> bool:
-        """We will check for equality only on the basis of the variable."""
-        if not isinstance(other, Region):
-            return False
-        return self.feature == other.feature
+    @classmethod
+    def from_density(cls, density: Density, level: float = 0.25):
+        polygon = cls._ensure_multipolygon(density.get_polygons_at(level))
+        return cls(density, polygon)
 
-    def __hash__(self):
-        """Hashing only on the basis of the variable."""
-        return hash(self.feature)
-
-    @property
-    def contained_features(self) -> list[Variable]:
-        """Return all the features contained within this region"""
-        return [self.feature]
+    # def __eq__(self, other: "Region") -> bool:
+    #     """We will check for equality only on the basis of the variable."""
+    #     if not isinstance(other, Region):
+    #         return False
+    #     return self.feature == other.feature
+    #
+    # def __hash__(self):
+    #     """Hashing only on the basis of the variable."""
+    #     return hash(self.feature)
+    #
+    # @property
+    # def contained_features(self) -> list[Variable]:
+    #     """Return all the features contained within this region"""
+    #     return [self.feature]
 
 
 class CompositeRegion(Region):
-    def __init__(self, feature: str | list[Any], regions: list[Region]):
-        self.feature = feature or " + ".join(str(r.feature) for r in regions)
-        self.level = regions[0].level
-        if not all(r.level == self.level for r in regions):
-            raise RuntimeError(
-                "All regions must have the same level when constructing "
-                "composite region!"
-            )
+    def __init__(self, regions: list[Region]):
         self.density = CompositeDensity([r.density for r in regions])
 
         self.base_regions = regions
@@ -147,14 +211,29 @@ class CompositeRegion(Region):
         polygon = reduce(operator.or_, [r.polygon for r in regions])
         self.polygon = self._ensure_multipolygon(polygon)
 
-    @property
-    def plot_label(self) -> str:
-        return str(self.feature)
+        # # Ensure the embedding is the same in all regions
+        # embedding = regions[0].embedding
+        # for r in regions[1:]:
+        #     if not np.allclose(r.embedding, embedding):
+        #         raise RuntimeError(
+        #             "All regions must have the same underlying embedding when "
+        #             "constructing composite region!"
+        #         )
 
-    @property
-    def plot_detail(self) -> str:
-        return "\n".join(str(f) for f in self.contained_features)
+        # Compute the new feature values
+        # feature_values = np.vstack([r.feature_values for r in regions])
+        # new_feature_values = np.max(feature_values, axis=0)
 
-    @property
-    def contained_features(self) -> list[Variable]:
-        return reduce(operator.add, [r.contained_features for r in self.base_regions])
+        # RegionEmbeddingMixin.__init__(self, embedding, new_feature_values)
+
+    # @property
+    # def plot_label(self) -> str:
+    #     return str(self.feature)
+    #
+    # @property
+    # def plot_detail(self) -> str:
+    #     return "\n".join(str(f) for f in self.contained_features)
+    #
+    # @property
+    # def contained_features(self) -> list[Variable]:
+    #     return reduce(operator.add, [r.contained_features for r in self.base_regions])

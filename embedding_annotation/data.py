@@ -1,15 +1,18 @@
+import operator
 from collections.abc import Iterable
+from functools import reduce
 
 import pandas as pd
 import numpy as np
 
+from embedding_annotation.region import Region, CompositeRegion
+
 
 class Variable:
+    __slots__ = ["name"]
+
     def __init__(self, name: str):
         self.name = name
-
-    def __str__(self):
-        return f"{self.__class__.__name__}(name={repr(self.name)})"
 
     @property
     def is_discrete(self):
@@ -19,8 +22,18 @@ class Variable:
     def is_continuous(self):
         return isinstance(self, ContinuousVariable)
 
+    @property
+    def is_derived(self):
+        return isinstance(self, DerivedVariable)
+
     def __str__(self):
         return str(self.name)
+
+    def __repr__(self):
+        attrs_str = ", ".join(
+            f"{attr}={repr(getattr(self, attr))}" for attr in self.__slots__
+        )
+        return f"{self.__class__.__name__}({attrs_str})"
 
     def __eq__(self, other):
         if not isinstance(other, self.__class__):
@@ -28,17 +41,16 @@ class Variable:
         return self.name == other.name
 
     def __hash__(self):
-        raise NotImplementedError()
+        return hash((self.__class__.__name__, self.name))
 
 
 class DiscreteVariable(Variable):
-    def __init__(self, name, values: list, ordered: bool = False):
-        super().__init__(name)
-        self.categories = values
-        self.ordered = ordered
+    __slots__ = Variable.__slots__ + ["categories", "ordered"]
 
-    def __repr__(self):
-        return f"{self.__class__.__name__}(name={repr(self.name)}, values={repr(self.categories)}, ordered={self.ordered})"
+    def __init__(self, name, categories: list, ordered: bool = False):
+        super().__init__(name)
+        self.categories = tuple(categories)
+        self.ordered = ordered
 
     def __eq__(self, other):
         if not isinstance(other, DiscreteVariable):
@@ -51,19 +63,12 @@ class DiscreteVariable(Variable):
 
     def __hash__(self):
         return hash(
-            (self.__class__.__name__, self.name, tuple(self.categories), self.ordered)
+            (self.__class__.__name__, self.name, self.categories, self.ordered)
         )
 
 
 class ContinuousVariable(Variable):
-    def __init__(self, name):
-        super().__init__(name)
-
-    def __repr__(self):
-        return f"{self.__class__.__name__}(name={repr(self.name)})"
-
-    def __hash__(self):
-        return hash((self.__class__.__name__, self.name))
+    pass
 
 
 class IncompatibleRuleError(ValueError):
@@ -138,7 +143,7 @@ class IntervalRule(Rule):
         return s
 
     def __repr__(self):
-        attrs = ["lower", "upper", "value_name"]
+        attrs = ["lower", "upper"]
         attrs_str = ", ".join(f"{attr}={repr(getattr(self, attr))}" for attr in attrs)
         return f"{self.__class__.__name__}({attrs_str})"
 
@@ -180,7 +185,7 @@ class EqualityRule(Rule):
         return f"{self.value_name} = {repr(self.value)}"
 
     def __repr__(self):
-        attrs = ["value", "value_name"]
+        attrs = ["value"]
         attrs_str = ", ".join(f"{attr}={repr(getattr(self, attr))}" for attr in attrs)
         return f"{self.__class__.__name__}({attrs_str})"
 
@@ -227,7 +232,7 @@ class OneOfRule(Rule):
         return f"{self.value_name} is in {repr(self.values)}"
 
     def __repr__(self):
-        attrs = ["values", "value_name"]
+        attrs = ["values"]
         attrs_str = ", ".join(f"{attr}={repr(getattr(self, attr))}" for attr in attrs)
         return f"{self.__class__.__name__}({attrs_str})"
 
@@ -240,18 +245,81 @@ class OneOfRule(Rule):
         return hash((self.__class__.__name__, tuple(sorted(tuple(self.values)))))
 
 
-class ExplanatoryVariable(DiscreteVariable):
+class DerivedVariable(Variable):
+    __slots__ = Variable.__slots__ + ["base_variable", "rule"]
+
     def __init__(
         self,
         base_variable: Variable,
         rule: Rule,
     ):
+        self.name = str(rule)
         self.base_variable = base_variable
         self.rule = rule
 
-    @property
-    def name(self):
+    def can_merge_with(self, other: "DerivedVariable") -> bool:
+        if not isinstance(other, DerivedVariable):
+            return False
+        # The variables must match on their base variable
+        if self.base_variable != other.base_variable:
+            return False
+
+        return self.rule.can_merge_with(other.rule)
+
+    def merge_with(self, other: "DerivedVariable") -> "DerivedVariable":
+        if not isinstance(other, DerivedVariable):
+            raise ValueError(
+                f"Cannot merge `{self.__class__.__name__}` with  `{other}`!"
+            )
+
+        if not self.can_merge_with(other):
+            raise ValueError(
+                f"Cannot merge derived variables `{self}` and {other}!"
+            )
+
+        merged_rule = self.rule.merge_with(other.rule)
+
+        return self.__class__(base_variable=self.base_variable, rule=merged_rule)
+
+    def __str__(self):
         return str(self.rule)
+
+    def __eq__(self, other):
+        if not isinstance(other, DerivedVariable):
+            return False
+        return (
+            self.base_variable == other.base_variable and self.rule == other.rule
+        )
+
+    def __hash__(self):
+        return hash((self.__class__.__name__, self.base_variable, self.rule))
+
+
+class ExplanatoryVariable(DerivedVariable):
+    __slots__ = DerivedVariable.__slots__ + ["values", "region", "embedding", "scale"]
+
+    def __init__(
+        self,
+        base_variable: Variable,
+        rule: Rule,
+        values: np.ndarray,
+        region: Region,
+        embedding: np.ndarray,
+        scale: float,
+    ):
+        super().__init__(base_variable, rule)
+
+        self.values = values
+        self.region = region
+        self.embedding = embedding
+        self.scale = scale
+
+        if self.values.shape[0] != self.embedding.shape[0]:
+            raise ValueError(
+                f"The number of samples in the feature values "
+                f"({self.values.shape[0]}) does not match the number "
+                f"of samples in the embedding ({self.embedding.shape[0]})."
+            )
 
     def can_merge_with(self, other: "ExplanatoryVariable") -> bool:
         if not isinstance(other, ExplanatoryVariable):
@@ -260,7 +328,13 @@ class ExplanatoryVariable(DiscreteVariable):
         if self.base_variable != other.base_variable:
             return False
 
-        return self.rule.can_merge_with(other.rule)
+        if not self.rule.can_merge_with(other.rule):
+            return False
+
+        if not np.allclose(self.embedding, other.embedding):
+            return False
+
+        return True
 
     def merge_with(self, other: "ExplanatoryVariable") -> "ExplanatoryVariable":
         if not isinstance(other, ExplanatoryVariable):
@@ -275,25 +349,61 @@ class ExplanatoryVariable(DiscreteVariable):
 
         merged_rule = self.rule.merge_with(other.rule)
 
-        return self.__class__(base_variable=self.base_variable, rule=merged_rule)
+        return CompositeExplanatoryVariable([self, other], merged_rule)
 
     def __repr__(self):
-        attrs = ["base_variable", "rule"]
-        attrs_str = ", ".join(f"{attr}={repr(getattr(self, attr))}" for attr in attrs)
+        attrs = [
+            ("base_variable", repr(self.base_variable)),
+            ("rule", repr(self.rule)),
+            ("values", "[...]"),
+            ("region", repr(self.region)),
+            ("embedding", "[[...]]"),
+            ("scale", repr(self.scale)),
+        ]
+        attrs_str = ", ".join(f"{k}={v}" for k, v in attrs)
         return f"{self.__class__.__name__}({attrs_str})"
 
-    def __str__(self):
-        return str(self.rule)
+    @property
+    def contained_variables(self):
+        return [self]
 
-    def __eq__(self, other):
-        if not isinstance(other, ExplanatoryVariable):
-            return False
-        return (
-            self.base_variable == other.base_variable and self.rule == other.rule
+
+class CompositeExplanatoryVariable(ExplanatoryVariable):
+    def __init__(
+        self,
+        variables: list[ExplanatoryVariable],
+        rule: Rule,
+    ):
+        self.base_variables = variables
+
+        v0 = variables[0]
+        base_variable = v0.base_variable
+        if not all(v.base_variable == base_variable for v in variables[1:]):
+            raise RuntimeError(
+                "Cannot merge Explanatory variables which do not share the "
+                "same base variable!"
+            )
+
+        feature_values = np.vstack([v.values for v in variables])
+        merged_values = np.max(feature_values, axis=0)
+        merged_region = CompositeRegion([v.region for v in variables])
+
+        embedding = v0.embedding
+        if not all(np.allclose(v.embedding, embedding) for v in variables[1:]):
+            raise RuntimeError(
+                "Cannot merge Explanatory variables which do not share the "
+                "same embedding!"
+            )
+
+        scale = v0.scale
+
+        super().__init__(
+            base_variable, rule, merged_values, merged_region, embedding, scale
         )
 
-    def __hash__(self):
-        return hash((self.__class__.__name__, self.base_variable, self.rule))
+    @property
+    def contained_variables(self):
+        return reduce(operator.add, [v.contained_variables for v in self.base_variables])
 
 
 def _pd_dtype_to_variable(col_name: str | Variable, col_type) -> Variable:
@@ -315,7 +425,7 @@ def _pd_dtype_to_variable(col_name: str | Variable, col_type) -> Variable:
     if pd.api.types.is_categorical_dtype(col_type):
         variable = DiscreteVariable(
             col_name,
-            values=col_type.categories.tolist(),
+            categories=col_type.categories.tolist(),
             ordered=col_type.ordered,
         )
     elif pd.api.types.is_numeric_dtype(col_type):
@@ -332,7 +442,7 @@ def ingest(df: pd.DataFrame) -> pd.DataFrame:
     """Convert a pandas DataFrame to a DataFrame the library can understand.
 
     This really just creates a copy of the data frame, but swaps out the columns
-    for instances of our `Variable` objects, so we know which explanatory
+    for instances of our `Variable` objects, so we know which derived
     variables can be merged later on.
 
     Parameters
@@ -354,7 +464,7 @@ def ingested_to_pandas(df: pd.DataFrame) -> pd.DataFrame:
     df_new = pd.DataFrame(index=df.index)
 
     for column in df.columns:
-        if isinstance(column, ExplanatoryVariable):
+        if isinstance(column, DerivedVariable):
             df_new[column.name] = pd.Categorical(df[column])
         elif isinstance(column, DiscreteVariable):
             col = pd.Categorical(
