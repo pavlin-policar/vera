@@ -2,19 +2,18 @@ import warnings
 from collections.abc import Iterable
 from itertools import cycle
 from textwrap import wrap
-from typing import Optional, Union, Dict, Any
+from typing import Any
 
 import matplotlib.colors as clr
 import matplotlib.colors as colors
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
-import matplotlib.patches as patches
 from matplotlib.path import Path
 from matplotlib.patches import PathPatch
-from matplotlib.collections import PatchCollection
 import numpy as np
 import pandas as pd
 
+from embedding_annotation.data import ExplanatoryVariable
 from embedding_annotation.region import Density, Region
 
 
@@ -215,8 +214,8 @@ def hue_colormap(
     return cmap
 
 
-def plot_feature_density(
-    density: Density,
+def plot_density(
+    density: ExplanatoryVariable | Region | Density,
     embedding: np.ndarray = None,
     levels: int | np.ndarray = 5,
     skip_first: bool = True,
@@ -263,10 +262,8 @@ def plot_feature_density(
     return ax
 
 
-def plot_feature_densities(
-    features: list[Any],
-    densities: dict[Any, Density],
-    embedding: np.ndarray = None,
+def plot_densities(
+    variables: list[ExplanatoryVariable],
     levels: int | np.ndarray = 5,
     skip_first: bool = True,
     per_row: int = 4,
@@ -276,23 +273,23 @@ def plot_feature_densities(
     contourf_kwargs: dict = {},
     scatter_kwargs: dict = {},
 ):
-    n_rows = len(features) // per_row
-    if len(features) % per_row > 0:
+    n_rows = len(variables) // per_row
+    if len(variables) % per_row > 0:
         n_rows += 1
 
     figheight = figwidth / per_row * n_rows
     fig, ax = plt.subplots(nrows=n_rows, ncols=per_row, figsize=(figwidth, figheight))
 
-    if len(features) == 1:
+    if len(variables) == 1:
         ax = np.array([ax])
     ax = ax.ravel()
 
-    for idx, feature in enumerate(features):
-        ax[idx].set_title(feature)
+    for idx, variable in enumerate(variables):
+        ax[idx].set_title(str(variable))
 
-        plot_feature_density(
-            densities[feature],
-            embedding,
+        plot_density(
+            variable.region.density,
+            embedding=variable.embedding,
             levels=levels,
             skip_first=skip_first,
             ax=ax[idx],
@@ -310,8 +307,7 @@ def plot_feature_densities(
 
 
 def plot_region(
-    region: Region,
-    embedding: np.ndarray = None,
+    variable: ExplanatoryVariable,
     ax=None,
     fill_color="tab:blue",
     edge_color=None,
@@ -319,6 +315,8 @@ def plot_region(
     edge_alpha=1,
     lw=1,
     draw_label=False,
+    highlight_members=True,
+    member_color="tab:red",
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
     detail_kwargs: dict = {},
@@ -330,7 +328,7 @@ def plot_region(
     if edge_color is None:
         edge_color = fill_color
 
-    for geom in region.polygon.geoms:
+    for geom in variable.region.polygon.geoms:
         # Polygon plotting code taken from
         # https://stackoverflow.com/questions/55522395/how-do-i-plot-shapely-polygons-and-objects-using-matplotlib
         path = Path.make_compound_path(
@@ -353,7 +351,7 @@ def plot_region(
 
     if draw_label:
         # Draw the lable on the largest polygon in the region
-        largest_polygon = max(region.polygon.geoms, key=lambda x: x.area)
+        largest_polygon = max(variable.polygon.geoms, key=lambda x: x.area)
         label_kwargs_ = {
             "ha": "center",
             "va": "bottom",
@@ -362,8 +360,8 @@ def plot_region(
         }
         label_kwargs_.update(label_kwargs)
         x, y = largest_polygon.centroid.coords[0]
-        label = ax.text(x, y, region.plot_label, **label_kwargs_)
-        if region.plot_detail is not None:
+        label = ax.text(x, y, variable.plot_label, **label_kwargs_)
+        if variable.plot_detail is not None:
             detail_kwargs_ = {
                 "ha": "center",
                 "va": "top",
@@ -371,18 +369,28 @@ def plot_region(
                 "fontweight": "normal",
             }
             detail_kwargs_.update(detail_kwargs)
-            label = ax.text(x, y, region.plot_detail, **detail_kwargs_)
+            label = ax.text(x, y, variable.plot_detail, **detail_kwargs_)
         # label.set_bbox(dict(facecolor="white", alpha=0.75, edgecolor="white"))
 
-    if embedding is not None:
-        scatter_kwargs_ = {
-            "zorder": 1,
-            "c": "k",
-            "s": 6,
-            "alpha": 0.1,
-        }
-        scatter_kwargs_.update(scatter_kwargs)
-        ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_)
+    # Plot embedding scatter plot
+    embedding = variable.embedding
+    scatter_kwargs_ = {
+        "zorder": 1,
+        "c": "#999999",
+        "s": 6,
+        "alpha": 1,
+    }
+    scatter_kwargs_.update(scatter_kwargs)
+    if highlight_members:
+        other_color = scatter_kwargs_.get("c")
+        c = np.array([other_color, member_color])[variable.values.astype(int)]
+        scatter_kwargs_["c"] = c
+        scatter_kwargs_["alpha"] = 1
+
+    ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_)
+
+    # Set title
+    ax.set_title(str(variable))
 
     # Hide ticks and axis
     ax.set_xticks([]), ax.set_yticks([])
@@ -392,9 +400,7 @@ def plot_region(
 
 
 def plot_regions(
-    regions: dict[Any, Region] | list[Region],
-    embedding: np.ndarray = None,
-    features: list[Any] = None,
+    variables: list[ExplanatoryVariable],
     per_row: int = 4,
     figwidth: int = 24,
     return_ax: bool = False,
@@ -404,32 +410,26 @@ def plot_regions(
     edge_alpha=1,
     lw=1,
     draw_labels=False,
+    highlight_members=True,
+    member_color="tab:red",
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
     detail_kwargs: dict = {},
 ):
-    if isinstance(regions, dict):
-        if features is not None:
-            regions = [regions[k] for k in features]
-        regions = list(regions.values())
-
-    n_rows = len(regions) // per_row
-    if len(regions) % per_row > 0:
+    n_rows = len(variables) // per_row
+    if len(variables) % per_row > 0:
         n_rows += 1
 
     figheight = figwidth / per_row * n_rows
     fig, ax = plt.subplots(nrows=n_rows, ncols=per_row, figsize=(figwidth, figheight))
 
-    if len(regions) == 1:
+    if len(variables) == 1:
         ax = np.array([ax])
     ax = ax.ravel()
 
-    for idx, region in enumerate(regions):
-        ax[idx].set_title(str(region.feature))
-
+    for idx, variable in enumerate(variables):
         plot_region(
-            region,
-            embedding,
+            variable,
             ax=ax[idx],
             fill_color=fill_color,
             edge_color=edge_color,
@@ -437,6 +437,8 @@ def plot_regions(
             edge_alpha=edge_alpha,
             lw=lw,
             draw_label=draw_labels,
+            highlight_members=highlight_members,
+            member_color=member_color,
             scatter_kwargs=scatter_kwargs,
             label_kwargs=label_kwargs,
             detail_kwargs=detail_kwargs,
