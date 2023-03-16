@@ -42,9 +42,9 @@ def _discretize(df: pd.DataFrame, n_bins: int = 5) -> pd.DataFrame:
         bin_edges = np.array(bin_edges)
         bin_edges[0], bin_edges[-1] = -np.inf, np.inf
 
-        for idx, (lower, upper) in enumerate(zip(bin_edges, bin_edges[1:])):
+        for lower, upper in zip(bin_edges, bin_edges[1:]):
             rule = IntervalRule(lower, upper, value_name=variable.name)
-            v = ExplanatoryVariable(variable, rule, discretization_indices=[idx])
+            v = ExplanatoryVariable(variable, rule)
             derived_features.append(v)
 
     assert len(derived_features) == len(

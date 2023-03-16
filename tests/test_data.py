@@ -514,7 +514,6 @@ class TestExplanatoryVariable(unittest.TestCase):
         self.assertIsInstance(v1v2, data.ExplanatoryVariable)
         self.assertEqual(v1v2.rule.lower, v1.rule.lower)
         self.assertEqual(v1v2.rule.upper, v2.rule.upper)
-        self.assertEqual(v1v2.discretization_indices, [0, 1])
 
         v2v1 = v2.merge_with(v1)
         self.assertEqual(v1v2, v2v1)
@@ -524,7 +523,7 @@ class TestExplanatoryVariable(unittest.TestCase):
         v_combined_2 = v_combined.merge_with(v2)
         self.assertEqual(v_combined, v_combined_2)
 
-        # Test that we can't merge non-neighboirng discretization indices
+        # Test that we can't merge non-neighboring bins
         with self.assertRaises(ValueError):
             v1.merge_with(v3)
         with self.assertRaises(ValueError):

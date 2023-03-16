@@ -124,7 +124,6 @@ class IntervalRule(Rule):
             return False
         return other.lower >= self.lower and other.upper <= self.upper
 
-
     def __str__(self):
         # Special handling for `x > 5`. Easier to read
         if np.isfinite(self.lower) and not np.isfinite(self.upper):
@@ -246,17 +245,9 @@ class ExplanatoryVariable(DiscreteVariable):
         self,
         base_variable: Variable,
         rule: Rule,
-        discretization_indices: list[int] = None,
     ):
         self.base_variable = base_variable
         self.rule = rule
-        self.discretization_indices = discretization_indices
-        if self.discretization_indices is not None:
-            self.discretization_indices = sorted(self.discretization_indices)
-
-    @property
-    def is_discretized(self):
-        return self.discretization_indices is not None
 
     @property
     def name(self):
@@ -269,20 +260,7 @@ class ExplanatoryVariable(DiscreteVariable):
         if self.base_variable != other.base_variable:
             return False
 
-        if self.is_discretized and other.is_discretized:
-            # The merged discretization bins must form a contiguous sequence
-            my_bins = set(self.discretization_indices)
-            other_bins = set(other.discretization_indices)
-            bins = sorted(list(my_bins | other_bins))
-            if all(i == j for i, j in zip(range(bins[0], bins[-1] + 1), bins)):
-                return True
-
-        if all(
-            isinstance(r, (EqualityRule, OneOfRule)) for r in [self.rule, other.rule]
-        ):
-            return True
-
-        return False
+        return self.rule.can_merge_with(other.rule)
 
     def merge_with(self, other: "ExplanatoryVariable") -> "ExplanatoryVariable":
         if not isinstance(other, ExplanatoryVariable):
@@ -295,53 +273,27 @@ class ExplanatoryVariable(DiscreteVariable):
                 f"Cannot merge explanatory variables `{self}` and {other}!"
             )
 
-        assert self.rule.can_merge_with(other.rule)
         merged_rule = self.rule.merge_with(other.rule)
 
-        if self.is_discretized:
-            assert other.is_discretized
-            discretization_indices = set(
-                self.discretization_indices + other.discretization_indices
-            )
-            discretization_indices = sorted(list(discretization_indices))
-        else:
-            discretization_indices = None
-
-        return self.__class__(
-            base_variable=self.base_variable,
-            rule=merged_rule,
-            discretization_indices=discretization_indices,
-        )
+        return self.__class__(base_variable=self.base_variable, rule=merged_rule)
 
     def __repr__(self):
-        attrs = ["base_variable", "rule", "discretization_indices"]
+        attrs = ["base_variable", "rule"]
         attrs_str = ", ".join(f"{attr}={repr(getattr(self, attr))}" for attr in attrs)
         return f"{self.__class__.__name__}({attrs_str})"
 
     def __str__(self):
-        return f"{self.rule}"
+        return str(self.rule)
 
     def __eq__(self, other):
         if not isinstance(other, ExplanatoryVariable):
             return False
         return (
-            self.base_variable == other.base_variable
-            and self.rule == other.rule
-            and self.discretization_indices == other.discretization_indices
+            self.base_variable == other.base_variable and self.rule == other.rule
         )
 
     def __hash__(self):
-        discretization_indices = self.discretization_indices
-        if discretization_indices is not None:
-            discretization_indices = tuple(discretization_indices)
-        return hash(
-            (
-                self.__class__.__name__,
-                self.base_variable,
-                self.rule,
-                discretization_indices,
-            )
-        )
+        return hash((self.__class__.__name__, self.base_variable, self.rule))
 
 
 def _pd_dtype_to_variable(col_name: str | Variable, col_type) -> Variable:
