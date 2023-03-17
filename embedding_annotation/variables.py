@@ -278,9 +278,7 @@ class CompositeExplanatoryVariable(ExplanatoryVariable):
     @cached_property
     def contained_samples(self):
         """Checking the region for contained samples is slow."""
-        return reduce(
-            operator.or_, (v.contained_samples for v in self.base_variables)
-        )
+        return reduce(operator.or_, (v.contained_samples for v in self.base_variables))
 
 
 class ExplanatoryVariableGroup(EmbeddingRegionMixin):
@@ -331,6 +329,4 @@ class ExplanatoryVariableGroup(EmbeddingRegionMixin):
     @cached_property
     def contained_samples(self):
         """Checking the region for contained samples is slow."""
-        return reduce(
-            operator.or_, (v.contained_samples for v in self.variables)
-        )
+        return reduce(operator.or_, (v.contained_samples for v in self.variables))
