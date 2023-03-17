@@ -285,7 +285,7 @@ def plot_densities(
     ax = ax.ravel()
 
     for idx, variable in enumerate(variables):
-        ax[idx].set_title(str(variable))
+        ax[idx].set_title(variable.name)
 
         plot_density(
             variable.region.density,
@@ -390,7 +390,7 @@ def plot_region(
     ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_)
 
     # Set title
-    ax.set_title(str(variable))
+    ax.set_title(variable.name)
 
     # Hide ticks and axis
     ax.set_xticks([]), ax.set_yticks([])
