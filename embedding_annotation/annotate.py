@@ -1,9 +1,15 @@
+from functools import cached_property
 from typing import Any, Callable
+
+import pandas as pd
+import numpy as np
 
 import embedding_annotation.graph as g
 from embedding_annotation import metrics
-from embedding_annotation.data import ExplanatoryVariable, ExplanatoryVariableGroup
+from embedding_annotation.region import Density, Region
+from embedding_annotation.variables import ExplanatoryVariable, ExplanatoryVariableGroup
 from embedding_annotation.metrics import pdist, intersection_percentage
+from embedding_annotation.preprocessing import estimate_embedding_scale, generate_derived_features
 
 
 def group_similar_variables(
@@ -56,3 +62,68 @@ def optimize_layout(
     independent_sets = g.independent_sets(graph)
 
     return independent_sets
+
+
+class Embedding:
+    def __init__(self, embedding: np.ndarray, scale_factor: float = 1):
+        self.X = embedding
+        self.scale_factor = scale_factor
+
+    @cached_property
+    def adj(self):
+        return metrics.adjacency_matrix(
+            self.X, scale=self.scale, weighting="gaussian",
+        )
+
+    @cached_property
+    def scale(self):
+        return estimate_embedding_scale(self.X, self.scale_factor)
+
+    @property
+    def shape(self):
+        return self.X.shape
+
+
+class Explainer:
+    def __init__(self, embedding, scale_factor=1):
+        self.embedding = Embedding(embedding, scale_factor=scale_factor)
+        self.scale_factor = scale_factor
+
+    def generate_explanatory_features(
+        self,
+        features: pd.DataFrame,
+        n_discretization_bins: int = 5,
+        n_grid_points: int = 100,
+        kernel: str = "gaussian",
+        contour_level: float = 0.25,
+    ):
+        # Convert the data frame so that it contains derived features
+        df_derived = generate_derived_features(
+            features, n_discretization_bins=n_discretization_bins
+        )
+
+        # Create explanatory variables from each of the derived features
+        explanatory_features = []
+        for v in df_derived.columns.tolist():
+            values = df_derived[v].values
+            density = Density.from_embedding(
+                self.embedding.X,
+                values,
+                n_grid_points=n_grid_points,
+                kernel=kernel,
+                bw=self.embedding.scale,
+            )
+            region = Region.from_density(density=density, level=contour_level)
+            explanatory_v = ExplanatoryVariable(
+                v.base_variable,
+                v.rule,
+                values,
+                region,
+                self.embedding,
+            )
+            explanatory_features.append(explanatory_v)
+
+        # Perform iterative merging
+
+        return explanatory_features
+

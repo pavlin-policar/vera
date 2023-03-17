@@ -88,16 +88,6 @@ class Region:
     def num_parts(self) -> int:
         return len(self.region_parts)
 
-    # @property
-    # def plot_label(self) -> str:
-    #     """The main label to be shown in a plot."""
-    #     return str(self.feature)
-    #
-    # @property
-    # def plot_detail(self) -> str:
-    #     """Region details to be shown in a plot."""
-    #     return None
-
     @staticmethod
     def _ensure_multipolygon(polygon) -> geom.MultiPolygon:
         if not isinstance(polygon, geom.MultiPolygon):
@@ -105,7 +95,7 @@ class Region:
         return polygon
 
     def get_contained_samples(self, embedding: np.ndarray) -> set[int]:
-        """Get the indices of the contained samples within the region.s"""
+        """Get the indices of the samples contained within the region."""
         embedding_points = [geom.Point(p) for p in embedding]
 
         contained_indices = set()
@@ -138,11 +128,3 @@ class CompositeRegion(Region):
 
         polygon = reduce(operator.or_, [r.polygon for r in regions])
         self.polygon = self._ensure_multipolygon(polygon)
-
-    # @property
-    # def plot_label(self) -> str:
-    #     return str(self.feature)
-    #
-    # @property
-    # def plot_detail(self) -> str:
-    #     return "\n".join(str(f) for f in self.contained_features)

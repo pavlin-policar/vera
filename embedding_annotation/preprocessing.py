@@ -6,14 +6,88 @@ import pandas as pd
 from sklearn import neighbors
 
 from embedding_annotation import metrics
-from embedding_annotation.data import (
-    ingest,
-    IntervalRule,
-    DerivedVariable,
-    EqualityRule,
-    ExplanatoryVariable,
-)
 from embedding_annotation.region import Density, Region
+from embedding_annotation.rules import IntervalRule, EqualityRule
+from embedding_annotation.variables import (
+    DerivedVariable,
+    ExplanatoryVariable,
+    DiscreteVariable,
+    ContinuousVariable,
+    Variable,
+)
+
+
+def _pd_dtype_to_variable(col_name: str | Variable, col_type) -> Variable:
+    """Convert a column from a pandas DataFrame to a Variable instance.
+
+    Parameters
+    ----------
+    col_name: str
+    col_type: dtype
+
+    Returns
+    -------
+    Variable
+
+    """
+    if isinstance(col_name, Variable):
+        return col_name
+
+    if pd.api.types.is_categorical_dtype(col_type):
+        variable = DiscreteVariable(
+            col_name,
+            categories=col_type.categories.tolist(),
+            ordered=col_type.ordered,
+        )
+    elif pd.api.types.is_numeric_dtype(col_type):
+        variable = ContinuousVariable(col_name)
+    else:
+        raise ValueError(
+            f"Only categorical and numeric dtypes supported! Got " f"`{col_type.name}`."
+        )
+
+    return variable
+
+
+def ingest(df: pd.DataFrame) -> pd.DataFrame:
+    """Convert a pandas DataFrame to a DataFrame the library can understand.
+
+    This really just creates a copy of the data frame, but swaps out the columns
+    for instances of our `Variable` objects, so we know which derived
+    variables can be merged later on.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+
+    Returns
+    -------
+    pd.DataFrame
+
+    """
+    df_new = df.copy()
+    new_index = map(lambda p: _pd_dtype_to_variable(*p), zip(df.columns, df.dtypes))
+    df_new.columns = pd.Index(list(new_index))
+    return df_new
+
+
+def ingested_to_pandas(df: pd.DataFrame) -> pd.DataFrame:
+    df_new = pd.DataFrame(index=df.index)
+
+    for column in df.columns:
+        if isinstance(column, DerivedVariable):
+            df_new[column.name] = pd.Categorical(df[column])
+        elif isinstance(column, DiscreteVariable):
+            col = pd.Categorical(
+                df[column], ordered=column.ordered, categories=column.categories
+            )
+            df_new[column.name] = col
+        elif isinstance(column, ContinuousVariable):
+            df_new[column.name] = df[column]
+        else:  # probably an uningested df column
+            df_new[column] = df[column]
+
+    return df_new
 
 
 def kth_neighbor_distance(x: np.ndarray, k_neighbors: int, n_jobs: int = 1) -> float:
@@ -109,8 +183,10 @@ def _one_hot(df: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([df_othr, df_disc], axis=1)
 
 
-def generate_derived_features(df: pd.DataFrame) -> pd.DataFrame:
-    return _one_hot(_discretize(ingest(df)))
+def generate_derived_features(
+    df: pd.DataFrame, n_discretization_bins: int = 5
+) -> pd.DataFrame:
+    return _one_hot(_discretize(ingest(df), n_bins=n_discretization_bins))
 
 
 def generate_explanatory_features():
@@ -136,22 +212,25 @@ def merge_overfragmented_candidates(
 
                 new_variable = v1.merge_with(v2)
                 purity_gain = new_variable.purity / np.maximum(v1.purity, v2.purity) - 1
-                shared_sample_pct = metrics.shared_sample_pct(v1, v2)
+                moran_gain = new_variable.morans_i / np.maximum(v1.morans_i, v2.morans_i) - 1
+                shared_sample_pct = metrics.max_shared_sample_pct(v1, v2)
                 if (
                     purity_gain >= min_purity_gain
                     and shared_sample_pct >= min_sample_overlap
+                    and moran_gain >= 0
                 ):
                     candidates.append(
                         {
                             "feature_1": v1,
                             "feature_2": v2,
                             "purity_gain": purity_gain,
+                            "moran_gain": moran_gain,
                             "sample_overlap": shared_sample_pct,
                         }
                     )
 
     candidates = pd.DataFrame(
-        candidates, columns=["feature_1", "feature_2", "purity_gain", "sample_overlap"]
+        candidates, columns=["feature_1", "feature_2", "purity_gain", "moran_gain", "sample_overlap"]
     )
 
     # If a feature is to be merged with more than one variable, allow only a
@@ -231,7 +310,7 @@ def generate_explanatory_features(
         )
         region = Region.from_density(density=density, level=contour_level)
         explanatory_v = ExplanatoryVariable(
-            v.base_variable,
+            v,
             v.rule,
             values,
             region,

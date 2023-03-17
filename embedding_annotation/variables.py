@@ -123,13 +123,11 @@ class EmbeddingRegionMixin:
         self,
         values: np.ndarray,
         region: Region,
-        embedding: np.ndarray,
-        scale: float,
+        embedding: "Embedding",
     ):
         self.values = values
         self.region = region
         self.embedding = embedding
-        self.scale = scale
 
         if self.values.shape[0] != self.embedding.shape[0]:
             raise ValueError(
@@ -140,7 +138,7 @@ class EmbeddingRegionMixin:
 
     @cached_property
     def contained_samples(self):
-        return self.region.get_contained_samples(self.embedding)
+        return self.region.get_contained_samples(self.embedding.X)
 
     @cached_property
     def num_contained_samples(self) -> int:
@@ -156,18 +154,12 @@ class EmbeddingRegionMixin:
         return np.mean(self.values[list(self.contained_samples)])
 
     @cached_property
-    def adj(self):
-        return metrics.adjacency_matrix(
-            self.embedding, scale=self.scale, weighting="gaussian",
-        )
-
-    @cached_property
     def morans_i(self):
-        return metrics.morans_i(self.values, self.adj)
+        return metrics.morans_i(self.values, self.embedding.adj)
 
     @cached_property
     def gearys_c(self):
-        return metrics.gearys_c(self.values, self.adj)
+        return metrics.gearys_c(self.values, self.embedding.adj)
 
 
 class ExplanatoryVariable(DerivedVariable, EmbeddingRegionMixin):
@@ -178,10 +170,9 @@ class ExplanatoryVariable(DerivedVariable, EmbeddingRegionMixin):
         values: np.ndarray,
         region: Region,
         embedding: np.ndarray,
-        scale: float,
     ):
         super().__init__(base_variable, rule)
-        EmbeddingRegionMixin.__init__(self, values, region, embedding, scale)
+        EmbeddingRegionMixin.__init__(self, values, region, embedding)
 
     def can_merge_with(self, other: "ExplanatoryVariable") -> bool:
         if not isinstance(other, ExplanatoryVariable):
@@ -193,7 +184,7 @@ class ExplanatoryVariable(DerivedVariable, EmbeddingRegionMixin):
         if not self.rule.can_merge_with(other.rule):
             return False
 
-        if not np.allclose(self.embedding, other.embedding):
+        if not np.allclose(self.embedding.X, other.embedding.X):
             return False
 
         return True
@@ -220,7 +211,6 @@ class ExplanatoryVariable(DerivedVariable, EmbeddingRegionMixin):
             ("values", "[...]"),
             ("region", repr(self.region)),
             ("embedding", "[[...]]"),
-            ("scale", repr(self.scale)),
         ]
         attrs_str = ", ".join(f"{k}={v}" for k, v in attrs)
         return f"{self.__class__.__name__}({attrs_str})"
@@ -228,6 +218,16 @@ class ExplanatoryVariable(DerivedVariable, EmbeddingRegionMixin):
     @property
     def contained_variables(self):
         return [self]
+
+    @property
+    def plot_label(self) -> str:
+        """The main label to be shown in a plot."""
+        return self.name
+
+    @property
+    def plot_detail(self) -> str:
+        """Region details to be shown in a plot."""
+        return None
 
 
 class CompositeExplanatoryVariable(ExplanatoryVariable):
@@ -247,16 +247,14 @@ class CompositeExplanatoryVariable(ExplanatoryVariable):
         merged_region = CompositeRegion([v.region for v in variables])
 
         embedding = v0.embedding
-        if not all(np.allclose(v.embedding, embedding) for v in variables[1:]):
+        if not all(np.allclose(v.embedding.X, embedding.X) for v in variables[1:]):
             raise RuntimeError(
                 "Cannot merge Explanatory variables which do not share the "
                 "same embedding!"
             )
 
-        scale = v0.scale
-
         super().__init__(
-            base_variable, rule, merged_values, merged_region, embedding, scale
+            base_variable, rule, merged_values, merged_region, embedding
         )
 
     @property
@@ -264,6 +262,16 @@ class CompositeExplanatoryVariable(ExplanatoryVariable):
         return reduce(
             operator.add, [v.contained_variables for v in self.base_variables]
         )
+
+    @property
+    def plot_label(self) -> str:
+        """The main label to be shown in a plot."""
+        return self.name
+
+    @property
+    def plot_detail(self) -> str:
+        """Region details to be shown in a plot."""
+        return None
 
 
 class ExplanatoryVariableGroup(EmbeddingRegionMixin):
@@ -280,17 +288,13 @@ class ExplanatoryVariableGroup(EmbeddingRegionMixin):
         merged_region = CompositeRegion([v.region for v in variables])
 
         embedding = v0.embedding
-        if not all(np.allclose(v.embedding, embedding) for v in variables[1:]):
+        if not all(np.allclose(v.embedding.X, embedding.X) for v in variables[1:]):
             raise RuntimeError(
                 "Cannot merge explanatory variables which do not share the "
                 "same embedding!"
             )
 
-        scale = v0.scale
-
-        EmbeddingRegionMixin.__init__(
-            self, merged_values, merged_region, embedding, scale
-        )
+        EmbeddingRegionMixin.__init__(self, merged_values, merged_region, embedding)
 
     @property
     def contained_variables(self):
@@ -303,7 +307,14 @@ class ExplanatoryVariableGroup(EmbeddingRegionMixin):
             ("values", "[...]"),
             ("region", repr(self.region)),
             ("embedding", "[[...]]"),
-            ("scale", repr(self.scale)),
         ]
         attrs_str = ", ".join(f"{k}={v}" for k, v in attrs)
         return f"{self.__class__.__name__}({attrs_str})"
+
+    @property
+    def plot_label(self) -> str:
+        return str(self.name)
+
+    @property
+    def plot_detail(self) -> str:
+        return "\n".join(str(f) for f in self.contained_variables)

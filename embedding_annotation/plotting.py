@@ -8,12 +8,13 @@ import matplotlib.colors as clr
 import matplotlib.colors as colors
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
+from matplotlib import collections
 from matplotlib.path import Path
 from matplotlib.patches import PathPatch
 import numpy as np
 import pandas as pd
 
-from embedding_annotation.data import ExplanatoryVariable
+from embedding_annotation.variables import ExplanatoryVariable, EmbeddingRegionMixin
 from embedding_annotation.region import Density, Region
 
 
@@ -289,7 +290,7 @@ def plot_densities(
 
         plot_density(
             variable.region.density,
-            embedding=variable.embedding,
+            embedding=variable.embedding.X,
             levels=levels,
             skip_first=skip_first,
             ax=ax[idx],
@@ -306,6 +307,26 @@ def plot_densities(
         return fig, ax
 
 
+def _add_region_info(variable: EmbeddingRegionMixin, ax, offset=0.025):
+    info = [
+        ("Purity", "purity"),
+        ("Moran's I", "morans_i"),
+        ("Geary's C", "gearys_c"),
+    ]
+    s_parts = [f"{name}: {getattr(variable, attr):.2f}" for name, attr in info]
+    s = "\n".join(s_parts)
+    txt = ax.text(
+        1 - offset,
+        1 - offset,
+        s,
+        transform=ax.transAxes,
+        va="top",
+        ha="right",
+        linespacing=1.5,
+    )
+    return txt
+
+
 def plot_region(
     variable: ExplanatoryVariable,
     ax=None,
@@ -315,8 +336,10 @@ def plot_region(
     edge_alpha=1,
     lw=1,
     draw_label=False,
+    draw_scatterplot=True,
     highlight_members=True,
     member_color="tab:red",
+    add_region_info=False,
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
     detail_kwargs: dict = {},
@@ -336,22 +359,28 @@ def plot_region(
             *[Path(np.asarray(ring.coords)[:, :2]) for ring in geom.interiors],
         )
         # Fill
-        fill_patch = PathPatch(
-            path,
-            fill=True,
-            color=fill_color,
-            alpha=fill_alpha,
-        )
-        ax.add_patch(fill_patch)
+        if fill_color is not None:
+            fill_patch = PathPatch(
+                path,
+                fill=True,
+                color=fill_color,
+                alpha=fill_alpha,
+            )
+            ax.add_patch(fill_patch)
         # Boundary
         edge_patch = PathPatch(
-            path, fill=False, edgecolor=edge_color, alpha=edge_alpha, lw=lw
+            path,
+            fill=False,
+            edgecolor=edge_color,
+            alpha=edge_alpha,
+            lw=lw,
+            zorder=10,
         )
         ax.add_patch(edge_patch)
 
     if draw_label:
         # Draw the lable on the largest polygon in the region
-        largest_polygon = max(variable.polygon.geoms, key=lambda x: x.area)
+        largest_polygon = max(variable.region.polygon.geoms, key=lambda x: x.area)
         label_kwargs_ = {
             "ha": "center",
             "va": "bottom",
@@ -372,22 +401,26 @@ def plot_region(
             label = ax.text(x, y, variable.plot_detail, **detail_kwargs_)
         # label.set_bbox(dict(facecolor="white", alpha=0.75, edgecolor="white"))
 
-    # Plot embedding scatter plot
-    embedding = variable.embedding
-    scatter_kwargs_ = {
-        "zorder": 1,
-        "c": "#999999",
-        "s": 6,
-        "alpha": 1,
-    }
-    scatter_kwargs_.update(scatter_kwargs)
-    if highlight_members:
-        other_color = scatter_kwargs_.get("c")
-        c = np.array([other_color, member_color])[variable.values.astype(int)]
-        scatter_kwargs_["c"] = c
-        scatter_kwargs_["alpha"] = 1
+    if add_region_info:
+        _add_region_info(variable, ax)
 
-    ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_)
+    # Plot embedding scatter plot
+    if draw_scatterplot:
+        embedding = variable.embedding.X
+        scatter_kwargs_ = {
+            "zorder": 1,
+            "c": "#999999",
+            "s": 6,
+            "alpha": 1,
+        }
+        scatter_kwargs_.update(scatter_kwargs)
+        if highlight_members:
+            other_color = scatter_kwargs_.get("c")
+            c = np.array([other_color, member_color])[variable.values.astype(int)]
+            scatter_kwargs_["c"] = c
+            scatter_kwargs_["alpha"] = 1
+
+        ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_)
 
     # Set title
     ax.set_title(variable.name)
@@ -412,6 +445,7 @@ def plot_regions(
     draw_labels=False,
     highlight_members=True,
     member_color="tab:red",
+    add_region_info=False,
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
     detail_kwargs: dict = {},
@@ -439,6 +473,7 @@ def plot_regions(
             draw_label=draw_labels,
             highlight_members=highlight_members,
             member_color=member_color,
+            add_region_info=add_region_info,
             scatter_kwargs=scatter_kwargs,
             label_kwargs=label_kwargs,
             detail_kwargs=detail_kwargs,
@@ -452,9 +487,77 @@ def plot_regions(
         return fig, ax
 
 
+def plot_region_with_subregions(
+    variable: ExplanatoryVariable,
+    ax=None,
+    cmap: str = "tab10",
+):
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 8))
+
+    plot_region(
+        variable,
+        ax=ax,
+        highlight_members=False,
+        fill_color="#cccccc",
+        edge_color="#666666",
+    )
+
+    hues = iter(cycle(get_cmap_colors(cmap)))
+    for subvariable, c in zip(variable.contained_variables, hues):
+        plot_region(
+            subvariable,
+            ax=ax,
+            highlight_members=False,
+            fill_color=c,
+            draw_scatterplot=False,
+        )
+
+    # Set title
+    ax.set_title(variable.name)
+
+    # Hide ticks and axis
+    ax.set_xticks([]), ax.set_yticks([])
+    ax.axis("equal")
+
+    return ax
+
+
+def plot_regions_with_subregions(
+    variables: list[ExplanatoryVariable],
+    per_row: int = 4,
+    figwidth: int = 24,
+    return_ax: bool = False,
+    cmap: str = "tab10",
+):
+    n_rows = len(variables) // per_row
+    if len(variables) % per_row > 0:
+        n_rows += 1
+
+    figheight = figwidth / per_row * n_rows
+    fig, ax = plt.subplots(nrows=n_rows, ncols=per_row, figsize=(figwidth, figheight))
+
+    if len(variables) == 1:
+        ax = np.array([ax])
+    ax = ax.ravel()
+
+    for idx, variable in enumerate(variables):
+        plot_region_with_subregions(
+            variable,
+            ax=ax[idx],
+            cmap=cmap,
+        )
+
+    # Hide remaining axes
+    for idx in range(idx + 1, n_rows * per_row):
+        ax[idx].axis("off")
+
+    if return_ax:
+        return fig, ax
+
+
 def plot_annotation(
-    densities: dict[str, Region],
-    embedding: np.ndarray,
+    variables: list[ExplanatoryVariable],
     cmap: str = "tab10",
     ax=None,
     scatter_kwargs: dict = {},
@@ -466,25 +569,30 @@ def plot_annotation(
 
     hues = iter(cycle(get_cmap_colors(cmap)))
 
-    for key, density in densities.items():
+    for variable in variables:
         plot_region(
-            density,
+            variable,
             fill_color=next(hues),
             ax=ax,
             draw_label=True,
+            highlight_members=False,
+            draw_scatterplot=False,
             label_kwargs=label_kwargs,
             detail_kwargs=detail_kwargs,
         )
 
-    if embedding is not None:
-        scatter_kwargs_ = {
-            "zorder": 1,
-            "c": "k",
-            "s": 6,
-            "alpha": 0.1,
-            **scatter_kwargs,
-        }
-        ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_)
+    embedding = variables[0].embedding.X
+    scatter_kwargs_ = {
+        "zorder": 1,
+        "c": "#aaaaaa",
+        "s": 6,
+        "alpha": 1,
+        **scatter_kwargs,
+    }
+    ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_)
+
+    # Clear title from drawn regions
+    ax.set_title("")
 
     # Hide ticks and axis
     ax.set_xticks([]), ax.set_yticks([])
