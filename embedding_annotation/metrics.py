@@ -2,8 +2,6 @@ from typing import Any, Callable
 
 import numpy as np
 import scipy.sparse as sp
-import scipy.stats as stats
-from sklearn import neighbors
 
 
 def pdist(l: list[Any], metric: Callable):
@@ -69,57 +67,6 @@ def inbetween_convex_hull_ratio(v1: "ExplanatoryVariable", v2: "ExplanatoryVaria
     total = inbetween | p1 | p2
 
     return inbetween.area / total.area
-
-
-def adjacency_matrix(
-    x: np.ndarray,
-    scale: float,
-    weighting: str = "gaussian",
-    n_jobs: int = 1,
-) -> sp.csr_matrix:
-    if weighting == "gaussian":
-        return _gaussian_adjacency_matrix(x, scale=scale, n_jobs=n_jobs)
-    elif weighting == "uniform":
-        return _uniform_adjacency_matrix(x, scale=scale, n_jobs=n_jobs)
-    else:
-        raise ValueError(
-            f"Unrecognized weighting scheme `{weighting}`. Must be one of "
-            f"`gaussian`, `uniform`."
-        )
-
-
-def _uniform_adjacency_matrix(
-    x: np.ndarray, scale: float, n_jobs: int = 1
-) -> sp.csr_matrix:
-    adj = neighbors.radius_neighbors_graph(
-        x, radius=scale, metric="euclidean", include_self=False, n_jobs=n_jobs
-    )
-    return adj
-
-
-def _gaussian_adjacency_matrix(
-    x: np.ndarray, scale: float, n_jobs: int = 1
-) -> sp.csr_matrix:
-    n_samples = x.shape[0]
-
-    nn = neighbors.NearestNeighbors(
-        radius=scale * 3, metric="euclidean", n_jobs=n_jobs
-    ).fit(x)
-    neighbor_distances, neighbor_idx = nn.radius_neighbors()
-
-    neighbor_weights = []
-    for row in neighbor_distances:
-        neighbor_weights.append(stats.norm(0, scale).pdf(row))
-
-    indices, weights, indptr = [], [], [0]
-    for idx, w in zip(neighbor_idx, neighbor_weights):
-        assert len(idx) == len(w)
-        indices.extend(idx)
-        weights.extend(w)
-        indptr.append(indptr[-1] + len(idx))
-
-    adj = sp.csr_matrix((weights, indices, indptr), shape=(n_samples, n_samples))
-    return adj
 
 
 def morans_i(x: np.ndarray, adj: sp.spmatrix) -> np.ndarray:

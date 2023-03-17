@@ -3,10 +3,8 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from sklearn import neighbors
 
 from embedding_annotation import metrics
-from embedding_annotation.region import Density, Region
 from embedding_annotation.rules import IntervalRule, EqualityRule
 from embedding_annotation.variables import (
     DerivedVariable,
@@ -88,23 +86,6 @@ def ingested_to_pandas(df: pd.DataFrame) -> pd.DataFrame:
             df_new[column] = df[column]
 
     return df_new
-
-
-def kth_neighbor_distance(x: np.ndarray, k_neighbors: int, n_jobs: int = 1) -> float:
-    """Find the median distance of each point's k-th nearest neighbor."""
-    nn = neighbors.NearestNeighbors(n_neighbors=k_neighbors, n_jobs=n_jobs)
-    nn.fit(x)
-    distances, indices = nn.kneighbors()
-
-    return np.median(distances[:, -1])
-
-
-def estimate_embedding_scale(embedding: np.ndarray, scale_factor: float = 1) -> float:
-    """Estimate the scale of the embedding."""
-    k_neighbors = int(np.floor(np.sqrt(embedding.shape[0])))
-    scale = kth_neighbor_distance(embedding, k_neighbors)
-    scale *= scale_factor
-    return scale
 
 
 def _discretize(df: pd.DataFrame, n_bins: int = 5) -> pd.DataFrame:
@@ -189,10 +170,6 @@ def generate_derived_features(
     return _one_hot(_discretize(ingest(df), n_bins=n_discretization_bins))
 
 
-def generate_explanatory_features():
-    ...
-
-
 def merge_overfragmented_candidates(
     variables: list[ExplanatoryVariable],
     min_purity_gain=0.05,
@@ -212,7 +189,9 @@ def merge_overfragmented_candidates(
 
                 new_variable = v1.merge_with(v2)
                 purity_gain = new_variable.purity / np.maximum(v1.purity, v2.purity) - 1
-                moran_gain = new_variable.morans_i / np.maximum(v1.morans_i, v2.morans_i) - 1
+                moran_gain = (
+                    new_variable.morans_i / np.maximum(v1.morans_i, v2.morans_i) - 1
+                )
                 shared_sample_pct = metrics.max_shared_sample_pct(v1, v2)
                 if (
                     purity_gain >= min_purity_gain
@@ -230,7 +209,14 @@ def merge_overfragmented_candidates(
                     )
 
     candidates = pd.DataFrame(
-        candidates, columns=["feature_1", "feature_2", "purity_gain", "moran_gain", "sample_overlap"]
+        candidates,
+        columns=[
+            "feature_1",
+            "feature_2",
+            "purity_gain",
+            "moran_gain",
+            "sample_overlap",
+        ],
     )
 
     # If a feature is to be merged with more than one variable, allow only a
@@ -285,40 +271,3 @@ def merge_overfragmented(
 
 def filter_explanatory_features(features, min_purity, min_spatial_correlation):
     ...
-
-
-def generate_explanatory_features(
-    df: pd.DataFrame,
-    embedding: np.ndarray,
-    n_grid_points: int = 100,
-    kernel: str = "gaussian",
-    scale_factor: int = 1,
-    contour_level: float = 0.25,
-) -> list[ExplanatoryVariable]:
-    # Convert the data frame so that it contains derived features
-    df_derived = generate_derived_features(df)
-
-    # Estimate the scale of the embedding
-    scale = estimate_embedding_scale(embedding, scale_factor)
-
-    # Create explanatory variables from each of the derived features
-    explanatory_features = []
-    for v in df_derived.columns.tolist():
-        values = df_derived[v].values
-        density = Density.from_embedding(
-            embedding, values, n_grid_points=n_grid_points, kernel=kernel, bw=scale
-        )
-        region = Region.from_density(density=density, level=contour_level)
-        explanatory_v = ExplanatoryVariable(
-            v,
-            v.rule,
-            values,
-            region,
-            embedding,
-            scale=scale,
-        )
-        explanatory_features.append(explanatory_v)
-
-    # Perform iterative merging
-
-    return explanatory_features

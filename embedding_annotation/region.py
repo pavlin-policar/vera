@@ -49,14 +49,14 @@ class Density:
     @classmethod
     def from_embedding(
         cls,
-        embedding: np.ndarray,
+        embedding: "Embedding",
         values: np.ndarray,
         n_grid_points: int = 100,
         kernel: str = "gaussian",
-        bw: float = 1,
     ):
         from KDEpy import FFTKDE
-        kde = FFTKDE(kernel=kernel, bw=bw).fit(embedding, weights=values)
+
+        kde = FFTKDE(kernel=kernel, bw=embedding.scale).fit(embedding.X, weights=values)
         grid, points = kde.evaluate(n_grid_points)
 
         return cls(grid, points)

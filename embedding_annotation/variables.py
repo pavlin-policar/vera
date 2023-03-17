@@ -4,8 +4,8 @@ from functools import cached_property, reduce
 import numpy as np
 
 from embedding_annotation import metrics
-from embedding_annotation.rules import Rule
 from embedding_annotation.region import Region, CompositeRegion
+from embedding_annotation.rules import Rule
 
 
 class Variable:
@@ -253,9 +253,7 @@ class CompositeExplanatoryVariable(ExplanatoryVariable):
                 "same embedding!"
             )
 
-        super().__init__(
-            base_variable, rule, merged_values, merged_region, embedding
-        )
+        super().__init__(base_variable, rule, merged_values, merged_region, embedding)
 
     @property
     def contained_variables(self):
