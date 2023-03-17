@@ -138,7 +138,7 @@ class EmbeddingRegionMixin:
 
     @cached_property
     def contained_samples(self):
-        return self.region.get_contained_samples(self.embedding.X)
+        return self.region.get_contained_samples(self.embedding)
 
     @cached_property
     def num_contained_samples(self) -> int:
@@ -271,6 +271,13 @@ class CompositeExplanatoryVariable(ExplanatoryVariable):
         """Region details to be shown in a plot."""
         return None
 
+    @cached_property
+    def contained_samples(self):
+        """Checking the region for contained samples is slow."""
+        return reduce(
+            operator.or_, (v.contained_samples for v in self.base_variables)
+        )
+
 
 class ExplanatoryVariableGroup(EmbeddingRegionMixin):
     def __init__(self, variables: list[ExplanatoryVariable], name: str = None):
@@ -316,3 +323,10 @@ class ExplanatoryVariableGroup(EmbeddingRegionMixin):
     @property
     def plot_detail(self) -> str:
         return "\n".join(str(f) for f in self.contained_variables)
+
+    @cached_property
+    def contained_samples(self):
+        """Checking the region for contained samples is slow."""
+        return reduce(
+            operator.or_, (v.contained_samples for v in self.variables)
+        )

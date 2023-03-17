@@ -3,6 +3,7 @@ from functools import cached_property
 import numpy as np
 import scipy.sparse as sp
 import scipy.stats as stats
+import shapely.geometry as geom
 from sklearn import neighbors
 
 
@@ -90,3 +91,7 @@ class Embedding:
     @property
     def shape(self):
         return self.X.shape
+
+    @cached_property
+    def points(self):
+        return [geom.Point(p) for p in self.X]

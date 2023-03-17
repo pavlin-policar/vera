@@ -5,6 +5,8 @@ import contourpy
 import numpy as np
 from shapely import geometry as geom
 
+from embedding_annotation.embedding import Embedding
+
 
 class Density:
     def __init__(self, grid: np.ndarray, values: np.ndarray):
@@ -94,13 +96,11 @@ class Region:
             polygon = geom.MultiPolygon([polygon])
         return polygon
 
-    def get_contained_samples(self, embedding: np.ndarray) -> set[int]:
+    def get_contained_samples(self, embedding: Embedding) -> set[int]:
         """Get the indices of the samples contained within the region."""
-        embedding_points = [geom.Point(p) for p in embedding]
-
         contained_indices = set()
-        for i in range(len(embedding_points)):
-            if self.polygon.contains(embedding_points[i]):
+        for i in range(len(embedding.points)):
+            if self.polygon.contains(embedding.points[i]):
                 contained_indices.add(i)
 
         return contained_indices
