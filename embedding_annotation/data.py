@@ -62,9 +62,7 @@ class DiscreteVariable(Variable):
         )
 
     def __hash__(self):
-        return hash(
-            (self.__class__.__name__, self.name, self.categories, self.ordered)
-        )
+        return hash((self.__class__.__name__, self.name, self.categories, self.ordered))
 
 
 class ContinuousVariable(Variable):
@@ -273,9 +271,7 @@ class DerivedVariable(Variable):
             )
 
         if not self.can_merge_with(other):
-            raise ValueError(
-                f"Cannot merge derived variables `{self}` and {other}!"
-            )
+            raise ValueError(f"Cannot merge derived variables `{self}` and {other}!")
 
         merged_rule = self.rule.merge_with(other.rule)
 
@@ -287,26 +283,23 @@ class DerivedVariable(Variable):
     def __eq__(self, other):
         if not isinstance(other, DerivedVariable):
             return False
-        return (
-            self.base_variable == other.base_variable and self.rule == other.rule
-        )
+        return self.base_variable == other.base_variable and self.rule == other.rule
 
     def __hash__(self):
         return hash((self.__class__.__name__, self.base_variable, self.rule))
 
 
-class ExplanatoryVariable(DerivedVariable):
+class EmbeddingRegionMixin:
+    """This mixin contains all the functionality to do with anything computed on
+    the embedding and the values in the embedding."""
+
     def __init__(
         self,
-        base_variable: Variable,
-        rule: Rule,
         values: np.ndarray,
         region: Region,
         embedding: np.ndarray,
         scale: float,
     ):
-        super().__init__(base_variable, rule)
-
         self.values = values
         self.region = region
         self.embedding = embedding
@@ -318,6 +311,37 @@ class ExplanatoryVariable(DerivedVariable):
                 f"({self.values.shape[0]}) does not match the number "
                 f"of samples in the embedding ({self.embedding.shape[0]})."
             )
+
+    @cached_property
+    def contained_samples(self):
+        return self.region.get_contained_samples(self.embedding)
+
+    @cached_property
+    def num_contained_samples(self) -> int:
+        return len(self.contained_samples)
+
+    @cached_property
+    def pct_contained_samples(self) -> float:
+        return self.num_contained_samples / self.embedding.shape[0]
+
+    @cached_property
+    def purity(self):
+        # We only have binary features, so we can just compute the mean
+        return np.mean(self.values[list(self.contained_samples)])
+
+
+class ExplanatoryVariable(DerivedVariable, EmbeddingRegionMixin):
+    def __init__(
+        self,
+        base_variable: Variable,
+        rule: Rule,
+        values: np.ndarray,
+        region: Region,
+        embedding: np.ndarray,
+        scale: float,
+    ):
+        super().__init__(base_variable, rule)
+        EmbeddingRegionMixin.__init__(self, values, region, embedding, scale)
 
     def can_merge_with(self, other: "ExplanatoryVariable") -> bool:
         if not isinstance(other, ExplanatoryVariable):
@@ -365,23 +389,6 @@ class ExplanatoryVariable(DerivedVariable):
     def contained_variables(self):
         return [self]
 
-    @cached_property
-    def contained_samples(self):
-        return self.region.get_contained_samples(self.embedding)
-
-    @cached_property
-    def num_contained_samples(self) -> int:
-        return len(self.contained_samples)
-
-    @cached_property
-    def pct_contained_samples(self) -> float:
-        return self.num_contained_samples / self.embedding.shape[0]
-
-    @cached_property
-    def purity(self):
-        # We only have binary features, so we can just compute the mean
-        return np.mean(self.values[list(self.contained_samples)])
-
 
 class CompositeExplanatoryVariable(ExplanatoryVariable):
     def __init__(self, variables: list[ExplanatoryVariable], rule: Rule):
@@ -414,7 +421,52 @@ class CompositeExplanatoryVariable(ExplanatoryVariable):
 
     @property
     def contained_variables(self):
-        return reduce(operator.add, [v.contained_variables for v in self.base_variables])
+        return reduce(
+            operator.add, [v.contained_variables for v in self.base_variables]
+        )
+
+
+class ExplanatoryVariableGroup(EmbeddingRegionMixin):
+    def __init__(self, variables: list[ExplanatoryVariable], name: str = None):
+        self.variables = variables
+        self.name = name
+
+        v0 = variables[0]
+
+        feature_values = np.vstack([v.values for v in variables])
+        # Take min: if plotted together, we expect each point to fulfill all the
+        # rules in the feature group
+        merged_values = np.min(feature_values, axis=0)
+        merged_region = CompositeRegion([v.region for v in variables])
+
+        embedding = v0.embedding
+        if not all(np.allclose(v.embedding, embedding) for v in variables[1:]):
+            raise RuntimeError(
+                "Cannot merge explanatory variables which do not share the "
+                "same embedding!"
+            )
+
+        scale = v0.scale
+
+        EmbeddingRegionMixin.__init__(
+            self, merged_values, merged_region, embedding, scale
+        )
+
+    @property
+    def contained_variables(self):
+        return self.variables
+
+    def __repr__(self):
+        attrs = [
+            ("name", repr(self.name)),
+            ("variables", repr(self.variables)),
+            ("values", "[...]"),
+            ("region", repr(self.region)),
+            ("embedding", "[[...]]"),
+            ("scale", repr(self.scale)),
+        ]
+        attrs_str = ", ".join(f"{k}={v}" for k, v in attrs)
+        return f"{self.__class__.__name__}({attrs_str})"
 
 
 def _pd_dtype_to_variable(col_name: str | Variable, col_type) -> Variable:
