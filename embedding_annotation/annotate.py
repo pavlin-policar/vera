@@ -16,6 +16,7 @@ def generate_explanatory_features(
     features: pd.DataFrame,
     embedding: np.ndarray,
     n_discretization_bins: int = 5,
+    min_samples_per_feature: int = 5,
     scale_factor: float = 1,
     n_grid_points: int = 100,
     kernel: str = "gaussian",
@@ -25,6 +26,10 @@ def generate_explanatory_features(
     df_derived = generate_derived_features(
         features, n_discretization_bins=n_discretization_bins
     )
+
+    # Remove any features that do not have a single value
+    col_sums = df_derived.sum(axis=0)
+    df_derived = df_derived.loc[:, col_sums > min_samples_per_feature]
 
     embedding = Embedding(embedding, scale_factor=scale_factor)
 
