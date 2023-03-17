@@ -137,6 +137,10 @@ class EmbeddingRegionMixin:
             )
 
     @cached_property
+    def num_all_samples(self):
+        return int(self.values.sum())
+
+    @cached_property
     def contained_samples(self):
         return self.region.get_contained_samples(self.embedding)
 

@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 
 from embedding_annotation import metrics
+from embedding_annotation.embedding import Embedding
+from embedding_annotation.region import Density, Region
 from embedding_annotation.rules import IntervalRule, EqualityRule
 from embedding_annotation.variables import (
     DerivedVariable,
@@ -170,6 +172,42 @@ def generate_derived_features(
     return _one_hot(_discretize(ingest(df), n_bins=n_discretization_bins))
 
 
+def convert_derived_features_to_explanatory(
+    df,
+    embedding,
+    scale_factor: float = 1,
+    n_grid_points: int = 100,
+    kernel: str = "gaussian",
+    contour_level: float = 0.25,
+):
+    # Create embedding instance which will be shared across all explanatory
+    # variables. The shared instance is necessary to avoid slow recomputation of
+    # adjacency matrices
+    embedding = Embedding(embedding, scale_factor=scale_factor)
+
+    # Create explanatory variables from each of the derived features
+    explanatory_features = []
+    for v in df.columns.tolist():
+        values = df[v].values
+        density = Density.from_embedding(
+            embedding,
+            values,
+            n_grid_points=n_grid_points,
+            kernel=kernel,
+        )
+        region = Region.from_density(density=density, level=contour_level)
+        explanatory_v = ExplanatoryVariable(
+            v.base_variable,
+            v.rule,
+            values,
+            region,
+            embedding,
+        )
+        explanatory_features.append(explanatory_v)
+
+    return explanatory_features
+
+
 def merge_overfragmented_candidates(
     variables: list[ExplanatoryVariable],
     min_purity_gain=0.05,
@@ -267,7 +305,3 @@ def merge_overfragmented(
         )
 
     return list(variables)
-
-
-def filter_explanatory_features(features, min_purity, min_spatial_correlation):
-    ...
