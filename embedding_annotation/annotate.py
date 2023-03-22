@@ -2,6 +2,7 @@ from typing import Any, Callable
 
 import numpy as np
 import pandas as pd
+from sklearn.utils import check_random_state
 
 import embedding_annotation.graph as g
 import embedding_annotation.preprocessing as pp
@@ -12,12 +13,24 @@ from embedding_annotation.variables import ExplanatoryVariable, ExplanatoryVaria
 def generate_explanatory_features(
     features: pd.DataFrame,
     embedding: np.ndarray,
+    sample_size: int = 5000,
     n_discretization_bins: int = 5,
     scale_factor: float = 1,
     n_grid_points: int = 100,
     kernel: str = "gaussian",
     contour_level: float = 0.25,
+    random_state: Any = None,
 ):
+    # Sample the data if necessary. Running on large data sets can be very slow
+    random_state = check_random_state(random_state)
+    if sample_size is not None:
+        num_samples = min(sample_size, features.shape[0])
+        sample_idx = random_state.choice(
+            features.shape[0], size=num_samples, replace=False
+        )
+        features = features.iloc[sample_idx]
+        embedding = embedding[sample_idx]
+
     # Convert the data frame so that it contains derived features
     df_derived = pp.generate_derived_features(
         features, n_discretization_bins=n_discretization_bins
