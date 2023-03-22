@@ -28,6 +28,14 @@ def max_shared_sample_pct(v1: "ExplanatoryVariable", v2: "ExplanatoryVariable") 
     return max(v1_shared_sample_pct, v2_shared_sample_pct)
 
 
+def min_shared_sample_pct(v1: "ExplanatoryVariable", v2: "ExplanatoryVariable") -> float:
+    v1_samples, v2_samples = v1.contained_samples, v2.contained_samples
+    shared_samples = v1_samples & v2_samples
+    v1_shared_sample_pct = len(shared_samples) / len(v1_samples)
+    v2_shared_sample_pct = len(shared_samples) / len(v2_samples)
+    return min(v1_shared_sample_pct, v2_shared_sample_pct)
+
+
 def shared_sample_pct(v1: "ExplanatoryVariable", v2: "ExplanatoryVariable") -> float:
     v1_samples, v2_samples = v1.contained_samples, v2.contained_samples
     return len(v1_samples & v2_samples) / len(v1_samples | v2_samples)
