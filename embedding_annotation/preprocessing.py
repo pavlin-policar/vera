@@ -104,6 +104,11 @@ def _discretize(df: pd.DataFrame, n_bins: int = 5) -> pd.DataFrame:
     if len(cont_cols) == 0:
         return df_ingested
 
+    # Sklearn discretization doesn't support NaNs, so impute median
+    from sklearn.impute import SimpleImputer
+    imputer = SimpleImputer(strategy="median")
+    df_cont_imputed = imputer.fit_transform(df_cont.values)
+
     # Use k-means for discretization
     from sklearn.preprocessing import KBinsDiscretizer
 
@@ -112,7 +117,7 @@ def _discretize(df: pd.DataFrame, n_bins: int = 5) -> pd.DataFrame:
         strategy="kmeans",
         encode="onehot-dense",
     )
-    x_discretized = discretizer.fit_transform(df_cont.values)
+    x_discretized = discretizer.fit_transform(df_cont_imputed)
 
     # Create derived features
     derived_features = []
