@@ -96,7 +96,7 @@ def group_similar_variables(
 def find_layouts(
     variables: list[ExplanatoryVariable], max_overlap: float = 0.05
 ) -> list[list[Any]]:
-    overlap = metrics.pdist(variables, metrics.intersection_percentage)
+    overlap = metrics.pdist(variables, metrics.max_shared_sample_pct)
     graph = g.similarities_to_graph(overlap, threshold=max_overlap)
     node_labels = dict(enumerate(variables))
     graph = g.label_nodes(graph, node_labels)
