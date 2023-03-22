@@ -174,7 +174,14 @@ def _one_hot(df: pd.DataFrame) -> pd.DataFrame:
 def generate_derived_features(
     df: pd.DataFrame, n_discretization_bins: int = 5
 ) -> pd.DataFrame:
-    return _one_hot(_discretize(ingest(df), n_bins=n_discretization_bins))
+    # Filter out features with identical values
+    df = df.loc[:, df.nunique() > 1]
+
+    df = _one_hot(_discretize(ingest(df), n_bins=n_discretization_bins))
+    # Filter out columns with zero occurences
+    df = df.loc[:, df.sum(axis=0) > 0]
+
+    return df
 
 
 def convert_derived_features_to_explanatory(
