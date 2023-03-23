@@ -108,16 +108,23 @@ def _discretize(df: pd.DataFrame, n_bins: int = 5) -> pd.DataFrame:
     from sklearn.impute import SimpleImputer
     imputer = SimpleImputer(strategy="median")
     df_cont_imputed = imputer.fit_transform(df_cont.values)
+    df_cont_imputed = pd.DataFrame(
+        df_cont_imputed, columns=df_cont.columns, index=df_cont.index
+    )
 
     # Use k-means for discretization
     from sklearn.preprocessing import KBinsDiscretizer
+
+    # Ensure that the number of bins is not larger than the number of unique
+    # values
+    n_bins = np.minimum(n_bins, df_cont_imputed.nunique(axis=0).values)
 
     discretizer = KBinsDiscretizer(
         n_bins=n_bins,
         strategy="kmeans",
         encode="onehot-dense",
     )
-    x_discretized = discretizer.fit_transform(df_cont_imputed)
+    x_discretized = discretizer.fit_transform(df_cont_imputed.values)
 
     # Create derived features
     derived_features = []
@@ -175,7 +182,7 @@ def generate_derived_features(
     df: pd.DataFrame, n_discretization_bins: int = 5
 ) -> pd.DataFrame:
     # Filter out features with identical values
-    df = df.loc[:, df.nunique() > 1]
+    df = df.loc[:, df.nunique(axis=0) > 1]
 
     df = _one_hot(_discretize(ingest(df), n_bins=n_discretization_bins))
     # Filter out columns with zero occurences
