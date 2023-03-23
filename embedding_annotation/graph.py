@@ -94,6 +94,21 @@ def degrees(g: Graph) -> dict[T, int]:
     return {v: len(e) for v, e in g.items()}
 
 
+def merge_nodes(graph: Graph, i: T, j: T, new: T) -> Graph:
+    node_mapping = {i: new, j: new}
+    new_graph = defaultdict(set)
+    for k, v in graph.items():
+        new_graph[node_mapping.get(k, k)] |= {node_mapping.get(i, i) for i in v}
+    return remove_self_loops(dict(new_graph))
+
+
+def remove_self_loops(graph: Graph) -> Graph:
+    new_graph = defaultdict(set)
+    for k, v in graph.items():
+        new_graph[k] |= {i for i in v if i != k}
+    return dict(new_graph)
+
+
 def configuration_graph(g: Graph, random_state) -> Graph:
     random_state = check_random_state(random_state)
 
