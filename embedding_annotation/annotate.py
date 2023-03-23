@@ -19,6 +19,8 @@ def generate_explanatory_features(
     n_grid_points: int = 100,
     kernel: str = "gaussian",
     contour_level: float = 0.25,
+    merge_min_purity_gain=0.05,
+    merge_min_sample_overlap=0.5,
     random_state: Any = None,
 ):
     # Sample the data if necessary. Running on large data sets can be very slow
@@ -47,7 +49,11 @@ def generate_explanatory_features(
     )
 
     # Perform iterative merging
-    explanatory_features = pp.merge_overfragmented(explanatory_features)
+    explanatory_features = pp.merge_overfragmented(
+        explanatory_features,
+        min_purity_gain=merge_min_purity_gain,
+        min_sample_overlap=merge_min_sample_overlap,
+    )
 
     return explanatory_features
 
