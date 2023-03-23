@@ -335,6 +335,7 @@ def plot_region(
     edge_alpha=1,
     lw=1,
     draw_label=False,
+    draw_detail=False,
     draw_scatterplot=True,
     highlight_members=True,
     member_color="tab:red",
@@ -382,22 +383,20 @@ def plot_region(
         largest_polygon = max(variable.region.polygon.geoms, key=lambda x: x.area)
         label_kwargs_ = {
             "ha": "center",
-            "va": "bottom",
-            "fontsize": 12,
-            "fontweight": "bold",
+            "va": "bottom" if draw_detail else "center",
+            "fontsize": 9,
         }
         label_kwargs_.update(label_kwargs)
         x, y = largest_polygon.centroid.coords[0]
         label = ax.text(x, y, variable.plot_label, **label_kwargs_)
-        if variable.plot_detail is not None:
+        if draw_detail and variable.plot_detail is not None:
             detail_kwargs_ = {
                 "ha": "center",
                 "va": "top",
                 "fontsize": 9,
-                "fontweight": "normal",
             }
             detail_kwargs_.update(detail_kwargs)
-            label = ax.text(x, y, variable.plot_detail, **detail_kwargs_)
+            label = ax.text(x, y, f"({variable.plot_detail})", **detail_kwargs_)
         # label.set_bbox(dict(facecolor="white", alpha=0.75, edgecolor="white"))
 
     if add_region_info:
@@ -442,6 +441,7 @@ def plot_regions(
     edge_alpha=1,
     lw=1,
     draw_labels=False,
+    draw_details=False,
     highlight_members=True,
     member_color="tab:red",
     add_region_info=False,
@@ -470,6 +470,7 @@ def plot_regions(
             edge_alpha=edge_alpha,
             lw=lw,
             draw_label=draw_labels,
+            draw_detail=draw_details,
             highlight_members=highlight_members,
             member_color=member_color,
             add_region_info=add_region_info,
@@ -574,6 +575,7 @@ def plot_annotation(
             fill_color=next(hues),
             ax=ax,
             draw_label=True,
+            draw_detail=False,
             highlight_members=False,
             draw_scatterplot=False,
             label_kwargs=label_kwargs,
