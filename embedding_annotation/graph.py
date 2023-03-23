@@ -1,6 +1,6 @@
 from collections import defaultdict
 from itertools import permutations
-from typing import NewType, TypeVar
+from typing import NewType, TypeVar, Union
 import scipy.sparse as sp
 
 import numpy as np
@@ -14,7 +14,7 @@ NodeList = NewType("NodeList", list[T])
 EdgeList = NewType("EdgeList", list[tuple[T, T]])
 
 
-def matrix_to_graph(mtx: sp.csr_matrix | sp.csc_matrix) -> Graph:
+def matrix_to_graph(mtx: sp.spmatrix) -> Graph:
     g = defaultdict(set)
 
     knng = mtx.tocsr()
@@ -155,7 +155,7 @@ def independent_sets(g: Graph) -> list[NodeList]:
 
 
 def graph_coloring_greedy(
-    g: Graph, node_ordering: NodeList | str = "degree"
+    g: Graph, node_ordering: Union[NodeList, str] = "degree"
 ) -> dict[T, int]:
     def _next_available_color(g, colors, v):
         neighboring_colors = {colors[u] for u in g[v]}

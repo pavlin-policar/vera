@@ -2,24 +2,23 @@ import warnings
 from collections.abc import Iterable
 from itertools import cycle
 from textwrap import wrap
-from typing import Any
+from typing import Any, Union
 
 import matplotlib.colors as clr
 import matplotlib.colors as colors
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
-from matplotlib import collections
-from matplotlib.path import Path
-from matplotlib.patches import PathPatch
 import numpy as np
 import pandas as pd
+from matplotlib.patches import PathPatch
+from matplotlib.path import Path
 
-from embedding_annotation.variables import ExplanatoryVariable, EmbeddingRegionMixin
 from embedding_annotation.region import Density, Region
+from embedding_annotation.variables import ExplanatoryVariable, EmbeddingRegionMixin
 
 
 def plot_feature(
-    feature_names: Any | list[Any],
+    feature_names: Union[Any, list[Any]],
     df: pd.DataFrame,
     embedding: np.ndarray,
     binary=False,
@@ -106,7 +105,7 @@ def plot_feature(
 
 
 def plot_features(
-    features: list[Any] | dict[str, list[Any]],
+    features: Union[list[Any], dict[str, list[Any]]],
     data: pd.DataFrame,
     embedding: np.ndarray,
     per_row=4,
@@ -200,7 +199,7 @@ def get_cmap_hues(cmap: str):
 
 
 def hue_colormap(
-    hue: float, levels: Iterable | int = 10, min_saturation: float = 0
+    hue: float, levels: Union[Iterable, int] = 10, min_saturation: float = 0
 ) -> colors.ListedColormap:
     """Create an HSV colormap with varying saturation levels"""
     if isinstance(levels, Iterable):
@@ -216,9 +215,9 @@ def hue_colormap(
 
 
 def plot_density(
-    density: ExplanatoryVariable | Region | Density,
+    density: Union[ExplanatoryVariable, Region, Density],
     embedding: np.ndarray = None,
-    levels: int | np.ndarray = 5,
+    levels: Union[int, np.ndarray] = 5,
     skip_first: bool = True,
     ax=None,
     cmap="RdBu_r",
@@ -265,7 +264,7 @@ def plot_density(
 
 def plot_densities(
     variables: list[ExplanatoryVariable],
-    levels: int | np.ndarray = 5,
+    levels: Union[int, np.ndarray] = 5,
     skip_first: bool = True,
     per_row: int = 4,
     figwidth: int = 24,

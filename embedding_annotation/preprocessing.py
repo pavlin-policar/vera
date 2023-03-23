@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import Any
+from typing import Any, Union
 
 import numpy as np
 import pandas as pd
@@ -17,7 +17,7 @@ from embedding_annotation.variables import (
 )
 
 
-def _pd_dtype_to_variable(col_name: str | Variable, col_type) -> Variable:
+def _pd_dtype_to_variable(col_name: Union[str, Variable], col_type) -> Variable:
     """Convert a column from a pandas DataFrame to a Variable instance.
 
     Parameters
