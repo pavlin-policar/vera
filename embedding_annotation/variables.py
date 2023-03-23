@@ -320,11 +320,11 @@ class ExplanatoryVariableGroup(EmbeddingRegionMixin):
 
     @property
     def plot_label(self) -> str:
-        return str(self.name)
+        return "\n".join(str(f) for f in self.contained_variables)
 
     @property
     def plot_detail(self) -> str:
-        return "\n".join(str(f) for f in self.contained_variables)
+        return str(self.name)
 
     @cached_property
     def contained_samples(self):
