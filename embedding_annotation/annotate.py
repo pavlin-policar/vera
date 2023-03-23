@@ -62,13 +62,13 @@ def filter_explanatory_features(
     features: list[ExplanatoryVariable],
     min_samples: int = 5,
     min_purity: float = 0.5,
-    min_moran_index: float = 0.5,
+    max_geary_index: float = 0.5,
 ):
     return [
         f
         for f in features
         if f.purity >= min_purity
-        and f.morans_i >= min_moran_index
+        and f.gearys_c <= max_geary_index
         and f.num_all_samples >= min_samples
     ]
 

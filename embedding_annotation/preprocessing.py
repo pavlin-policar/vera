@@ -238,22 +238,25 @@ def merge_overfragmented_candidates(
                     continue
 
                 new_variable = v1.merge_with(v2)
-                purity_gain = new_variable.purity / np.maximum(v1.purity, v2.purity) - 1
-                moran_gain = (
-                    new_variable.morans_i / np.maximum(v1.morans_i, v2.morans_i) - 1
+                # purity_gain = new_variable.purity / np.maximum(v1.purity, v2.purity) - 1
+                v1_purity_gain = new_variable.purity / v1.purity - 1
+                v2_purity_gain = new_variable.purity / v2.purity - 1
+                purity_gain = np.mean([v1_purity_gain, v2_purity_gain])
+                geary_gain = (
+                    min(v1.gearys_c, v2.gearys_c) / (new_variable.gearys_c + 1e-8) - 1
                 )
                 shared_sample_pct = metrics.max_shared_sample_pct(v1, v2)
                 if (
                     purity_gain >= min_purity_gain
                     and shared_sample_pct >= min_sample_overlap
-                    and moran_gain >= 0
+                    and geary_gain >= 0
                 ):
                     candidates.append(
                         {
                             "feature_1": v1,
                             "feature_2": v2,
                             "purity_gain": purity_gain,
-                            "moran_gain": moran_gain,
+                            "geary_gain": geary_gain,
                             "sample_overlap": shared_sample_pct,
                         }
                     )
@@ -264,7 +267,7 @@ def merge_overfragmented_candidates(
             "feature_1",
             "feature_2",
             "purity_gain",
-            "moran_gain",
+            "geary_gain",
             "sample_overlap",
         ],
     )
