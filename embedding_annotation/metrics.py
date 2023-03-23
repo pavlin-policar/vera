@@ -92,7 +92,24 @@ def morans_i(x: np.ndarray, adj: sp.spmatrix) -> np.ndarray:
     return N / W * n / (d + 1e-16)
 
 
-def gearys_c(x: np.ndarray, adj: sp.spmatrix) -> np.ndarray:
+def gearys_c(x: np.ndarray, adj: sp.spmatrix, adjustment: float = 1e-8) -> np.ndarray:
+    """Compute the Geary's C spatial autocorrelation statistic.
+
+    Parameters
+    ----------
+    x: np.ndarray
+    adj: sp.spmatrix
+        The adjacency matrix.
+    adjustment: float
+        The adjustment is added to the numerator of the equation to avoid the
+        case where all the vaues are the same. In this case, Geary's C equals
+        zero, but this is not a spacially interesting case result.
+
+    Returns
+    -------
+    np.ndarray
+
+    """
     assert (
         x.shape[0] == adj.shape[0]
     ), "Feature matrix dimensions do not match adjacency matrix."
@@ -104,7 +121,7 @@ def gearys_c(x: np.ndarray, adj: sp.spmatrix) -> np.ndarray:
     W = adj.sum()
 
     diff = (x[adj.row, :] - x[adj.col, :]) ** 2
-    n = adj.data.dot(diff)
+    n = adj.data.dot(diff) + adjustment
     d = np.sum((x - np.mean(x, axis=0)) ** 2, axis=0)
 
     score = (N - 1) / (2 * W) * n / (d + 1e-16)
