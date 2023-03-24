@@ -1,4 +1,4 @@
-from typing import Iterable
+from typing import Iterable, Union
 
 import numpy as np
 
@@ -132,8 +132,14 @@ class EqualityRule(Rule):
     def __hash__(self):
         return hash((self.__class__.__name__, self.value))
 
-    def __lt__(self, other):
-        return self.value < other.value
+    def __lt__(self, other: Union["EqualityRule", "OneOfRule"]) -> bool:
+        if isinstance(other, OneOfRule):
+            other_vals = sorted(list(other.values))
+            return self.value < other_vals[0]
+        elif isinstance(other, EqualityRule):
+            return self.value < other.value
+        else:
+            raise NotImplementedError()
 
 
 class OneOfRule(Rule):
@@ -182,7 +188,12 @@ class OneOfRule(Rule):
     def __hash__(self):
         return hash((self.__class__.__name__, tuple(sorted(tuple(self.values)))))
 
-    def __lt__(self, other):
+    def __lt__(self, other: Union["EqualityRule", "OneOfRule"]) -> bool:
         my_vals = sorted(list(self.values))
-        other_vals = sorted(list(other.values))
-        return my_vals[0] < other_vals[0]
+        if isinstance(other, EqualityRule):
+            return my_vals[0] < other.value
+        elif isinstance(other, OneOfRule):
+            other_vals = sorted(list(other.values))
+            return my_vals[0] < other_vals[0]
+        else:
+            raise NotImplementedError()

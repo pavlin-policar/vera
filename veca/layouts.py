@@ -36,7 +36,7 @@ def contrastive(variables: list[ExplanatoryVariable]):
         layout_scores[v] = np.mean(purities) * (1 - min_overlap[v])
 
     sorted_keys = reversed(sorted(variable_groups, key=layout_scores.get))
-    sorted_groups = [variable_groups[k] for k in sorted_keys]
+    sorted_groups = [sorted(variable_groups[k]) for k in sorted_keys]
     return sorted_groups
 
 

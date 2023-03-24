@@ -114,6 +114,9 @@ class DerivedVariable(Variable):
     def __hash__(self):
         return hash((self.__class__.__name__, self.base_variable, self.rule))
 
+    def __lt__(self, other):
+        return (self.base_variable, self.rule) < (other.base_variable, other.rule)
+
 
 class EmbeddingRegionMixin:
     """This mixin contains all the functionality to do with anything computed on
