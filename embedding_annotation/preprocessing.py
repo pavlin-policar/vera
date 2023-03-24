@@ -1,3 +1,4 @@
+import warnings
 from collections import defaultdict
 from typing import Union
 
@@ -115,6 +116,7 @@ def _discretize(df: pd.DataFrame, n_bins: int = 5) -> pd.DataFrame:
 
     # Use k-means for discretization
     from sklearn.preprocessing import KBinsDiscretizer
+    from sklearn.exceptions import ConvergenceWarning
 
     # Ensure that the number of bins is not larger than the number of unique
     # values
@@ -125,7 +127,9 @@ def _discretize(df: pd.DataFrame, n_bins: int = 5) -> pd.DataFrame:
         strategy="kmeans",
         encode="onehot-dense",
     )
-    x_discretized = discretizer.fit_transform(df_cont_imputed.values)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=ConvergenceWarning)
+        x_discretized = discretizer.fit_transform(df_cont_imputed.values)
 
     # Create derived features
     derived_features = []
