@@ -340,6 +340,7 @@ def plot_region(
     highlight_members=True,
     member_color="tab:red",
     add_region_info=False,
+    indicate_purity: bool = False,
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
     detail_kwargs: dict = {},
@@ -350,6 +351,10 @@ def plot_region(
     # If no edge color is specified, use the same color as the fill
     if edge_color is None:
         edge_color = fill_color
+
+    if indicate_purity:
+        edge_alpha *= variable.purity
+        fill_alpha *= variable.purity
 
     for geom in variable.region.polygon.geoms:
         # Polygon plotting code taken from
@@ -449,6 +454,7 @@ def plot_regions(
     highlight_members=True,
     member_color="tab:red",
     add_region_info=False,
+    indicate_purity: bool = False,
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
     detail_kwargs: dict = {},
@@ -478,6 +484,7 @@ def plot_regions(
             highlight_members=highlight_members,
             member_color=member_color,
             add_region_info=add_region_info,
+            indicate_purity=indicate_purity,
             scatter_kwargs=scatter_kwargs,
             label_kwargs=label_kwargs,
             detail_kwargs=detail_kwargs,
@@ -564,6 +571,7 @@ def plot_annotation(
     variables: list[ExplanatoryVariable],
     cmap: str = "tab10",
     ax=None,
+    indicate_purity: bool = False,
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
     detail_kwargs: dict = {},
@@ -582,6 +590,7 @@ def plot_annotation(
             draw_detail=False,
             highlight_members=False,
             draw_scatterplot=False,
+            indicate_purity=indicate_purity,
             label_kwargs=label_kwargs,
             detail_kwargs=detail_kwargs,
         )
@@ -612,6 +621,7 @@ def plot_annotations(
     figwidth: int = 24,
     return_ax: bool = False,
     cmap: str = "tab10",
+    indicate_purity: bool = False,
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
     detail_kwargs: dict = {},
@@ -632,6 +642,7 @@ def plot_annotations(
             variables,
             cmap=cmap,
             ax=ax[idx],
+            indicate_purity=indicate_purity,
             scatter_kwargs=scatter_kwargs,
             label_kwargs=label_kwargs,
             detail_kwargs=detail_kwargs,
