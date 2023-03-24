@@ -4,10 +4,10 @@ import numpy as np
 import pandas as pd
 from sklearn.utils import check_random_state
 
-import embedding_annotation.graph as g
-import embedding_annotation.preprocessing as pp
-from embedding_annotation import metrics
-from embedding_annotation.variables import ExplanatoryVariable, ExplanatoryVariableGroup
+import veca.graph as g
+import veca.preprocessing as pp
+from veca import metrics
+from veca.variables import ExplanatoryVariable, ExplanatoryVariableGroup
 
 
 def generate_explanatory_features(
@@ -113,7 +113,7 @@ def group_similar_variables(
 
 
 def find_layouts(
-    variables: list[ExplanatoryVariable], max_overlap: float = 0.05
+    variables: list[ExplanatoryVariable], max_overlap: float = 0.2
 ) -> list[list[Any]]:
     overlap = metrics.pdist(variables, metrics.max_shared_sample_pct)
     graph = g.similarities_to_graph(overlap, threshold=max_overlap)

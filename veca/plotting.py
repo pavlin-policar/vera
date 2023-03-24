@@ -13,8 +13,8 @@ import pandas as pd
 from matplotlib.patches import PathPatch
 from matplotlib.path import Path
 
-from embedding_annotation.region import Density, Region
-from embedding_annotation.variables import ExplanatoryVariable, EmbeddingRegionMixin
+from veca.region import Density, Region
+from veca.variables import ExplanatoryVariable, EmbeddingRegionMixin
 
 
 def plot_feature(
@@ -388,7 +388,11 @@ def plot_region(
         }
         label_kwargs_.update(label_kwargs)
         x, y = largest_polygon.centroid.coords[0]
-        label = ax.text(x, y, variable.plot_label, **label_kwargs_)
+        label_parts = map(
+            lambda x: "\n".join(wrap(x, width=80)),
+            str(variable.plot_label).split("\n"),
+        )
+        label = ax.text(x, y, "\n".join(label_parts), **label_kwargs_)
         if draw_detail and variable.plot_detail is not None:
             detail_kwargs_ = {
                 "ha": "center",
@@ -600,3 +604,42 @@ def plot_annotation(
     ax.axis("equal")
 
     return ax
+
+
+def plot_annotations(
+    layouts: list[list[ExplanatoryVariable]],
+    per_row: int = 4,
+    figwidth: int = 24,
+    return_ax: bool = False,
+    cmap: str = "tab10",
+    scatter_kwargs: dict = {},
+    label_kwargs: dict = {},
+    detail_kwargs: dict = {},
+):
+    n_rows = len(layouts) // per_row
+    if len(layouts) % per_row > 0:
+        n_rows += 1
+
+    figheight = figwidth / per_row * n_rows
+    fig, ax = plt.subplots(nrows=n_rows, ncols=per_row, figsize=(figwidth, figheight))
+
+    if len(layouts) == 1:
+        ax = np.array([ax])
+    ax = ax.ravel()
+
+    for idx, variables in enumerate(layouts):
+        plot_annotation(
+            variables,
+            cmap=cmap,
+            ax=ax[idx],
+            scatter_kwargs=scatter_kwargs,
+            label_kwargs=label_kwargs,
+            detail_kwargs=detail_kwargs,
+        )
+
+    # Hide remaining axes
+    for idx in range(idx + 1, n_rows * per_row):
+        ax[idx].axis("off")
+
+    if return_ax:
+        return fig, ax

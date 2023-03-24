@@ -87,6 +87,9 @@ class IntervalRule(Rule):
     def __hash__(self):
         return hash((self.__class__.__name__, self.lower, self.upper))
 
+    def __lt__(self, other: "IntervalRule") -> bool:
+        return self.lower < other.lower
+
 
 class EqualityRule(Rule):
     def __init__(self, value, value_name: str = "x"):
@@ -128,6 +131,9 @@ class EqualityRule(Rule):
 
     def __hash__(self):
         return hash((self.__class__.__name__, self.value))
+
+    def __lt__(self, other):
+        return self.value < other.value
 
 
 class OneOfRule(Rule):
@@ -175,3 +181,8 @@ class OneOfRule(Rule):
 
     def __hash__(self):
         return hash((self.__class__.__name__, tuple(sorted(tuple(self.values)))))
+
+    def __lt__(self, other):
+        my_vals = sorted(list(self.values))
+        other_vals = sorted(list(other.values))
+        return my_vals[0] < other_vals[0]

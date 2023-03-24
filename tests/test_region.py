@@ -3,8 +3,8 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from embedding_annotation.annotate import estimate_feature_densities, find_regions
-from embedding_annotation import d, pl
+import veca.preprocessing
+from veca.preprocessing import estimate_feature_densities, find_regions
 
 
 def plot(x, y=None, show=True):
@@ -30,7 +30,7 @@ class TestRegion(unittest.TestCase):
 
         features = pd.DataFrame()
         features["inner"] = np.linalg.norm(x, axis=1) < 0.5
-        features = d.generate_explanatory_features(features)
+        features = veca.pp.generate_explanatory_features(features)
 
         features_list = features.columns.tolist()
 
@@ -62,7 +62,7 @@ class TestRegion(unittest.TestCase):
         hole4 = np.linalg.norm(x - [-1, -1], axis=1) < 0.5
         features["holes"] = hole1 | hole2 | hole3 | hole4
         features["holes"] = features["holes"].astype("category")
-        features = d.generate_explanatory_features(features)
+        features = veca.pp.generate_explanatory_features(features)
 
         features_list = features.columns.tolist()
 

@@ -3,9 +3,9 @@ from functools import cached_property, reduce
 
 import numpy as np
 
-from embedding_annotation import metrics
-from embedding_annotation.region import Region, CompositeRegion
-from embedding_annotation.rules import Rule
+from veca import metrics
+from veca.region import Region, CompositeRegion
+from veca.rules import Rule
 
 
 class Variable:
@@ -291,7 +291,7 @@ class ExplanatoryVariableGroup(EmbeddingRegionMixin):
         feature_values = np.vstack([v.values for v in variables])
         # Take min: if plotted together, we expect each point to fulfill all the
         # rules in the feature group
-        merged_values = np.min(feature_values, axis=0)
+        merged_values = np.max(feature_values, axis=0)
         merged_region = CompositeRegion([v.region for v in variables])
 
         embedding = v0.embedding

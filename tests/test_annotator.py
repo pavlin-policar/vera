@@ -1,103 +1,101 @@
-import os.path
-import shutil
 import unittest
-from dataclasses import dataclass
-from os import path
 
 import numpy as np
-import openTSNE
-import pandas as pd
-from sklearn import datasets
 
-import embedding_annotation as annotate
+import veca as annotate
+import veca.embedding
+import veca.preprocessing
 
 DATA_DIR = "data"
 
 
-@dataclass
-class TestDataset:
-    name: str
-    embedding: np.ndarray
-    features: pd.DataFrame
-
-    @property
-    def data_dir(self):
-        return path.join(DATA_DIR, self.name)
-
-    @classmethod
-    def load(cls, name):
-        embedding_fname = path.join(DATA_DIR, name, "embedding.csv")
-        features_fname = path.join(DATA_DIR, name, "features.csv")
-        if not path.exists(embedding_fname):
-            raise FileNotFoundError(embedding_fname)
-        if not path.exists(features_fname):
-            raise FileNotFoundError(features_fname)
-
-        embedding = pd.read_csv(embedding_fname, header=None).values
-        features = pd.read_csv(features_fname)
-
-        return cls(name, embedding, features)
-
-    def save(self, force=False):
-        if os.path.exists(self.data_dir):
-            if force:
-                shutil.rmtree(self.data_dir)
-            else:
-                raise FileExistsError(self.data_dir)
-
-        os.mkdir(self.data_dir)
-
-        pd.DataFrame(self.embedding).to_csv(
-            path.join(self.data_dir, "embedding.csv"), header=False, index=False
-        )
-        self.features.to_csv(path.join(self.data_dir, "features.csv"), index=False)
-
-
-def prepare_iris():
-    iris = datasets.load_iris()
-    x = pd.DataFrame(iris["data"], columns=iris["feature_names"])
-
-    embedding = openTSNE.TSNE(metric="cosine", perplexity=30).fit(x.values)
-
-    return TestDataset("iris", embedding, x)
+import sys
+sys.path.append("../experiments/")
+import datasets
 
 
 class TestAnnotator(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        try:
-            cls.iris = TestDataset.load("iris")
-        except FileNotFoundError:
-            cls.iris = prepare_iris()
-            cls.iris.save(force=True)
+        cls.iris = datasets.Dataset.load("bike_sharing")
+
+    def test_iris(self):
+        x, embedding = self.iris.features, self.iris.embedding
+        x, embedding = x[:5000], embedding[:5000]
+        features = annotate.an.generate_explanatory_features(x, embedding)
+
+        merged_features = annotate.pp.merge_overfragmented(features, min_sample_overlap=0.5)
+        pass
 
     def test_bla(self):
         embedding, x = self.iris.embedding, self.iris.features
-        features = annotate.d.generate_explanatory_features(x)
-        candidates = annotate.fs.morans_i(embedding, features)
-        feature_densities = annotate.an.estimate_feature_densities(
-            candidates["feature"].tolist(),
-            embedding,
-            features,
-        )
 
-        clusters, cluster_densities = annotate.an.group_similar_features(
+        # Desired API
+        features = veca.an.generate_explanatory_features()
+        features = veca.an.filter_explanatory_features(features)
+
+        feature_groups = veca.an.group_similar_features(features)
+        feature_groups = veca.an.filter_explanatory_features(feature_groups)
+
+        layouts = veca.an.find_layouts(feature_groups)
+
+        # Find contrastive features
+        veca.layouts.contrastive(features)
+        # find other
+        veca.layouts.descriptive(features)
+
+
+        layouts = veca.rank.contrastive(layouts)
+        veca.pl.layouts(layouts)
+
+        # END
+
+        features = veca.pp.generate_explanatory_features(x, embedding)
+
+        layouts = vasari.explain(features, embedding)
+        layouts = vasari.rank.contrastive(layouts)
+        vasari.plot.layouts(layouts, embedding)
+
+        # Or, simlpy
+        layouts = vasari.explain(features, embedding)
+        layouts = vasari.rank.contrastive(layouts)
+        vasari.plot.layouts(layouts, embedding)
+
+        # Current implementation
+        features = veca.preprocessing.generate_explanatory_features(x)
+
+        k_neighbors = int(np.floor(np.sqrt(embedding.shape[0])))
+        scale = veca.embedding.kth_neighbor_distance(embedding, k_neighbors)
+
+        candidates = annotate.fs.morans_i(embedding, features, scale=scale)
+
+        feature_densities = veca.preprocessing.estimate_feature_densities(
             candidates["feature"].tolist(),
-            feature_densities,
+            features,
+            embedding,
+            bw=scale,
+        )
+        regions = veca.preprocessing.find_regions(feature_densities, level=0.25)
+
+        merged_regions = annotate.an.stage_1_merge_regions(regions, overlap_threshold=0.75)
+
+        clusters, cluster_densities = annotate.an.group_similar_variables(
+            merged_regions.tolist(),
+            merged_regions,
             threshold=0.85,
             method="connected-components",
         )
 
-        annotate.pl.plot_feature_densities(
-            list(clusters),
-            cluster_densities,
-            embedding=embedding,
-            levels=4,
-            skip_first=False,
-            per_row=1,
-            figwidth=4,
-        )
-        import matplotlib.pyplot as plt
-
-        plt.tight_layout()
-        plt.show()
+        # annotate.pl.plot_feature_densities(
+        #     list(clusters),
+        #     cluster_densities,
+        #     embedding=embedding,
+        #     levels=4,
+        #     skip_first=False,
+        #     per_row=1,
+        #     figwidth=4,
+        # )
+        # import matplotlib.pyplot as plt
+        #
+        # plt.tight_layout()
+        # plt.show()

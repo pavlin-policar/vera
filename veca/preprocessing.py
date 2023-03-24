@@ -4,13 +4,14 @@ from typing import Union
 
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
-import embedding_annotation.graph as g
-from embedding_annotation import metrics
-from embedding_annotation.embedding import Embedding
-from embedding_annotation.region import Density, Region
-from embedding_annotation.rules import IntervalRule, EqualityRule
-from embedding_annotation.variables import (
+import veca.graph as g
+from veca import metrics
+from veca.embedding import Embedding
+from veca.region import Density, Region
+from veca.rules import IntervalRule, EqualityRule
+from veca.variables import (
     DerivedVariable,
     ExplanatoryVariable,
     DiscreteVariable,
@@ -211,7 +212,7 @@ def convert_derived_features_to_explanatory(
 
     # Create explanatory variables from each of the derived features
     explanatory_features = []
-    for v in df.columns.tolist():
+    for v in tqdm(df.columns.tolist()):
         values = df[v].values
         density = Density.from_embedding(
             embedding,
@@ -266,7 +267,7 @@ def merge_overfragmented(
             variable_groups[v.base_variable].append(v)
 
         merged_variables = []
-        for k, variable_group in variable_groups.items():
+        for k, variable_group in tqdm(variable_groups.items()):
             dists = metrics.pdist(variable_group, _dist)
             graph = g.similarities_to_graph(dists, threshold=0.5)
             node_labels = dict(enumerate(variable_group))

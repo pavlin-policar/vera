@@ -1,6 +1,6 @@
 import unittest
 
-import embedding_annotation.graph as g
+import veca.graph as g
 
 
 class TestMergeNodes(unittest.TestCase):

@@ -5,7 +5,7 @@ import contourpy
 import numpy as np
 from shapely import geometry as geom
 
-from embedding_annotation.embedding import Embedding
+from veca.embedding import Embedding
 
 
 class Density:
