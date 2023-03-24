@@ -1,9 +1,10 @@
 from collections import defaultdict
-from typing import Any, Union
+from typing import Union
 
 import numpy as np
 import pandas as pd
 
+import embedding_annotation.graph as g
 from embedding_annotation import metrics
 from embedding_annotation.embedding import Embedding
 from embedding_annotation.region import Density, Region
@@ -227,103 +228,62 @@ def convert_derived_features_to_explanatory(
     return explanatory_features
 
 
-def merge_overfragmented_candidates(
-    variables: list[ExplanatoryVariable],
-    min_purity_gain=0.05,
-    min_sample_overlap=0.5,
-):
-    variable_groups = defaultdict(list)
-    for v in variables:
-        variable_groups[v.base_variable].append(v)
-
-    candidates = []
-    for variable_group in variable_groups.values():
-        for i in range(len(variable_group)):
-            for j in range(i + 1, len(variable_group)):
-                v1, v2 = variable_group[i], variable_group[j]
-                if not v1.can_merge_with(v2):
-                    continue
-
-                new_variable = v1.merge_with(v2)
-                # purity_gain = new_variable.purity / np.maximum(v1.purity, v2.purity) - 1
-                v1_purity_gain = new_variable.purity / v1.purity - 1
-                v2_purity_gain = new_variable.purity / v2.purity - 1
-                purity_gain = np.mean([v1_purity_gain, v2_purity_gain])
-                geary_gain = (
-                    min(v1.gearys_c, v2.gearys_c) / (new_variable.gearys_c + 1e-8) - 1
-                )
-                shared_sample_pct = metrics.max_shared_sample_pct(v1, v2)
-                if (
-                    purity_gain >= min_purity_gain
-                    and shared_sample_pct >= min_sample_overlap
-                    and geary_gain >= 0
-                ):
-                    candidates.append(
-                        {
-                            "feature_1": v1,
-                            "feature_2": v2,
-                            "purity_gain": purity_gain,
-                            "geary_gain": geary_gain,
-                            "sample_overlap": shared_sample_pct,
-                        }
-                    )
-
-    candidates = pd.DataFrame(
-        candidates,
-        columns=[
-            "feature_1",
-            "feature_2",
-            "purity_gain",
-            "geary_gain",
-            "sample_overlap",
-        ],
-    )
-
-    # If a feature is to be merged with more than one variable, allow only a
-    # single merge. Pick the merge with the largest gain
-    candidates = candidates.sort_values("purity_gain", ascending=False)
-
-    seen, idx_to_drop = set(), []
-    for idx, row in candidates.iterrows():
-        pair = frozenset([row["feature_1"], row["feature_2"]])
-        if any(len(pair & s) > 0 for s in seen):
-            idx_to_drop.append(idx)
-        else:
-            seen.add(pair)
-    candidates.drop(index=idx_to_drop, inplace=True)
-
-    return candidates.reset_index(drop=True)
-
-
 def merge_overfragmented(
     variables: list[ExplanatoryVariable],
     min_purity_gain=0.05,
     min_sample_overlap=0.5,
+    min_geary_gain=0,
 ):
-    variables = set(variables)
+    def _dist(v1, v2):
+        if not v1.can_merge_with(v2):
+            return 0
 
-    def _merge_variables(variables_to_merge: tuple[Any, Any]):
-        """Merge all the regions in the list of tuples."""
-        nonlocal variables
+        shared_sample_pct = metrics.max_shared_sample_pct(v1, v2)
+        # if shared_sample_pct < min_sample_overlap:
+        #    return 0
 
-        # Sometimes, a feature should be merged more than once, so we can't
-        # remove it immediately after merge
-        variables_to_remove = set()
-        for v1, v2 in variables_to_merge:
-            variables.add(v1.merge_with(v2))
-            variables_to_remove.update([v1, v2])
-
-        variables -= variables_to_remove
-
-    while (
-        variables_to_merge := merge_overfragmented_candidates(
-            variables,
-            min_purity_gain=min_purity_gain,
-            min_sample_overlap=min_sample_overlap,
-        )
-    ).shape[0] > 0:
-        _merge_variables(
-            variables_to_merge[["feature_1", "feature_2"]].itertuples(index=False)
+        new_variable = v1.merge_with(v2)
+        v1_purity_gain = new_variable.purity / v1.purity - 1
+        v2_purity_gain = new_variable.purity / v2.purity - 1
+        purity_gain = np.mean([v1_purity_gain, v2_purity_gain])
+        geary_gain = (
+            min(v1.gearys_c, v2.gearys_c) / (new_variable.gearys_c + 1e-8) - 1
         )
 
-    return list(variables)
+        return int(
+            purity_gain >= min_purity_gain
+            and geary_gain >= min_geary_gain
+            and shared_sample_pct >= min_sample_overlap
+        )
+
+    def _merge_round(variables):
+        variable_groups = defaultdict(list)
+        for v in variables:
+            variable_groups[v.base_variable].append(v)
+
+        merged_variables = []
+        for k, variable_group in variable_groups.items():
+            dists = metrics.pdist(variable_group, _dist)
+            graph = g.similarities_to_graph(dists, threshold=0.5)
+            node_labels = dict(enumerate(variable_group))
+            graph = g.label_nodes(graph, node_labels)
+            connected_components = g.connected_components(graph)
+
+            for c in connected_components:
+                curr_node = next(iter(c))
+                while len(c[curr_node]):
+                    next_node = next(iter(c[curr_node]))
+                    c = g.merge_nodes(c, curr_node, next_node, curr_node.merge_with(next_node))
+                    curr_node = next(iter(c))
+                assert len(c) == 1
+                merged_variables.append(curr_node)
+
+        return merged_variables
+
+    # TODO: This can be sped up by only recomputing variable groups that have
+    # changed in the last round. We now recompute all variable groups every time
+    prev_len = len(variables)
+    while len(variables := _merge_round(variables)) < prev_len:
+        prev_len = len(variables)
+
+    return variables
