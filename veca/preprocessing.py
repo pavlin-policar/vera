@@ -244,8 +244,8 @@ def merge_overfragmented(
             return 0
 
         shared_sample_pct = metrics.max_shared_sample_pct(v1, v2)
-        # if shared_sample_pct < min_sample_overlap:
-        #    return 0
+        if shared_sample_pct < min_sample_overlap:
+            return 0
 
         new_variable = v1.merge_with(v2)
         v1_purity_gain = new_variable.purity / v1.purity - 1
@@ -254,16 +254,11 @@ def merge_overfragmented(
 
         v1_geary_gain = (1 - new_variable.gearys_c) / (1 - v1.gearys_c + 1e-16)
         v2_geary_gain = (1 - new_variable.gearys_c) / (1 - v2.gearys_c + 1e-16)
-        # geary_gain = (
-        #     min(v1.gearys_c, v2.gearys_c) / (new_variable.gearys_c + 1e-16) - 1
-        # )
         geary_gain = np.mean([v1_geary_gain, v2_geary_gain])
-        # geary_gain += 1e-8  # undo ronuding error in geary gain
 
         return int(
             purity_gain >= min_purity_gain
             and geary_gain >= min_geary_gain - 1e-4
-            and shared_sample_pct >= min_sample_overlap
         )
 
     def _merge_round(variables):
@@ -295,5 +290,11 @@ def merge_overfragmented(
     prev_len = len(variables)
     while len(variables := _merge_round(variables)) < prev_len:
         prev_len = len(variables)
+
+    # Filter out groups that now only have a single explanatory variable
+    variable_groups = defaultdict(list)
+    for v in variables:
+        variable_groups[v.base_variable].append(v)
+    variables = [v for v in variables if len(variable_groups[v.base_variable]) > 1]
 
     return variables

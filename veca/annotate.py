@@ -19,7 +19,7 @@ def generate_explanatory_features(
     n_grid_points: int = 100,
     kernel: str = "gaussian",
     contour_level: float = 0.25,
-    merge_min_purity_gain=0.05,
+    merge_min_purity_gain=0.5,
     merge_min_sample_overlap=0.5,
     random_state: Any = None,
 ):
