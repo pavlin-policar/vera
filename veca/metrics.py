@@ -92,7 +92,7 @@ def morans_i(x: np.ndarray, adj: sp.spmatrix) -> np.ndarray:
     return N / W * n / (d + 1e-16)
 
 
-def gearys_c(x: np.ndarray, adj: sp.spmatrix, adjustment: float = 1e-8) -> np.ndarray:
+def gearys_c(x: np.ndarray, adj: sp.spmatrix, adjustment: float = 1e-16) -> np.ndarray:
     """Compute the Geary's C spatial autocorrelation statistic.
 
     Parameters
@@ -125,6 +125,9 @@ def gearys_c(x: np.ndarray, adj: sp.spmatrix, adjustment: float = 1e-8) -> np.nd
     d = np.sum((x - np.mean(x, axis=0)) ** 2, axis=0)
 
     score = (N - 1) / (2 * W) * n / (d + 1e-16)
+    # The adjustment can make Geary's C a really large number, so we clamp that
+    # to 1, which is the maximal possible value.
+    score = np.minimum(score, 1)
 
     if score.size == 1:  # if a single attribute is passed, the size is (1,)
         score = score[0]

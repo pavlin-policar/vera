@@ -251,13 +251,18 @@ def merge_overfragmented(
         v1_purity_gain = new_variable.purity / v1.purity - 1
         v2_purity_gain = new_variable.purity / v2.purity - 1
         purity_gain = np.mean([v1_purity_gain, v2_purity_gain])
-        geary_gain = (
-            min(v1.gearys_c, v2.gearys_c) / (new_variable.gearys_c + 1e-8) - 1
-        )
+
+        v1_geary_gain = (1 - new_variable.gearys_c) / (1 - v1.gearys_c + 1e-16)
+        v2_geary_gain = (1 - new_variable.gearys_c) / (1 - v2.gearys_c + 1e-16)
+        # geary_gain = (
+        #     min(v1.gearys_c, v2.gearys_c) / (new_variable.gearys_c + 1e-16) - 1
+        # )
+        geary_gain = np.mean([v1_geary_gain, v2_geary_gain])
+        # geary_gain += 1e-8  # undo ronuding error in geary gain
 
         return int(
             purity_gain >= min_purity_gain
-            and geary_gain >= min_geary_gain
+            and geary_gain >= min_geary_gain - 1e-4
             and shared_sample_pct >= min_sample_overlap
         )
 
