@@ -1,3 +1,4 @@
+from collections import defaultdict
 from typing import Any, Callable
 
 import numpy as np
@@ -22,6 +23,8 @@ def generate_explanatory_features(
     merge_min_purity_gain=0.5,
     merge_min_sample_overlap=0.5,
     random_state: Any = None,
+    filter_trivial_groups: bool = True,
+    return_unmerged_features: bool = False,
 ):
     # Sample the data if necessary. Running on large data sets can be very slow
     random_state = check_random_state(random_state)
@@ -49,13 +52,27 @@ def generate_explanatory_features(
     )
 
     # Perform iterative merging
-    explanatory_features = pp.merge_overfragmented(
+    merged_explanatory_features = pp.merge_overfragmented(
         explanatory_features,
         min_purity_gain=merge_min_purity_gain,
         min_sample_overlap=merge_min_sample_overlap,
     )
 
-    return explanatory_features
+    # Filter out groups that now only have a single explanatory variable
+    if filter_trivial_groups:
+        variable_groups = defaultdict(list)
+        for v in merged_explanatory_features:
+            variable_groups[v.base_variable].append(v)
+        merged_explanatory_features = [
+            v
+            for v in merged_explanatory_features
+            if len(variable_groups[v.base_variable]) > 1
+        ]
+
+    if return_unmerged_features:
+        return merged_explanatory_features, explanatory_features
+    else:
+        return merged_explanatory_features
 
 
 def filter_explanatory_features(

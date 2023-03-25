@@ -109,6 +109,7 @@ def _discretize(df: pd.DataFrame, n_bins: int = 5) -> pd.DataFrame:
 
     # Sklearn discretization doesn't support NaNs, so impute median
     from sklearn.impute import SimpleImputer
+
     imputer = SimpleImputer(strategy="median")
     df_cont_imputed = imputer.fit_transform(df_cont.values)
     df_cont_imputed = pd.DataFrame(
@@ -257,8 +258,7 @@ def merge_overfragmented(
         geary_gain = np.mean([v1_geary_gain, v2_geary_gain])
 
         return int(
-            purity_gain >= min_purity_gain
-            and geary_gain >= min_geary_gain - 1e-4
+            purity_gain >= min_purity_gain and geary_gain >= min_geary_gain - 1e-4
         )
 
     def _merge_round(variables):
@@ -278,7 +278,9 @@ def merge_overfragmented(
                 curr_node = next(iter(c))
                 while len(c[curr_node]):
                     next_node = next(iter(c[curr_node]))
-                    c = g.merge_nodes(c, curr_node, next_node, curr_node.merge_with(next_node))
+                    c = g.merge_nodes(
+                        c, curr_node, next_node, curr_node.merge_with(next_node)
+                    )
                     curr_node = next(iter(c))
                 assert len(c) == 1
                 merged_variables.append(curr_node)
@@ -290,11 +292,5 @@ def merge_overfragmented(
     prev_len = len(variables)
     while len(variables := _merge_round(variables)) < prev_len:
         prev_len = len(variables)
-
-    # Filter out groups that now only have a single explanatory variable
-    variable_groups = defaultdict(list)
-    for v in variables:
-        variable_groups[v.base_variable].append(v)
-    variables = [v for v in variables if len(variable_groups[v.base_variable]) > 1]
 
     return variables
