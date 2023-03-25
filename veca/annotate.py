@@ -23,7 +23,6 @@ def generate_explanatory_features(
     merge_min_purity_gain=0.5,
     merge_min_sample_overlap=0.5,
     random_state: Any = None,
-    filter_trivial_groups: bool = True,
     return_unmerged_features: bool = False,
 ):
     # Sample the data if necessary. Running on large data sets can be very slow
@@ -58,17 +57,6 @@ def generate_explanatory_features(
         min_sample_overlap=merge_min_sample_overlap,
     )
 
-    # Filter out groups that now only have a single explanatory variable
-    if filter_trivial_groups:
-        variable_groups = defaultdict(list)
-        for v in merged_explanatory_features:
-            variable_groups[v.base_variable].append(v)
-        merged_explanatory_features = [
-            v
-            for v in merged_explanatory_features
-            if len(variable_groups[v.base_variable]) > 1
-        ]
-
     if return_unmerged_features:
         return merged_explanatory_features, explanatory_features
     else:
@@ -76,17 +64,25 @@ def generate_explanatory_features(
 
 
 def filter_explanatory_features(
-    features: list[ExplanatoryVariable],
+    variables: list[ExplanatoryVariable],
     min_samples: int = 5,
     min_purity: float = 0.5,
     max_geary_index: float = 0.5,
+    filter_trivial_groups: bool = True,
 ):
+    # Filter out groups that now only have a single explanatory variable
+    if filter_trivial_groups:
+        variable_groups = defaultdict(list)
+        for v in variables:
+            variable_groups[v.base_variable].append(v)
+        variables = [v for v in variables if len(variable_groups[v.base_variable]) > 1]
+
     return [
-        f
-        for f in features
-        if f.purity >= min_purity
-        and f.gearys_c <= max_geary_index
-        and f.num_all_samples >= min_samples
+        v
+        for v in variables
+        if v.purity >= min_purity
+        and v.gearys_c <= max_geary_index
+        and v.num_all_samples >= min_samples
     ]
 
 
