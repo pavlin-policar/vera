@@ -9,10 +9,11 @@ from veca.rules import Rule
 
 
 class Variable:
-    __slots__ = ["name"]
+    repr_attrs = ["name"]
 
     def __init__(self, name: str):
         self.name = name
+        self._explanatory_variables = []
 
     @property
     def is_discrete(self):
@@ -26,12 +27,22 @@ class Variable:
     def is_derived(self):
         return isinstance(self, DerivedVariable)
 
+    @property
+    def explanatory_variables(self):
+        return self._explanatory_variables
+
+    def register_explanatory_variable(self, variable: "ExplanatoryVariable"):
+        self._explanatory_variables.append(variable)
+
+    def unregister_explanatory_variable(self, variable: "ExplanatoryVariable"):
+        self._explanatory_variables.remove(variable)
+
     def __str__(self):
         return str(self.name)
 
     def __repr__(self):
         attrs_str = ", ".join(
-            f"{attr}={repr(getattr(self, attr))}" for attr in self.__slots__
+            f"{attr}={repr(getattr(self, attr))}" for attr in self.repr_attrs
         )
         return f"{self.__class__.__name__}({attrs_str})"
 
@@ -45,7 +56,7 @@ class Variable:
 
 
 class DiscreteVariable(Variable):
-    __slots__ = Variable.__slots__ + ["categories", "ordered"]
+    repr_attrs = Variable.repr_attrs + ["categories", "ordered"]
 
     def __init__(self, name, categories: list, ordered: bool = False):
         super().__init__(name)
@@ -70,7 +81,7 @@ class ContinuousVariable(Variable):
 
 
 class DerivedVariable(Variable):
-    __slots__ = Variable.__slots__ + ["base_variable", "rule"]
+    repr_attrs = Variable.repr_attrs + ["base_variable", "rule"]
 
     def __init__(
         self,

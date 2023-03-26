@@ -229,6 +229,7 @@ def convert_derived_features_to_explanatory(
             region,
             embedding,
         )
+        explanatory_v.base_variable.register_explanatory_variable(explanatory_v)
         explanatory_features.append(explanatory_v)
 
     return explanatory_features
@@ -275,12 +276,16 @@ def merge_overfragmented(
             connected_components = g.connected_components(graph)
 
             for c in connected_components:
-                curr_node = next(iter(c))
+                curr_node: ExplanatoryVariable = next(iter(c))
                 while len(c[curr_node]):
                     next_node = next(iter(c[curr_node]))
-                    c = g.merge_nodes(
-                        c, curr_node, next_node, curr_node.merge_with(next_node)
-                    )
+                    new_node = curr_node.merge_with(next_node)
+                    # Ensure that the base variable keeps track of its subvariables
+                    curr_node.base_variable.unregister_explanatory_variable(curr_node)
+                    curr_node.base_variable.unregister_explanatory_variable(next_node)
+                    curr_node.base_variable.register_explanatory_variable(new_node)
+
+                    c = g.merge_nodes(c, curr_node, next_node, new_node)
                     curr_node = next(iter(c))
                 assert len(c) == 1
                 merged_variables.append(curr_node)
