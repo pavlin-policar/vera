@@ -5,6 +5,9 @@ import scipy.sparse as sp
 import scipy.stats as stats
 import shapely.geometry as geom
 from sklearn import neighbors
+import KDEpy
+
+from veca.region import Density
 
 
 def kth_neighbor_distance(x: np.ndarray, k_neighbors: int, n_jobs: int = 1) -> float:
@@ -76,9 +79,10 @@ def _gaussian_adjacency_matrix(
 
 
 class Embedding:
-    def __init__(self, embedding: np.ndarray, scale_factor: float = 1):
+    def __init__(self, embedding: np.ndarray, scale_factor: float = 1, n_density_grid_points: int = 100):
         self.X = embedding
         self.scale_factor = scale_factor
+        self.n_density_grid_points = n_density_grid_points
 
     @cached_property
     def adj(self):
@@ -95,3 +99,12 @@ class Embedding:
     @cached_property
     def points(self):
         return [geom.Point(p) for p in self.X]
+
+    @cached_property
+    def _density_grid(self):
+        return KDEpy.utils.autogrid(self.X, self.scale, self.n_density_grid_points)
+
+    def esimtimate_density(self, values: np.ndarray, kernel: str = "gaussian") -> Density:
+        kde = KDEpy.FFTKDE(kernel=kernel, bw=self.scale).fit(self.X, weights=values)
+        kde_esimates = kde.evaluate(self._density_grid)
+        return Density(self._density_grid, kde_esimates)

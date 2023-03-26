@@ -5,8 +5,6 @@ import contourpy
 import numpy as np
 from shapely import geometry as geom
 
-from veca.embedding import Embedding
-
 
 class Density:
     def __init__(self, grid: np.ndarray, values: np.ndarray):
@@ -48,21 +46,6 @@ class Density:
 
         return geom.MultiPolygon(polygons)
 
-    @classmethod
-    def from_embedding(
-        cls,
-        embedding: "Embedding",
-        values: np.ndarray,
-        n_grid_points: int = 100,
-        kernel: str = "gaussian",
-    ):
-        from KDEpy import FFTKDE
-
-        kde = FFTKDE(kernel=kernel, bw=embedding.scale).fit(embedding.X, weights=values)
-        grid, points = kde.evaluate(n_grid_points)
-
-        return cls(grid, points)
-
 
 class CompositeDensity(Density):
     def __init__(self, densities: list[Density]):
@@ -96,7 +79,7 @@ class Region:
             polygon = geom.MultiPolygon([polygon])
         return polygon
 
-    def get_contained_samples(self, embedding: Embedding) -> set[int]:
+    def get_contained_samples(self, embedding: "Embedding") -> set[int]:
         """Get the indices of the samples contained within the region."""
         contained_indices = set()
         for i in range(len(embedding.points)):

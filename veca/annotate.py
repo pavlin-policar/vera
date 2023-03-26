@@ -17,7 +17,6 @@ def generate_explanatory_features(
     sample_size: int = 5000,
     n_discretization_bins: int = 5,
     scale_factor: float = 1,
-    n_grid_points: int = 100,
     kernel: str = "gaussian",
     contour_level: float = 0.25,
     merge_min_purity_gain=0.5,
@@ -45,7 +44,6 @@ def generate_explanatory_features(
         df_derived,
         embedding,
         scale_factor=scale_factor,
-        n_grid_points=n_grid_points,
         kernel=kernel,
         contour_level=contour_level,
     )

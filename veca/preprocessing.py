@@ -202,25 +202,20 @@ def convert_derived_features_to_explanatory(
     df,
     embedding,
     scale_factor: float = 1,
-    n_grid_points: int = 100,
     kernel: str = "gaussian",
     contour_level: float = 0.25,
 ):
     # Create embedding instance which will be shared across all explanatory
     # variables. The shared instance is necessary to avoid slow recomputation of
     # adjacency matrices
-    embedding = Embedding(embedding, scale_factor=scale_factor)
+    if not isinstance(embedding, Embedding):
+        embedding = Embedding(embedding, scale_factor=scale_factor)
 
     # Create explanatory variables from each of the derived features
     explanatory_features = []
     for v in tqdm(df.columns.tolist()):
         values = df[v].values
-        density = Density.from_embedding(
-            embedding,
-            values,
-            n_grid_points=n_grid_points,
-            kernel=kernel,
-        )
+        density = embedding.esimtimate_density(values, kernel=kernel)
         region = Region.from_density(density=density, level=contour_level)
         explanatory_v = ExplanatoryVariable(
             v.base_variable,
