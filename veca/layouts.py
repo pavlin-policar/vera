@@ -1,3 +1,4 @@
+from functools import reduce
 from itertools import combinations
 from typing import List
 
@@ -31,6 +32,7 @@ def merge_contrastive(variables: List[VariableGroup], threshold: float = 0.95):
         expl_var_mapping = dict(enumerate(expl_vars))
         distances = metrics.pdist(expl_vars, metrics.shared_sample_pct)
         graph = g.similarities_to_graph(distances, threshold=threshold)
+        graph = g.label_nodes(graph, expl_var_mapping)
 
         # The number of connected components should be the same as the
         # number of explanatory variables
@@ -40,9 +42,6 @@ def merge_contrastive(variables: List[VariableGroup], threshold: float = 0.95):
 
         # Each connected component should contain both base variables to be merged
         connected_components = list(map(g.nodes, connected_components))
-        connected_components = [
-            [expl_var_mapping[ci] for ci in c] for c in connected_components
-        ]
 
         all_components_have_two = True
         for c in connected_components:
@@ -52,33 +51,35 @@ def merge_contrastive(variables: List[VariableGroup], threshold: float = 0.95):
         if not all_components_have_two:
             continue
 
-        new_explanatory_variables = []
-        for c in connected_components:
-            assert len(c) == 2
-            new_explanatory_variables.append(ExplanatoryVariableGroup([c[0], c[1]]))
+        merge_candidates[frozenset([v1, v2])] = connected_components
 
-        merge_candidates[frozenset([v1, v2])] = new_explanatory_variables
-
-    graph = g.edgelist_to_graph(variables, merge_candidates)
+    graph = g.edgelist_to_graph(variables, list(merge_candidates))
     graph = g.to_undirected(graph)
     connected_components = g.connected_components(graph)
 
     merged_variables = []
     for c in connected_components:
-        curr_node = next(iter(c))
-        while len(c[curr_node]):
-            next_node = next(iter(c[curr_node]))
+        var_groups_to_merge = g.nodes(c)
 
-            # perform merging logic
-            new_node = VariableGroup(
-                curr_node.variables | next_node.variables,
-                merge_candidates[frozenset([curr_node, next_node])],
-            )
+        if len(var_groups_to_merge) == 1:
+            merged_variables.append(var_groups_to_merge[0])
+            continue
 
-            c = g.merge_nodes(c, curr_node, next_node, new_node)
-            curr_node = next(iter(c))
-        assert len(c) == 1
-        merged_variables.append(curr_node)
+        # Which entries of the merge_candidates contain info on the bipartite mapping
+        merge_candidate_keys = [
+            p for p in list(merge_candidates) if len(p & set(var_groups_to_merge)) == 2
+        ]
+        edges = [e for k in merge_candidate_keys for e in merge_candidates[k]]
+
+        all_nodes = reduce(lambda acc, x: set(x) | acc, edges, set())
+        graph = g.edgelist_to_graph(all_nodes, edges)
+        graph = g.to_undirected(graph)
+        cc_parts = g.connected_components(graph)
+
+        merged_expl_vars = [
+            ExplanatoryVariableGroup(cc_part) for cc_part in map(g.nodes, cc_parts)
+        ]
+        merged_variables.append(VariableGroup(var_groups_to_merge, merged_expl_vars))
 
     return merged_variables
 

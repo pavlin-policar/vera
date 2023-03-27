@@ -134,7 +134,12 @@ class DerivedVariable(Variable):
 
 
 class VariableGroup:
-    def __init__(self, variables: list[Variable], explanatory_variables: list["ExplanatoryVariable"], name: str = None):
+    def __init__(
+        self,
+        variables: list[Variable],
+        explanatory_variables: list["ExplanatoryVariable"],
+        name: str = None,
+    ):
         self.variables = frozenset(variables)
         self.name = name
         self.explanatory_variables = explanatory_variables
@@ -146,6 +151,9 @@ class VariableGroup:
         if not isinstance(other, self.__class__):
             return False
         return self.name == other.name and self.variables == other.variables
+
+    def __repr__(self):
+        return ",".join([str(v) for v in self.variables])
 
 
 class EmbeddingRegionMixin:
@@ -298,7 +306,9 @@ class CompositeExplanatoryVariable(ExplanatoryVariable):
                 "same embedding!"
             )
 
-        super().__init__(base_variable, new_rule, merged_values, merged_region, embedding)
+        super().__init__(
+            base_variable, new_rule, merged_values, merged_region, embedding
+        )
 
     @property
     def contained_variables(self):
@@ -347,10 +357,6 @@ class ExplanatoryVariableGroup(EmbeddingRegionMixin):
     @property
     def contained_variables(self):
         return self.variables
-
-    @property
-    def base_variables(self):
-        return [v.base_variable for v in self.variables]
 
     def __repr__(self):
         attrs = [

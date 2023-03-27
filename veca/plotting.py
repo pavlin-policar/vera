@@ -14,7 +14,7 @@ from matplotlib.patches import PathPatch
 from matplotlib.path import Path
 
 from veca.region import Density, Region
-from veca.variables import ExplanatoryVariable, EmbeddingRegionMixin
+from veca.variables import ExplanatoryVariable, EmbeddingRegionMixin, Variable
 
 
 def plot_feature(
