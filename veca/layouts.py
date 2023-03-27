@@ -4,6 +4,7 @@ from itertools import combinations
 from typing import List, Callable, Any
 
 import numpy as np
+import scipy.stats as stats
 
 import veca.graph as g
 import veca.metrics as metrics
@@ -218,12 +219,30 @@ def rank_discovery_layouts(layouts):
         l: num_polygons[l] / num_variables[l] for l in layouts
     }  # lower is better, min=1
 
-    # Determine the overlap area
+    # Determine the overlap area: shared sample pct, smaller is better
     overlap_area = {
-        l: np.mean(metrics.pdist(l, metrics.shared_sample_pct)) for l in layouts
+        l: np.max(metrics.pdist(l, metrics.shared_sample_pct), initial=0.01) for l in layouts
     }
 
-    layout_scores = {l: polygon_ratio[l] * overlap_area[l] for l in layouts}
+    # Determine how many of the data points are covered by the polygons
+    n_data_points = layouts[0][0].embedding.shape[0]
+    coverage = {}
+    for l in layouts:
+        contained_samples = set()
+        for v in l:
+            contained_samples.update(v.contained_samples)
+        coverage[l] = 1 - len(contained_samples) / n_data_points
+
+    # Ideally, we want about three variables
+    pdf = stats.norm(loc=3, scale=2)
+
+    layout_scores = {
+        l: 0.25 * np.log(polygon_ratio[l])
+        + 3 * -pdf.logpdf(num_variables[l])
+        + 2 * np.log(overlap_area[l] + 0.0001)
+        + 1 * np.log(coverage[l])
+        for l in layouts
+    }
 
     candidate_layouts = list(layouts)
     sorted_layouts = []
@@ -236,7 +255,7 @@ def rank_discovery_layouts(layouts):
             for l in candidate_layouts
         }
         final_layout_scores = [
-            layout_scores[l] * layout_penalties[l] for l in candidate_layouts
+            layout_scores[l] + 1 * layout_penalties[l] for l in candidate_layouts
         ]
 
         next_layout = candidate_layouts[np.argmin(final_layout_scores)]
@@ -245,9 +264,9 @@ def rank_discovery_layouts(layouts):
 
         # Apply penalty
         for v in next_layout:
-            variable_penalties[v] += 20
+            variable_penalties[v] += 10
         for v in variable_penalties:
-            variable_penalties[v] /= 2
+            variable_penalties[v] /= 1.5
 
     return list(map(list, sorted_layouts))
 
