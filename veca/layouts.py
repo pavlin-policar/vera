@@ -204,29 +204,52 @@ def find_layouts(
 
 
 def rank_discovery_layouts(layouts):
-    layout_idx = np.arange(len(layouts))
+    layouts = list(map(tuple, layouts))
 
     # Determine the number of polygons each variable has
-    num_polygons = np.zeros_like(layout_idx, dtype=int)
-    num_variables = np.zeros_like(layout_idx, dtype=int)
-    for idx, layout in enumerate(layouts):
-        for var in layout:
-            num_polygons[idx] += var.region.num_parts
-            num_variables[idx] += 1
+    num_polygons = defaultdict(int)
+    num_variables = defaultdict(int)
+    for layout in layouts:
+        for v in layout:
+            num_polygons[layout] += v.region.num_parts
+            num_variables[layout] += 1
 
-    polygon_ratio = num_polygons / num_variables  # lower is better, min=1
+    polygon_ratio = {
+        l: num_polygons[l] / num_variables[l] for l in layouts
+    }  # lower is better, min=1
 
     # Determine the overlap area
-    overlap_area = np.array([
-        np.mean(metrics.pdist(layout, metrics.intersection_area))
-        for layout in layouts
-    ])
+    overlap_area = {
+        l: np.mean(metrics.pdist(l, metrics.shared_sample_pct)) for l in layouts
+    }
 
-    score = polygon_ratio * overlap_area
+    layout_scores = {l: polygon_ratio[l] * overlap_area[l] for l in layouts}
 
-    sort_idx = np.argsort(score)
+    candidate_layouts = list(layouts)
+    sorted_layouts = []
 
-    return [layouts[idx] for idx in sort_idx]
+    # We want to penalize subsequent uses of the same variable
+    variable_penalties = defaultdict(int)
+    while len(candidate_layouts):
+        layout_penalties = {
+            l: np.prod([variable_penalties[v] + 1 for v in l])
+            for l in candidate_layouts
+        }
+        final_layout_scores = [
+            layout_scores[l] * layout_penalties[l] for l in candidate_layouts
+        ]
+
+        next_layout = candidate_layouts[np.argmin(final_layout_scores)]
+        candidate_layouts.remove(next_layout)
+        sorted_layouts.append(next_layout)
+
+        # Apply penalty
+        for v in next_layout:
+            variable_penalties[v] += 20
+        for v in variable_penalties:
+            variable_penalties[v] /= 2
+
+    return list(map(list, sorted_layouts))
 
 
 def discovery(
