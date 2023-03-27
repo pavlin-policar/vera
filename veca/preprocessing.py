@@ -9,7 +9,7 @@ from tqdm import tqdm
 import veca.graph as g
 from veca import metrics
 from veca.embedding import Embedding
-from veca.region import Density, Region
+from veca.region import Region
 from veca.rules import IntervalRule, EqualityRule
 from veca.variables import (
     DerivedVariable,
@@ -20,7 +20,7 @@ from veca.variables import (
 )
 
 
-def _pd_dtype_to_variable(col_name: Union[str, Variable], col_type) -> Variable:
+def _pd_dtype_to_variable(col_name: Union[str, Variable], col_type, col_vals) -> Variable:
     """Convert a column from a pandas DataFrame to a Variable instance.
 
     Parameters
@@ -39,11 +39,12 @@ def _pd_dtype_to_variable(col_name: Union[str, Variable], col_type) -> Variable:
     if pd.api.types.is_categorical_dtype(col_type):
         variable = DiscreteVariable(
             col_name,
+            values=col_vals[1].values,
             categories=col_type.categories.tolist(),
             ordered=col_type.ordered,
         )
     elif pd.api.types.is_numeric_dtype(col_type):
-        variable = ContinuousVariable(col_name)
+        variable = ContinuousVariable(col_name, values=col_vals[1].values)
     else:
         raise ValueError(
             f"Only categorical and numeric dtypes supported! Got " f"`{col_type.name}`."
@@ -69,7 +70,7 @@ def ingest(df: pd.DataFrame) -> pd.DataFrame:
 
     """
     df_new = df.copy()
-    new_index = map(lambda p: _pd_dtype_to_variable(*p), zip(df.columns, df.dtypes))
+    new_index = map(lambda p: _pd_dtype_to_variable(*p), zip(df.columns, df.dtypes, df.items()))
     df_new.columns = pd.Index(list(new_index))
     return df_new
 

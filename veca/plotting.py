@@ -658,9 +658,7 @@ def plot_annotations(
 
 def plot_discretization(
     variable: Variable,
-    x: pd.DataFrame,
     features: list[ExplanatoryVariable],
-    embedding: np.ndarray,
     cmap: str = "viridis",
     hist_scatter_alpha: float = 1,
     hist_scatter_size: float = 36,
@@ -722,13 +720,14 @@ def plot_discretization(
         return ax
 
     v = variable  # The variable in question
+    embedding = v.explanatory_variables[0].embedding.X
 
     fig = plt.figure(figsize=(12, 9))
     gs = gridspec.GridSpec(2, 2, height_ratios=(1 / 3, 2 / 3), hspace=0.2, wspace=0.3)
 
     ax = fig.add_subplot(gs[0, 0])
     plot_distribution_bins(
-        x[v.name],
+        v.values,
         unmerged_feature_bin_edges[v],
         unmerged_feature_pt_bins[v],
         ax=ax,
@@ -744,7 +743,7 @@ def plot_discretization(
 
     ax = fig.add_subplot(gs[0, 1])
     plot_distribution_bins(
-        x[v.name],
+        v.values,
         final_feature_bin_edges[v],
         final_feature_pt_bins[v],
         ax=ax,

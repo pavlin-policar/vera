@@ -15,8 +15,9 @@ class MergeError(Exception):
 class Variable:
     repr_attrs = ["name"]
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, values: np.ndarray):
         self.name = name
+        self.values = values
         self._explanatory_variables = []
 
     @property
@@ -62,8 +63,8 @@ class Variable:
 class DiscreteVariable(Variable):
     repr_attrs = Variable.repr_attrs + ["categories", "ordered"]
 
-    def __init__(self, name, categories: list, ordered: bool = False):
-        super().__init__(name)
+    def __init__(self, name, values, categories: list, ordered: bool = False):
+        super().__init__(name, values)
         self.categories = tuple(categories)
         self.ordered = ordered
 
