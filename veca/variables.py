@@ -8,6 +8,10 @@ from veca.region import Region, CompositeRegion
 from veca.rules import Rule
 
 
+class MergeError(Exception):
+    pass
+
+
 class Variable:
     repr_attrs = ["name"]
 
@@ -29,7 +33,7 @@ class Variable:
 
     @property
     def explanatory_variables(self):
-        return self._explanatory_variables
+        return sorted(self._explanatory_variables)
 
     def register_explanatory_variable(self, variable: "ExplanatoryVariable"):
         self._explanatory_variables.append(variable)
@@ -103,12 +107,12 @@ class DerivedVariable(Variable):
 
     def merge_with(self, other: "DerivedVariable") -> "DerivedVariable":
         if not isinstance(other, DerivedVariable):
-            raise ValueError(
+            raise MergeError(
                 f"Cannot merge `{self.__class__.__name__}` with  `{other}`!"
             )
 
         if not self.can_merge_with(other):
-            raise ValueError(f"Cannot merge derived variables `{self}` and {other}!")
+            raise MergeError(f"Cannot merge derived variables `{self}` and {other}!")
 
         merged_rule = self.rule.merge_with(other.rule)
 
@@ -127,6 +131,21 @@ class DerivedVariable(Variable):
 
     def __lt__(self, other):
         return (self.base_variable, self.rule) < (other.base_variable, other.rule)
+
+
+class VariableGroup:
+    def __init__(self, variables: list[Variable], explanatory_variables: list["ExplanatoryVariable"], name: str = None):
+        self.variables = frozenset(variables)
+        self.name = name
+        self.explanatory_variables = explanatory_variables
+
+    def __hash__(self):
+        return hash((self.__class__.__name__, self.name, self.variables))
+
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        return self.name == other.name and self.variables == other.variables
 
 
 class EmbeddingRegionMixin:
@@ -209,22 +228,19 @@ class ExplanatoryVariable(DerivedVariable, EmbeddingRegionMixin):
 
     def merge_with(self, other: "ExplanatoryVariable") -> "ExplanatoryVariable":
         if not isinstance(other, ExplanatoryVariable):
-            raise ValueError(
+            raise MergeError(
                 f"Cannot merge `{self.__class__.__name__}` with  `{other}`!"
             )
 
         if not self.can_merge_with(other):
-            raise ValueError(
+            raise MergeError(
                 f"Cannot merge explanatory variables `{self}` and {other}!"
             )
 
-        merged_rule = self.rule.merge_with(other.rule)
-
-        return CompositeExplanatoryVariable([self, other], merged_rule)
+        return CompositeExplanatoryVariable([self, other])
 
     def __repr__(self):
         attrs = [
-            ("base_variable", repr(self.base_variable)),
             ("rule", repr(self.rule)),
             ("values", "[...]"),
             ("region", repr(self.region)),
@@ -249,7 +265,7 @@ class ExplanatoryVariable(DerivedVariable, EmbeddingRegionMixin):
 
 
 class CompositeExplanatoryVariable(ExplanatoryVariable):
-    def __init__(self, variables: list[ExplanatoryVariable], rule: Rule):
+    def __init__(self, variables: list[ExplanatoryVariable]):
         self.base_variables = variables
 
         v0 = variables[0]
@@ -258,6 +274,17 @@ class CompositeExplanatoryVariable(ExplanatoryVariable):
             raise RuntimeError(
                 "Cannot merge Explanatory variables which do not share the "
                 "same base variable!"
+            )
+
+        try:
+            new_rule = variables[0].rule
+            for v in variables[1:]:
+                new_rule = new_rule.merge_with(v.rule)
+        except MergeError as e:
+            raise MergeError(
+                f"CompositeExplanatoryVariable cannot be created because the "
+                f"variables given were incompatible:\n{e.message}\nPlease "
+                f"ensure that the variables are given in a valid merge order."
             )
 
         feature_values = np.vstack([v.values for v in variables])
@@ -271,12 +298,12 @@ class CompositeExplanatoryVariable(ExplanatoryVariable):
                 "same embedding!"
             )
 
-        super().__init__(base_variable, rule, merged_values, merged_region, embedding)
+        super().__init__(base_variable, new_rule, merged_values, merged_region, embedding)
 
     @property
     def contained_variables(self):
-        return reduce(
-            operator.add, [v.contained_variables for v in self.base_variables]
+        return sorted(
+            reduce(operator.add, [v.contained_variables for v in self.base_variables])
         )
 
     @property
@@ -310,7 +337,7 @@ class ExplanatoryVariableGroup(EmbeddingRegionMixin):
 
         embedding = v0.embedding
         if not all(np.allclose(v.embedding.X, embedding.X) for v in variables[1:]):
-            raise RuntimeError(
+            raise MergeError(
                 "Cannot merge explanatory variables which do not share the "
                 "same embedding!"
             )
@@ -320,6 +347,10 @@ class ExplanatoryVariableGroup(EmbeddingRegionMixin):
     @property
     def contained_variables(self):
         return self.variables
+
+    @property
+    def base_variables(self):
+        return [v.base_variable for v in self.variables]
 
     def __repr__(self):
         attrs = [

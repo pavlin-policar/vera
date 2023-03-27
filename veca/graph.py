@@ -69,8 +69,11 @@ def label_nodes(graph: Graph, labels: dict[T, T]) -> Graph:
     return {labels[i]: {labels[j] for j in graph[i]} for i in graph}
 
 
-def nodes(g: Graph) -> NodeList:
-    return sorted(list(g.keys()))
+def nodes(g: Graph, sort: bool = True) -> NodeList:
+    vs = list(g.keys())
+    if sort:
+        vs = sorted(vs)
+    return vs
 
 
 def graph_complement(g: Graph) -> Graph:

@@ -22,7 +22,6 @@ def generate_explanatory_features(
     merge_min_purity_gain=0.5,
     merge_min_sample_overlap=0.5,
     random_state: Any = None,
-    return_unmerged_features: bool = False,
 ):
     # Sample the data if necessary. Running on large data sets can be very slow
     random_state = check_random_state(random_state)
@@ -55,10 +54,9 @@ def generate_explanatory_features(
         min_sample_overlap=merge_min_sample_overlap,
     )
 
-    if return_unmerged_features:
-        return merged_explanatory_features, explanatory_features
-    else:
-        return merged_explanatory_features
+    # Return the list of base variables, which contain the explanatory variables
+    base_variables = set(v.base_variable for v in merged_explanatory_features)
+    return list(base_variables)
 
 
 def filter_explanatory_features(
