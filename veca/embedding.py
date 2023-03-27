@@ -102,7 +102,7 @@ class Embedding:
 
     @cached_property
     def _density_grid(self):
-        return KDEpy.utils.autogrid(self.X, self.scale, self.n_density_grid_points)
+        return KDEpy.utils.autogrid(self.X, self.scale * 3, self.n_density_grid_points)
 
     def esimtimate_density(self, values: np.ndarray, kernel: str = "gaussian") -> Density:
         kde = KDEpy.FFTKDE(kernel=kernel, bw=self.scale).fit(self.X, weights=values)
