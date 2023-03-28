@@ -234,7 +234,7 @@ def rank_descriptive_layouts(layouts):
         coverage[l] = 1 - len(contained_samples) / n_data_points
 
     # Ideally, we want about three variables
-    pdf = stats.norm(loc=3, scale=2)
+    pdf = stats.norm(loc=3.5, scale=2)
 
     layout_scores = {
         l: 0.25 * np.log(polygon_ratio[l])
