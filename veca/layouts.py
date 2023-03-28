@@ -204,7 +204,7 @@ def find_layouts(
     return independent_sets
 
 
-def rank_discovery_layouts(layouts):
+def rank_descriptive_layouts(layouts):
     layouts = list(map(tuple, layouts))
 
     # Determine the number of polygons each variable has
@@ -271,7 +271,7 @@ def rank_discovery_layouts(layouts):
     return list(map(list, sorted_layouts))
 
 
-def discovery(
+def descriptive(
     variables: list[Variable],
     merge_metric: Callable = metrics.min_shared_sample_pct,
     metric_is_distance: bool = False,
@@ -303,7 +303,7 @@ def discovery(
 
     layouts = find_layouts(filtered_clusters, max_overlap=layout_max_overlap)
 
-    layouts = rank_discovery_layouts(layouts)
+    layouts = rank_descriptive_layouts(layouts)
 
     if filter_layouts:
         layouts = [l for l in layouts if len(l) > 1]
