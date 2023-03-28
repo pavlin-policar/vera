@@ -658,59 +658,64 @@ def plot_annotations(
 
 def plot_discretization(
     variable: Variable,
-    features: list[ExplanatoryVariable],
     cmap: str = "viridis",
-    hist_scatter_alpha: float = 1,
-    hist_scatter_size: float = 36,
+    hist_scatter_kwargs: dict = {},
+    scatter_kwargs: dict = {},
+    return_fig: bool = False,
 ):
     import matplotlib.gridspec as gridspec
 
-    def _get_point_bins(variable_groups):
-        variable_group_values = {}
-        for k in variable_groups:
-            if not k.is_continuous:
-                continue
-            variable_values = np.vstack([v.values for v in variable_groups[k]])
-            variable_group_values[k] = np.argmax(variable_values, axis=0)
+    def _get_bin_edges_continuous(explanatory_variables: list[ExplanatoryVariable]):
+        edges = [v.rule.lower for v in explanatory_variables]
+        edges += [explanatory_variables[-1].rule.upper]
+        if np.isinf(edges[0]):
+            edges[0] = variable.values.min()
+        if np.isinf(edges[-1]):
+            edges[-1] = variable.values.max()
+
+        return edges
+
+    def _get_bin_edges_discrete(explanatory_variables: list[ExplanatoryVariable]):
+        num_contained_variables = [len(v.contained_variables) for v in explanatory_variables]
+        edges = np.concatenate([[0], np.cumsum(num_contained_variables)]) + 0.5
+
+        return edges
+
+    def _get_sample_bin_indices(explanatory_variables: list[ExplanatoryVariable]):
+        variable_values = np.vstack([v.values for v in explanatory_variables])
+        variable_group_values = np.argmax(variable_values, axis=0)
         return variable_group_values
 
-    def _get_bin_edges(variable_groups):
-        variable_group_edges = {}
-        for k in variable_groups:
-            if not k.is_continuous:
-                continue
-            variable_edges = [v.rule.lower for v in variable_groups[k]][1:]
-            variable_group_edges[k] = variable_edges
-        return variable_group_edges
+    unmerged_explanatory_variables = [
+        expl_var
+        for expl_vars in variable.explanatory_variables
+        for expl_var in expl_vars.contained_variables
+    ]
 
-    final_feature_var_groups = {v: v.explanatory_variables for v in features}
-    unmerged_feature_var_groups = {
-        v: expl_vars.contained_variables
-        for v in features
-        for expl_vars in v.explanatory_variables
-    }
+    if variable.is_continuous:
+        _get_bin_edges_func = _get_bin_edges_continuous
+    elif variable.is_discrete:
+        _get_bin_edges_func = _get_bin_edges_discrete
 
-    final_feature_pt_bins = _get_point_bins(final_feature_var_groups)
-    final_feature_bin_edges = _get_bin_edges(final_feature_var_groups)
-    unmerged_feature_pt_bins = _get_point_bins(unmerged_feature_var_groups)
-    unmerged_feature_bin_edges = _get_bin_edges(unmerged_feature_var_groups)
+    unmerged_feature_pt_bins = _get_sample_bin_indices(unmerged_explanatory_variables)
+    unmerged_feature_bin_edges = _get_bin_edges_func(unmerged_explanatory_variables)
+    merged_feature_pt_bins = _get_sample_bin_indices(variable.explanatory_variables)
+    merged_feature_bin_edges = _get_bin_edges_func(variable.explanatory_variables)
 
-    def plot_distribution_bins(x, bin_edges, x_bins, ax, cmap=None, scatter_alpha=1, scatter_size=36):
-        if len(bin_edges) > 1:
-            bin_width = bin_edges[1] - bin_edges[0]
-            bin_edges_ = [bin_edges[0] - bin_width] + bin_edges + [bin_edges[-1] + bin_width]
-            d, bins, *_ = ax.hist(
-                x, bins=bin_edges_, alpha=0.5, edgecolor="k", align="mid", zorder=5
-            )
-        else:
-            d, bins, *_ = ax.hist(x, bins=20, alpha=0.5, edgecolor="k", align="mid", zorder=5)
+    def plot_distribution_bins(x, bin_edges, x_bins, bins, ax, cmap=None, hist_scatter_kwargs={}):
+        d, bins, *_ = ax.hist(
+            x, bins=bins, alpha=0.5, edgecolor="k", align="mid", zorder=5
+        )
 
         bin_width = bins[1] - bins[0]
         x_jitter = x + np.random.normal(0, bin_width * 0.05, size=x.shape)
         y_jitter = np.abs(np.random.normal(0, d.max() / 2, size=x.shape))
-        ax.scatter(x_jitter, y_jitter, c=x_bins, cmap=cmap, alpha=scatter_alpha, s=scatter_size)
 
-        for edge in bin_edges:
+        hist_scatter_kwargs_ = {}
+        hist_scatter_kwargs_.update(hist_scatter_kwargs)
+        ax.scatter(x_jitter, y_jitter, c=x_bins, cmap=cmap, **hist_scatter_kwargs)
+
+        for edge in bin_edges[1:-1]:
             ax.axvline(edge, c="tab:red", lw=2)
 
         ax.set_xlabel("Attribute Values")
@@ -722,37 +727,56 @@ def plot_discretization(
     v = variable  # The variable in question
     embedding = v.explanatory_variables[0].embedding.X
 
+    variable_values = v.values
+    if pd.api.types.is_categorical_dtype(variable_values):
+        variable_values = variable_values.codes.astype(float) + 1
+
     fig = plt.figure(figsize=(12, 9))
     gs = gridspec.GridSpec(2, 2, height_ratios=(1 / 3, 2 / 3), hspace=0.2, wspace=0.3)
 
+    # Unmerged feature bins
     ax = fig.add_subplot(gs[0, 0])
+
+    if variable.is_continuous:
+        bins = 20
+    elif variable.is_discrete:
+        bins = unmerged_feature_bin_edges
     plot_distribution_bins(
-        v.values,
-        unmerged_feature_bin_edges[v],
-        unmerged_feature_pt_bins[v],
+        variable_values,
+        unmerged_feature_bin_edges,
+        unmerged_feature_pt_bins,
+        bins=bins,
         ax=ax,
         cmap=cmap,
-        scatter_alpha=hist_scatter_alpha,
-        scatter_size=hist_scatter_size
+        hist_scatter_kwargs=hist_scatter_kwargs,
     )
 
     ax = fig.add_subplot(gs[1, 0])
-    ax.scatter(embedding[:, 0], embedding[:, 1], c=unmerged_feature_pt_bins[v], cmap=cmap)
+    ax.scatter(embedding[:, 0], embedding[:, 1], c=unmerged_feature_pt_bins, cmap=cmap, **scatter_kwargs)
     ax.axis("equal"), ax.set_box_aspect(1)
     ax.set_xticks([]), ax.set_yticks([])
 
+    # Merged feature bins
     ax = fig.add_subplot(gs[0, 1])
+
+    if variable.is_continuous:
+        bins = 20
+    elif variable.is_discrete:
+        bins = merged_feature_bin_edges
     plot_distribution_bins(
-        v.values,
-        final_feature_bin_edges[v],
-        final_feature_pt_bins[v],
+        variable_values,
+        merged_feature_bin_edges,
+        merged_feature_pt_bins,
+        bins=bins,
         ax=ax,
         cmap=cmap,
-        scatter_alpha=hist_scatter_alpha,
-        scatter_size=hist_scatter_size
+        hist_scatter_kwargs=hist_scatter_kwargs,
     )
 
     ax = fig.add_subplot(gs[1, 1])
-    ax.scatter(embedding[:, 0], embedding[:, 1], c=final_feature_pt_bins[v], cmap=cmap)
+    ax.scatter(embedding[:, 0], embedding[:, 1], c=merged_feature_pt_bins, cmap=cmap, **scatter_kwargs)
     ax.axis("equal"), ax.set_box_aspect(1)
     ax.set_xticks([]), ax.set_yticks([])
+
+    if return_fig:
+        return fig
