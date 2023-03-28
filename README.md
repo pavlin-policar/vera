@@ -12,7 +12,7 @@ pip install veca
 
 ## A hello world example
 
-Getting started with `veca` is very simple. First, we'll load up some data using scikit-learn
+Getting started with `veca` is very simple. First, we'll load up some data using scikit-learn.
 
 ```python
 from sklearn import datasets
@@ -21,13 +21,25 @@ iris = datasets.load_iris()
 x = iris["data"]
 ```
 
-then we'll import and run
+Next, we have to generate an embedding of the data. We'll use openTSNE here, but any embedding method will do.
+
+```python
+import openTSNE
+
+embedding = openTSNE.TSNE().fit(x)
+```
+
+Then, we'll import and run the following commands to explain the embedding.
 
 ```python
 import veca
 
-TODO
-veca.run(x)
+features = veca.get_features(x)
+contrastive_explanations = veca.explain.contrastive(features)
+descriptive_explanations = veca.explain.descriptive(features)
+
+veca.pl.plot_annotations(contrastive_explanations)
+veca.pl.plot_annotations(descriptive_explanations)
 ```
 
 ## Citation
