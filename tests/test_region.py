@@ -3,27 +3,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-import veca.preprocessing
-import veca.annotate
-import matplotlib.pyplot as plt
-
-
-# from veca.preprocessing import estimate_feature_densities, find_regions
-
-
-def plot(x, y=None, show=True):
-    import matplotlib.pyplot as plt
-
-    fig, ax = plt.subplots()
-
-    c = "k"
-    if y is not None:
-        c = y
-
-    ax.scatter(x[:, 0], x[:, 1], c=c)
-
-    if show:
-        plt.show()
+import veca
 
 
 class TestRegion(unittest.TestCase):
@@ -39,7 +19,6 @@ class TestRegion(unittest.TestCase):
         feature_list = veca.an.generate_explanatory_features(
             features, embedding=x, scale_factor=0.5,
         )
-        plt.show()
         self.assertEqual(
             len(feature_list), 1,
             "`an.generate_explanatory_features` returned more than one variable"
@@ -73,13 +52,12 @@ class TestRegion(unittest.TestCase):
         hole3 = np.linalg.norm(x - [1, -1], axis=1) < 0.5
         hole4 = np.linalg.norm(x - [-1, -1], axis=1) < 0.5
         features["holes"] = hole1 | hole2 | hole3 | hole4
-        features["holes"] = features["holes"].astype("category")
+        features["holes"] = features["holes"]
 
         # The function returns the base variables, of which there should only be one
         feature_list = veca.an.generate_explanatory_features(
             features, embedding=x, scale_factor=0.5,
         )
-        plt.show()
         self.assertEqual(
             len(feature_list), 1,
             "`an.generate_explanatory_features` returned more than one variable"
