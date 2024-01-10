@@ -7,7 +7,7 @@ import pandas as pd
 from tqdm import tqdm
 
 import veca.graph as g
-from veca import metrics
+import veca.metrics as metrics
 from veca.embedding import Embedding
 from veca.region import Region
 from veca.rules import IntervalRule, EqualityRule
@@ -95,7 +95,12 @@ def ingested_to_pandas(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _discretize(df: pd.DataFrame, n_bins: int = 5) -> pd.DataFrame:
-    """Discretize all continuous variables in the data frame."""
+    """Discretize all continuous variables in the data frame.
+
+    TODO: This function does imputation, but this really shouldn't be done here
+    It should be up to the user to ensure there are no NaNs in the data, or up
+    to us to ignore them.
+    """
     df_ingested = ingest(df)
 
     # We can only discretize continuous columns
@@ -168,7 +173,7 @@ def _one_hot(df: pd.DataFrame) -> pd.DataFrame:
     df_disc = df_ingested[disc_cols]
     df_othr = df_ingested[othr_cols]
 
-    x_onehot = pd.get_dummies(df_disc).values
+    x_onehot = pd.get_dummies(df_disc).values.astype(float)
 
     # Create derived features
     derived_features = []
@@ -216,7 +221,7 @@ def convert_derived_features_to_explanatory(
     explanatory_features = []
     for v in tqdm(df.columns.tolist()):
         values = df[v].values
-        density = embedding.esimtimate_density(values, kernel=kernel)
+        density = embedding.estimate_density(values, kernel=kernel)
         region = Region.from_density(density=density, level=contour_level)
         explanatory_v = ExplanatoryVariable(
             v.base_variable,

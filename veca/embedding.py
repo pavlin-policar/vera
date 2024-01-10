@@ -85,26 +85,26 @@ class Embedding:
         self.n_density_grid_points = n_density_grid_points
 
     @cached_property
-    def adj(self):
+    def adj(self) -> sp.spmatrix:
         return adjacency_matrix(self.X, scale=self.scale, weighting="gaussian")
 
     @cached_property
-    def scale(self):
+    def scale(self) -> float:
         return estimate_embedding_scale(self.X, self.scale_factor)
 
     @property
-    def shape(self):
+    def shape(self) -> tuple[int, int]:
         return self.X.shape
 
     @cached_property
-    def points(self):
+    def points(self) -> list[geom.Point]:
         return [geom.Point(p) for p in self.X]
 
     @cached_property
     def _density_grid(self):
         return KDEpy.utils.autogrid(self.X, self.scale * 3, self.n_density_grid_points)
 
-    def esimtimate_density(self, values: np.ndarray, kernel: str = "gaussian") -> Density:
+    def estimate_density(self, values: np.ndarray, kernel: str = "gaussian") -> Density:
         kde = KDEpy.FFTKDE(kernel=kernel, bw=self.scale).fit(self.X, weights=values)
         kde_esimates = kde.evaluate(self._density_grid)
         return Density(self._density_grid, kde_esimates)
