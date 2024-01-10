@@ -21,25 +21,25 @@ class Variable:
         self._explanatory_variables = []
 
     @property
-    def is_discrete(self):
+    def is_discrete(self) -> bool:
         return isinstance(self, DiscreteVariable)
 
     @property
-    def is_continuous(self):
+    def is_continuous(self) -> bool:
         return isinstance(self, ContinuousVariable)
 
     @property
-    def is_derived(self):
+    def is_derived(self) -> bool:
         return isinstance(self, DerivedVariable)
 
     @property
-    def explanatory_variables(self):
+    def explanatory_variables(self) -> list["ExplanatoryVariable"]:
         return sorted(self._explanatory_variables)
 
-    def register_explanatory_variable(self, variable: "ExplanatoryVariable"):
+    def register_explanatory_variable(self, variable: "ExplanatoryVariable") -> None:
         self._explanatory_variables.append(variable)
 
-    def unregister_explanatory_variable(self, variable: "ExplanatoryVariable"):
+    def unregister_explanatory_variable(self, variable: "ExplanatoryVariable") -> None:
         self._explanatory_variables.remove(variable)
 
     def __str__(self):

@@ -117,7 +117,7 @@ class EqualityRule(Rule):
         return self.value == other.value
 
     def __str__(self):
-        return f"{self.value_name} = {repr(self.value)}"
+        return f"{self.value_name} is {repr(self.value)}"
 
     def __repr__(self):
         attrs = ["value"]
@@ -173,7 +173,10 @@ class OneOfRule(Rule):
         return all(v in self.values for v in values)
 
     def __str__(self):
-        return f"{self.value_name} is in {repr(self.values)}"
+        values = sorted(list(self.values))
+        values_str = ", ".join(repr(v) for v in values[:-1])
+        values_str += f", or {repr(values[-1])}"
+        return f"{self.value_name} is {values_str}"
 
     def __repr__(self):
         attrs = ["values"]

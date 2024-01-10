@@ -1,14 +1,11 @@
-from collections import defaultdict
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 import pandas as pd
 from sklearn.utils import check_random_state
 
-import veca.graph as g
 import veca.preprocessing as pp
-from veca import metrics
-from veca.variables import ExplanatoryVariable, ExplanatoryVariableGroup
+from veca.variables import Variable
 
 
 def generate_explanatory_features(
@@ -22,7 +19,7 @@ def generate_explanatory_features(
     merge_min_purity_gain=0.5,
     merge_min_sample_overlap=0.5,
     random_state: Any = None,
-):
+) -> list[Variable]:
     # Sample the data if necessary. Running on large data sets can be very slow
     random_state = check_random_state(random_state)
     if sample_size is not None:

@@ -1,3 +1,4 @@
+import string
 import warnings
 from collections.abc import Iterable
 from itertools import cycle
@@ -78,6 +79,8 @@ def plot_feature(
         if log:
             y = np.log1p(y)
 
+        s = s * y
+
         cmap = clr.LinearSegmentedColormap.from_list(
             "expression", [colors[0], colors[1]], N=256
         )
@@ -85,7 +88,7 @@ def plot_feature(
             embedding[sort_idx, 0],
             embedding[sort_idx, 1],
             c=y[sort_idx],
-            s=s,
+            s=s[sort_idx],
             alpha=alpha,
             rasterized=True,
             cmap=cmap,
@@ -94,6 +97,7 @@ def plot_feature(
 
     # Hide ticks and axis
     ax.set_xticks([]), ax.set_yticks([]), ax.axis("equal")
+    ax.set_box_aspect(1)
 
     marker_str = ", ".join(map(str, feature_names))
     if title is None:
@@ -253,10 +257,11 @@ def plot_density(
             "alpha": 0.1,
         }
         scatter_kwargs_.update(scatter_kwargs)
-        ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_)
+        ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_, rasterized=True)
 
     # Hide ticks and axis
     ax.set_xticks([]), ax.set_yticks([])
+    ax.set_box_aspect(1)
     ax.axis("equal")
 
     return ax
@@ -394,7 +399,7 @@ def plot_region(
         label_kwargs_.update(label_kwargs)
         x, y = largest_polygon.centroid.coords[0]
         label_parts = map(
-            lambda x: "\n".join(wrap(x, width=80)),
+            lambda x: "\n".join(wrap(x, width=40)),
             str(variable.plot_label).split("\n"),
         )
         label = ax.text(x, y, "\n".join(label_parts), **label_kwargs_)
@@ -403,6 +408,7 @@ def plot_region(
                 "ha": "center",
                 "va": "top",
                 "fontsize": 9,
+                "zorder": 99,
             }
             detail_kwargs_.update(detail_kwargs)
             label = ax.text(x, y, f"({variable.plot_detail})", **detail_kwargs_)
@@ -427,13 +433,14 @@ def plot_region(
             scatter_kwargs_["c"] = c
             scatter_kwargs_["alpha"] = 1
 
-        ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_)
+        ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_, rasterized=True)
 
     # Set title
     ax.set_title(variable.name)
 
     # Hide ticks and axis
     ax.set_xticks([]), ax.set_yticks([])
+    ax.set_box_aspect(1)
     ax.axis("equal")
 
     return ax
@@ -490,6 +497,13 @@ def plot_regions(
             detail_kwargs=detail_kwargs,
         )
 
+        offset = 0.025
+        l = string.ascii_lowercase[idx % len(string.ascii_lowercase)]
+        ax[idx].text(
+            offset, 1 - offset, l, transform=ax[idx].transAxes, va="top", ha="left",
+            fontweight="bold", fontsize=16
+        )
+
     # Hide remaining axes
     for idx in range(idx + 1, n_rows * per_row):
         ax[idx].axis("off")
@@ -529,6 +543,7 @@ def plot_region_with_subregions(
 
     # Hide ticks and axis
     ax.set_xticks([]), ax.set_yticks([])
+    ax.set_box_aspect(1)
     ax.axis("equal")
 
     return ax
@@ -557,6 +572,13 @@ def plot_regions_with_subregions(
             variable,
             ax=ax[idx],
             cmap=cmap,
+        )
+
+        offset = 0.025
+        l = string.ascii_lowercase[idx % len(string.ascii_lowercase)]
+        ax[idx].text(
+            offset, 1 - offset, l, transform=ax[idx].transAxes, va="top", ha="left",
+            fontweight="bold", fontsize=16
         )
 
     # Hide remaining axes
@@ -603,13 +625,14 @@ def plot_annotation(
         "alpha": 1,
         **scatter_kwargs,
     }
-    ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_)
+    ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_, rasterized=True)
 
     # Clear title from drawn regions
     ax.set_title("")
 
     # Hide ticks and axis
     ax.set_xticks([]), ax.set_yticks([])
+    ax.set_box_aspect(1)
     ax.axis("equal")
 
     return ax
@@ -646,6 +669,13 @@ def plot_annotations(
             scatter_kwargs=scatter_kwargs,
             label_kwargs=label_kwargs,
             detail_kwargs=detail_kwargs,
+        )
+
+        offset = 0.025
+        l = string.ascii_lowercase[idx % len(string.ascii_lowercase)]
+        ax[idx].text(
+            offset, 1 - offset, l, transform=ax[idx].transAxes, va="top", ha="left",
+            fontweight="bold", fontsize=16
         )
 
     # Hide remaining axes
@@ -709,17 +739,21 @@ def plot_discretization(
 
         bin_width = bins[1] - bins[0]
         x_jitter = x + np.random.normal(0, bin_width * 0.05, size=x.shape)
-        y_jitter = np.abs(np.random.normal(0, d.max() / 2, size=x.shape))
+        y_jitter = np.abs(np.random.normal(0, d.max() / 3, size=x.shape))
 
         hist_scatter_kwargs_ = {}
         hist_scatter_kwargs_.update(hist_scatter_kwargs)
-        ax.scatter(x_jitter, y_jitter, c=x_bins, cmap=cmap, **hist_scatter_kwargs)
+        ax.scatter(x_jitter, y_jitter, c=x_bins, cmap=cmap, **hist_scatter_kwargs, rasterized=True)
 
         for edge in bin_edges[1:-1]:
             ax.axvline(edge, c="tab:red", lw=2)
 
-        ax.set_xlabel("Attribute Values")
-        ax.set_ylabel("Frequency")
+        # ax.set_xticks(bin_edges[:-1] + 0.5)
+        # ax.set_xticklabels([])
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_xlabel("Attribute Values", labelpad=3)
+        ax.set_ylabel("Frequency", labelpad=3)
         ax.spines[["right", "top"]].set_visible(False)
 
         return ax
@@ -731,8 +765,10 @@ def plot_discretization(
     if pd.api.types.is_categorical_dtype(variable_values):
         variable_values = variable_values.codes.astype(float) + 1
 
-    fig = plt.figure(figsize=(12, 9))
-    gs = gridspec.GridSpec(2, 2, height_ratios=(1 / 3, 2 / 3), hspace=0.2, wspace=0.3)
+    fig = plt.figure(figsize=(8, 6), dpi=100)
+    fig.suptitle(variable.name, fontsize=16, ha="center")
+    gs = gridspec.GridSpec(2, 2, height_ratios=(1 / 4, 3 / 3), hspace=0., wspace=0.15)
+    # gs.tight_layout(fig, pad=0)
 
     # Unmerged feature bins
     ax = fig.add_subplot(gs[0, 0])
@@ -752,7 +788,7 @@ def plot_discretization(
     )
 
     ax = fig.add_subplot(gs[1, 0])
-    ax.scatter(embedding[:, 0], embedding[:, 1], c=unmerged_feature_pt_bins, cmap=cmap, **scatter_kwargs)
+    ax.scatter(embedding[:, 0], embedding[:, 1], c=unmerged_feature_pt_bins, cmap=cmap, **scatter_kwargs, rasterized=True)
     ax.axis("equal"), ax.set_box_aspect(1)
     ax.set_xticks([]), ax.set_yticks([])
 
@@ -774,7 +810,7 @@ def plot_discretization(
     )
 
     ax = fig.add_subplot(gs[1, 1])
-    ax.scatter(embedding[:, 0], embedding[:, 1], c=merged_feature_pt_bins, cmap=cmap, **scatter_kwargs)
+    ax.scatter(embedding[:, 0], embedding[:, 1], c=merged_feature_pt_bins, cmap=cmap, **scatter_kwargs, rasterized=True)
     ax.axis("equal"), ax.set_box_aspect(1)
     ax.set_xticks([]), ax.set_yticks([])
 

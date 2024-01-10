@@ -102,7 +102,7 @@ def contrastive(
     variables = merge_contrastive(variables, threshold=merge_threshold)
 
     # Compute metrics for each variable group
-    min_overlap, mean_purity, num_vars, num_polygons = {}, {}, {}, {}
+    mean_overlap, mean_purity, num_vars, num_polygons = {}, {}, {}, {}
     layout_scores = {}
     for v in variables:
         overlaps = [
@@ -110,7 +110,7 @@ def contrastive(
             for v1, v2 in combinations(v.explanatory_variables, 2)
         ]
         # Select the minimum overlap between any two variables in the group
-        min_overlap[v] = np.min(overlaps, initial=0)
+        mean_overlap[v] = np.mean(overlaps)
 
         purities = [vi.purity for vi in v.explanatory_variables]
         mean_purity[v] = np.mean(purities)
@@ -121,7 +121,15 @@ def contrastive(
         # polygon_ratio = num_vars[v] / num_polygons[v]  # lower is worse, max=1
         # Polygon doesn't work well
         # TODO: Perhaps it would be better to rank these by overlap area?
-        layout_scores[v] = np.mean(purities) * (1 - min_overlap[v])
+
+        # Ideally, we want about three variables
+        pdf = stats.norm(loc=3, scale=2)
+
+        layout_scores[v] = (
+            np.log(np.mean(purities))
+            + np.log(1 - mean_overlap[v])
+            + 0.1 * pdf.logpdf(num_vars[v])
+        )
 
     # Socres for variables with a single explanatory variable are 0
     for v in variables:
@@ -234,13 +242,13 @@ def rank_descriptive_layouts(layouts):
         coverage[l] = 1 - len(contained_samples) / n_data_points
 
     # Ideally, we want about three variables
-    pdf = stats.norm(loc=3.5, scale=2)
+    pdf = stats.norm(loc=3, scale=2)
 
     layout_scores = {
         l: 0.25 * np.log(polygon_ratio[l])
         + 3 * -pdf.logpdf(num_variables[l])
         + 2 * np.log(overlap_area[l] + 0.0001)
-        + 1 * np.log(coverage[l])
+        + 1 * np.log(coverage[l] + 0.0001)
         for l in layouts
     }
 
