@@ -143,7 +143,7 @@ def connected_components(g: Graph) -> list[Graph]:
     return component_graphs
 
 
-def max_cliques(g: Graph) -> list[NodeList]:
+def max_cliques(g: Graph) -> list[Graph]:
     def _bron_kerbosch(g: dict, r: set, p: set, x: set):
         if len(p) == 0 and len(x) == 0:
             return [r]
@@ -162,11 +162,16 @@ def max_cliques(g: Graph) -> list[NodeList]:
     cliques = list(map(NodeList, map(list, cliques)))
     cliques = sorted(cliques, key=len, reverse=True)
 
-    return cliques
+    clique_graphs = [
+        Graph({k: v for k, v in g.items() if k in c}) for c in cliques
+    ]
+    clique_graphs = sorted(clique_graphs, key=len, reverse=True)
+
+    return clique_graphs
 
 
 def independent_sets(g: Graph) -> list[NodeList]:
-    return max_cliques(graph_complement(g))
+    return list(map(nodes, max_cliques(graph_complement(g))))
 
 
 def graph_coloring_greedy(

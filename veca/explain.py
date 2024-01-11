@@ -163,9 +163,11 @@ def group_similar_variables(
     # merged "clusters"
     if method == "max-cliques":
         cliques = g.max_cliques(graph)
+        cliques = list(map(g.nodes, cliques))
         clusts = {f"Cluster {cid}": vs for cid, vs in enumerate(cliques, start=1)}
     elif method == "connected-components":
         connected_components = g.connected_components(graph)
+        connected_components = list(map(g.nodes, connected_components))
         clusts = {
             f"Cluster {cid}": list(c)
             for cid, c in enumerate(connected_components, start=1)
