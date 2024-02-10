@@ -1,5 +1,6 @@
 import unittest
 
+import numpy as np
 import pandas as pd
 
 import veca.rules
@@ -138,6 +139,8 @@ class TestDiscretize(unittest.TestCase):
             "Discretization of constant continuous variable produced more than "
             "one variable."
         )
+
+        np.testing.assert_equal(df_discretized.values, 1)
 
 
 class TestOneHotEncoding(unittest.TestCase):

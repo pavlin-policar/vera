@@ -121,6 +121,10 @@ def __discretize_const_continuous_features(df: pd.DataFrame) -> pd.DataFrame:
         df.values, columns=derived_features, index=df.index
     )
 
+    # Constant variables are discretized into binary indicator variables
+    # indicating membership. Therefore, their values should all be set to 1
+    df_cont_const.loc[:, :] = 1
+
     return df_cont_const
 
 
