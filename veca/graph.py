@@ -50,8 +50,8 @@ def similarities_to_graph(similarities: np.ndarray, threshold: float = 0.9) -> G
     elif similarities.ndim != 2:
         raise ValueError("`dists` can only be 1- or 2-dimensional!")
 
-    overlap_sp = sp.csr_matrix(similarities > threshold)
-    return matrix_to_graph(overlap_sp)
+    similarities_sp = sp.csr_matrix(similarities > threshold)
+    return matrix_to_graph(similarities_sp)
 
 
 def distances_to_graph(dists: np.ndarray, threshold: float = 0.1) -> Graph:

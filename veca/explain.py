@@ -98,7 +98,7 @@ def contrastive(
 ):
     variables = [VariableGroup([v], v.explanatory_variables) for v in variables]
 
-    # See if we can merge diffent variables with almost perfectly overlap
+    # See if we can merge different variables with almost perfectly overlap
     variables = merge_contrastive(variables, threshold=merge_threshold)
 
     # Compute metrics for each variable group
@@ -131,7 +131,7 @@ def contrastive(
             + 0.1 * pdf.logpdf(num_vars[v])
         )
 
-    # Socres for variables with a single explanatory variable are 0
+    # Scores for variables with a single explanatory variable are 0
     for v in variables:
         if len(v.explanatory_variables) == 1:
             layout_scores[v] = 0
@@ -294,6 +294,10 @@ def descriptive(
     filter_layouts: bool = True,
     return_clusters: bool = False,
 ):
+    # TODO: When constructing descriptive layouts, it may be useful to split the
+    # regions into the different polygon parts. We don't need to match the entire
+    # region of a variable value to describe what a particular cluster corresponds
+    # to
     explanatory_features = [ex for v in variables for ex in v.explanatory_variables]
 
     clusters = group_similar_variables(

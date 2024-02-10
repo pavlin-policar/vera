@@ -12,6 +12,7 @@ def generate_explanatory_features(
     features: pd.DataFrame,
     embedding: np.ndarray,
     sample_size: int = 5000,
+    filter_constant: bool = True,
     n_discretization_bins: int = 5,
     scale_factor: float = 1,
     kernel: str = "gaussian",
@@ -32,13 +33,15 @@ def generate_explanatory_features(
         embedding = embedding[sample_idx]
 
     # Convert the data frame so that it contains derived features
-    df_derived = pp.generate_derived_features(
-        features, n_discretization_bins=n_discretization_bins
+    df_expanded = pp.expand_to_indicator(
+        features,
+        n_discretization_bins=n_discretization_bins,
+        filter_constant=filter_constant
     )
 
     # Create explanatory variables from each of the derived features
-    explanatory_features = pp.convert_derived_features_to_explanatory(
-        df_derived,
+    explanatory_features = pp.generate_explanatory_features(
+        df_expanded,
         embedding,
         scale_factor=scale_factor,
         kernel=kernel,

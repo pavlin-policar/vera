@@ -37,6 +37,7 @@ def min_shared_sample_pct(v1: "ExplanatoryVariable", v2: "ExplanatoryVariable") 
 
 
 def shared_sample_pct(v1: "ExplanatoryVariable", v2: "ExplanatoryVariable") -> float:
+    """Aka the Jaccard similarity."""
     v1_samples, v2_samples = v1.contained_samples, v2.contained_samples
     return len(v1_samples & v2_samples) / len(v1_samples | v2_samples)
 

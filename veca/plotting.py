@@ -555,6 +555,7 @@ def plot_regions_with_subregions(
     figwidth: int = 24,
     return_ax: bool = False,
     cmap: str = "tab10",
+    show: bool = False,
 ):
     n_rows = len(variables) // per_row
     if len(variables) % per_row > 0:
@@ -585,6 +586,9 @@ def plot_regions_with_subregions(
     for idx in range(idx + 1, n_rows * per_row):
         ax[idx].axis("off")
 
+    if show:
+        fig.show()
+
     if return_ax:
         return fig, ax
 
@@ -597,9 +601,12 @@ def plot_annotation(
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
     detail_kwargs: dict = {},
+    figwidth: int = 8,
+    return_ax: bool = False,
+    show: bool = False,
 ):
     if ax is None:
-        fig, ax = plt.subplots(figsize=(8, 8))
+        fig, ax = plt.subplots(figsize=(figwidth, figwidth))
 
     hues = iter(cycle(get_cmap_colors(cmap)))
 
@@ -635,7 +642,11 @@ def plot_annotation(
     ax.set_box_aspect(1)
     ax.axis("equal")
 
-    return ax
+    if show:
+        fig.show()
+
+    if return_ax:
+        return fig, ax
 
 
 def plot_annotations(

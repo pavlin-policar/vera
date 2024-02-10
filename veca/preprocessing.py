@@ -8,6 +8,7 @@ from tqdm import tqdm
 
 import veca.graph as g
 import veca.metrics as metrics
+import veca.variables
 from veca.embedding import Embedding
 from veca.region import Region
 from veca.rules import IntervalRule, EqualityRule
@@ -94,41 +95,45 @@ def ingested_to_pandas(df: pd.DataFrame) -> pd.DataFrame:
     return df_new
 
 
-def _discretize(df: pd.DataFrame, n_bins: int = 5) -> pd.DataFrame:
-    """Discretize all continuous variables in the data frame.
-
-    TODO: This function does imputation, but this really shouldn't be done here
-    It should be up to the user to ensure there are no NaNs in the data, or up
-    to us to ignore them.
-    """
-    df_ingested = ingest(df)
-
-    # We can only discretize continuous columns
-    cont_cols = [c for c in df_ingested.columns if c.is_continuous]
-    othr_cols = [c for c in df_ingested.columns if not c.is_continuous]
-    df_cont = df_ingested[cont_cols]
-    df_othr = df_ingested[othr_cols]
-
-    # If there are no continuous features to be discretized, return
-    if len(cont_cols) == 0:
-        return df_ingested
-
-    # Sklearn discretization doesn't support NaNs, so impute median
+def __impute_missing_continous_values(df: pd.DataFrame) -> pd.DataFrame:
     from sklearn.impute import SimpleImputer
 
     imputer = SimpleImputer(strategy="median")
-    df_cont_imputed = imputer.fit_transform(df_cont.values)
-    df_cont_imputed = pd.DataFrame(
-        df_cont_imputed, columns=df_cont.columns, index=df_cont.index
+    df_imputed = imputer.fit_transform(df.values)
+    df_imputed = pd.DataFrame(
+        df_imputed, columns=df.columns, index=df.index
     )
 
-    # Use k-means for discretization
+    return df_imputed
+
+
+def __discretize_const_continuous_features(df: pd.DataFrame) -> pd.DataFrame:
+    # Constant features are converted into discrete equality rules
+    derived_features = []
+    for variable in df.columns:
+        # All values are the same, so we can just take the first one
+        uniq_val = df.loc[0, variable]
+        rule = EqualityRule(uniq_val, value_name=variable.name)
+        v = DerivedVariable(variable, rule)
+        derived_features.append(v)
+
+    df_cont_const = pd.DataFrame(
+        df.values, columns=derived_features, index=df.index
+    )
+
+    return df_cont_const
+
+
+def __discretize_nonconst_continuous_features(
+    df: pd.DataFrame, n_bins: int
+) -> pd.DataFrame:
+    # Discretize non-constant features
     from sklearn.preprocessing import KBinsDiscretizer
     from sklearn.exceptions import ConvergenceWarning
 
     # Ensure that the number of bins is not larger than the number of unique
     # values
-    n_bins = np.minimum(n_bins, df_cont_imputed.nunique(axis=0).values)
+    n_bins = np.minimum(n_bins, df.nunique(axis=0).values)
 
     discretizer = KBinsDiscretizer(
         n_bins=n_bins,
@@ -137,12 +142,10 @@ def _discretize(df: pd.DataFrame, n_bins: int = 5) -> pd.DataFrame:
     )
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=ConvergenceWarning)
-        x_discretized = discretizer.fit_transform(df_cont_imputed.values)
+        x_discretized = discretizer.fit_transform(df.values)
 
-    # Create derived features
     derived_features = []
-
-    for variable, bin_edges in zip(cont_cols, discretizer.bin_edges_):
+    for variable, bin_edges in zip(df.columns, discretizer.bin_edges_):
         # Ensure open intervals
         bin_edges = np.array(bin_edges)
         bin_edges[0], bin_edges[-1] = -np.inf, np.inf
@@ -156,8 +159,54 @@ def _discretize(df: pd.DataFrame, n_bins: int = 5) -> pd.DataFrame:
         discretizer.get_feature_names_out()
     ), "The number of derived features do not match discretization output!"
 
-    df_cont = pd.DataFrame(x_discretized, columns=derived_features, index=df.index)
-    return pd.concat([df_othr, df_cont], axis=1)
+    df_cont_nonconst = pd.DataFrame(
+        x_discretized, columns=derived_features, index=df.index
+    )
+
+    return df_cont_nonconst
+
+
+def _discretize(df: pd.DataFrame, n_bins: int = 5) -> pd.DataFrame:
+    """Discretize all continuous variables in the data frame.
+
+    TODO: This function does imputation, but this really shouldn't be done here
+    It should be up to the user to ensure there are no NaNs in the data, or up
+    to us to ignore them.
+    """
+    df_ingested = ingest(df)
+
+    # We can only discretize continuous columns
+    cont_cols = [c for c in df_ingested.columns if c.is_continuous]
+    othr_cols = [c for c in df_ingested.columns if not c.is_continuous]
+    df_cont = df_ingested[cont_cols]
+    df_cat = df_ingested[othr_cols]
+
+    # If there are no continuous features to be discretized, return
+    if not len(df_cont.columns):
+        return df_ingested
+
+    # Sklearn discretization doesn't support NaNs, so perform imputation
+    df_cont_imputed = __impute_missing_continous_values(df_cont)
+
+    # We can't perform discretization on constant features, so handle constant
+    # and non-constant features separately
+    nuniq = df_cont_imputed.nunique()
+
+    # Handle constant continuous features
+    cont_const_cols = nuniq.index[nuniq == 1].tolist()
+    df_cont_const = df_cont_imputed[cont_const_cols]
+    if len(cont_const_cols):
+        df_cont_const = __discretize_const_continuous_features(df_cont_const)
+
+    # Handle non-constant continuous features
+    cont_nonconst_cols = nuniq.index[nuniq > 1].tolist()
+    df_cont_nonconst = df_cont_imputed[cont_nonconst_cols]
+    if len(cont_nonconst_cols):
+        df_cont_nonconst = __discretize_nonconst_continuous_features(
+            df_cont_nonconst, n_bins=n_bins,
+        )
+
+    return pd.concat([df_cat, df_cont_const, df_cont_nonconst], axis=1)
 
 
 def _one_hot(df: pd.DataFrame) -> pd.DataFrame:
@@ -191,20 +240,22 @@ def _one_hot(df: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([df_othr, df_disc], axis=1)
 
 
-def generate_derived_features(
-    df: pd.DataFrame, n_discretization_bins: int = 5
+def expand_to_indicator(
+    df: pd.DataFrame, n_discretization_bins: int = 5, filter_constant: bool = True
 ) -> pd.DataFrame:
     # Filter out features with identical values
-    df = df.loc[:, df.nunique(axis=0) > 1]
+    if filter_constant:
+        df = df.loc[:, df.nunique(axis=0) > 1]
 
     df = _one_hot(_discretize(ingest(df), n_bins=n_discretization_bins))
+
     # Filter out columns with zero occurences
     df = df.loc[:, df.sum(axis=0) > 0]
 
     return df
 
 
-def convert_derived_features_to_explanatory(
+def generate_explanatory_features(
     df,
     embedding,
     scale_factor: float = 1,
@@ -246,7 +297,7 @@ def merge_overfragmented(
         if not v1.can_merge_with(v2):
             return 0
 
-        shared_sample_pct = metrics.max_shared_sample_pct(v1, v2)
+        shared_sample_pct = metrics.min_shared_sample_pct(v1, v2)
         if shared_sample_pct < min_sample_overlap:
             return 0
 
@@ -274,22 +325,30 @@ def merge_overfragmented(
             graph = g.similarities_to_graph(dists, threshold=0.5)
             node_labels = dict(enumerate(variable_group))
             graph = g.label_nodes(graph, node_labels)
-            connected_components = g.connected_components(graph)
+            merge_groups = g.connected_components(graph)
+            # merge_groups = g.max_cliques(graph)  # TODO: max cliques puts nodes into multiple cliques
 
-            for c in connected_components:
-                curr_node: ExplanatoryVariable = next(iter(c))
-                while len(c[curr_node]):
-                    next_node = next(iter(c[curr_node]))
-                    new_node = curr_node.merge_with(next_node)
-                    # Ensure that the base variable keeps track of its subvariables
-                    curr_node.base_variable.unregister_explanatory_variable(curr_node)
-                    curr_node.base_variable.unregister_explanatory_variable(next_node)
-                    curr_node.base_variable.register_explanatory_variable(new_node)
+            # # Check which subgraphs each node appears in
+            # node_occurence = defaultdict(list)
+            # for subgraph in merge_groups:
+            #     for node in subgraph:
+            #         node_occurence[node].append(subgraph)
 
-                    c = g.merge_nodes(c, curr_node, next_node, new_node)
-                    curr_node = next(iter(c))
-                assert len(c) == 1
-                merged_variables.append(curr_node)
+            for c in merge_groups:
+                # Merging all the nodes in the graph into a single node. It is
+                # important that the nodes are merged in the correct order, to
+                # respect the `.can_merge_with` constraint
+
+                # For some reason, this is automatically sorted so that the
+                # variables can be merged immediately
+                var_order = list(c)
+                new_var = veca.variables.CompositeExplanatoryVariable(var_order)
+
+                for node in var_order:
+                    node.base_variable.unregister_explanatory_variable(node)
+                new_var.base_variable.register_explanatory_variable(new_var)
+
+                merged_variables.append(new_var)
 
         return merged_variables
 
