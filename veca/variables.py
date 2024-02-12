@@ -251,12 +251,21 @@ class ExplanatoryVariable(DerivedVariable, EmbeddingRegionMixin):
     def __repr__(self):
         attrs = [
             ("rule", repr(self.rule)),
-            ("values", "[...]"),
-            ("region", repr(self.region)),
-            ("embedding", "[[...]]"),
+            # ("values", "[...]"),
+            # ("region", repr(self.region)),
+            # ("embedding", "[[...]]"),
         ]
         attrs_str = ", ".join(f"{k}={v}" for k, v in attrs)
         return f"{self.__class__.__name__}({attrs_str})"
+
+    def split_region(self):
+        """If a variable comprises multiple regions, split each region into its
+        own explanatory variable."""
+        return [
+            ExplanatoryVariable(
+                self.base_variable, self.rule, self.values, r, self.embedding
+            ) for r in self.region.split_into_parts()
+        ]
 
     @property
     def contained_variables(self):
@@ -271,6 +280,20 @@ class ExplanatoryVariable(DerivedVariable, EmbeddingRegionMixin):
     def plot_detail(self) -> str:
         """Region details to be shown in a plot."""
         return None
+
+    def __hash__(self):
+        return hash(
+            (self.__class__.__name__, self.base_variable, self.rule, self.region)
+        )
+
+    def __eq__(self, other):
+        if not isinstance(other, ExplanatoryVariable):
+            return False
+        return (
+            self.base_variable == other.base_variable and
+            self.rule == other.rule and
+            self.region == other.region
+        )
 
 
 class CompositeExplanatoryVariable(ExplanatoryVariable):

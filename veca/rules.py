@@ -18,6 +18,9 @@ class Rule:
         """Check if a rule is completely encompassed by this rule."""
         raise NotImplementedError()
 
+    def __lt__(self, other: "Rule") -> "Rule":
+        raise NotImplementedError()
+
 
 class IntervalRule(Rule):
     def __init__(

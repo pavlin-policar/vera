@@ -36,7 +36,7 @@ def generate_explanatory_features(
     df_expanded = pp.expand_to_indicator(
         features,
         n_discretization_bins=n_discretization_bins,
-        filter_constant=filter_constant
+        filter_constant=filter_constant,
     )
 
     # Create explanatory variables from each of the derived features

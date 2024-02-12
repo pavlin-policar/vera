@@ -73,11 +73,22 @@ class Region:
     def num_parts(self) -> int:
         return len(self.region_parts)
 
+    def split_into_parts(self):
+        return [Region(self.density, g) for g in self.region_parts]
+
     @staticmethod
     def _ensure_multipolygon(polygon) -> geom.MultiPolygon:
         if not isinstance(polygon, geom.MultiPolygon):
             polygon = geom.MultiPolygon([polygon])
         return polygon
+
+    def __eq__(self, other: "Region"):
+        if not isinstance(other, Region):
+            return False
+        return self.polygon == other.polygon
+
+    def __hash__(self):
+        return hash((self.__class__.__name__, self.polygon))
 
     def get_contained_samples(self, embedding: "Embedding") -> set[int]:
         """Get the indices of the samples contained within the region."""

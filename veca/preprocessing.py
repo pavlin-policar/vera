@@ -128,9 +128,7 @@ def __discretize_const_continuous_features(df: pd.DataFrame) -> pd.DataFrame:
     return df_cont_const
 
 
-def __discretize_nonconst_continuous_features(
-    df: pd.DataFrame, n_bins: int
-) -> pd.DataFrame:
+def __discretize_nonconst_continuous_features(df: pd.DataFrame, n_bins: int) -> pd.DataFrame:
     # Discretize non-constant features
     from sklearn.preprocessing import KBinsDiscretizer
     from sklearn.exceptions import ConvergenceWarning
@@ -297,6 +295,10 @@ def merge_overfragmented(
     min_sample_overlap=0.5,
     min_geary_gain=0,
 ):
+    # If we only have a single variable, there is nothing to merge
+    if len(variables) == 1:
+        return variables
+
     def _dist(v1, v2):
         if not v1.can_merge_with(v2):
             return 0
@@ -345,7 +347,10 @@ def merge_overfragmented(
 
                 # For some reason, this is automatically sorted so that the
                 # variables can be merged immediately
-                var_order = list(c)
+
+                # TODO: Rules on explanatory variables can be sorted. Can we use
+                # that to ensure the correct order?
+                var_order = sorted(list(c), key=lambda x: x.rule)
                 new_var = veca.variables.CompositeExplanatoryVariable(var_order)
 
                 for node in var_order:

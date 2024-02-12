@@ -298,10 +298,10 @@ def descriptive(
     # regions into the different polygon parts. We don't need to match the entire
     # region of a variable value to describe what a particular cluster corresponds
     # to
-    explanatory_features = [ex for v in variables for ex in v.explanatory_variables]
+    explanatory_variables = [ex for v in variables for ex in v.explanatory_variables]
 
     clusters = group_similar_variables(
-        explanatory_features,
+        explanatory_variables,
         metric=merge_metric,
         metric_is_distance=metric_is_distance,
         threshold=merge_threshold,
