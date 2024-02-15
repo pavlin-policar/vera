@@ -4,7 +4,13 @@ import numpy as np
 
 
 class IncompatibleRuleError(ValueError):
-    pass
+    def __init__(self, r1, r2):
+        self.r1 = r1
+        self.r2 = r2
+
+    @property
+    def message(self):
+        return f"Incompatible rules `{self.r1}` and `{self.r2}`!"
 
 
 class Rule:
@@ -54,7 +60,7 @@ class IntervalRule(Rule):
 
     def merge_with(self, other: Rule) -> Rule:
         if not self.can_merge_with(other):
-            raise IncompatibleRuleError(other)
+            raise IncompatibleRuleError(self, other)
         lower = min(self.lower, other.lower)
         upper = max(self.upper, other.upper)
         return self.__class__(lower=lower, upper=upper, value_name=self.value_name)
@@ -104,7 +110,7 @@ class EqualityRule(Rule):
 
     def merge_with(self, other: Rule) -> Rule:
         if not self.can_merge_with(other):
-            raise IncompatibleRuleError(other)
+            raise IncompatibleRuleError(self, other)
 
         if isinstance(other, EqualityRule):
             new_values = {self.value, other.value}
@@ -155,7 +161,7 @@ class OneOfRule(Rule):
 
     def merge_with(self, other: Rule) -> Rule:
         if not self.can_merge_with(other):
-            raise IncompatibleRuleError(other)
+            raise IncompatibleRuleError(self, other)
 
         if isinstance(other, OneOfRule):
             new_values = self.values | other.values
