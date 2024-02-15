@@ -197,7 +197,7 @@ def filter_explanatory_features(
         for v in variables
         if v.purity >= min_purity
         and v.gearys_c <= max_geary_index
-        and v.num_all_samples >= min_samples
+        and v.num_contained_samples >= min_samples
     ]
 
 
