@@ -6,7 +6,7 @@ from textwrap import wrap
 from typing import Any, Union
 
 import matplotlib.colors as clr
-import matplotlib.colors as colors
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
@@ -204,7 +204,7 @@ def get_cmap_hues(cmap: str):
 
 def hue_colormap(
     hue: float, levels: Union[Iterable, int] = 10, min_saturation: float = 0
-) -> colors.ListedColormap:
+) -> mcolors.ListedColormap:
     """Create an HSV colormap with varying saturation levels"""
     if isinstance(levels, Iterable):
         hsv = [[hue, (s + min_saturation) / (1 + min_saturation), 1] for s in levels]
@@ -212,8 +212,8 @@ def hue_colormap(
         num_levels = len(levels) if isinstance(levels, Iterable) else levels
         hsv = [[hue, s, 1] for s in np.linspace(min_saturation, 1, num=num_levels)]
 
-    rgb = colors.hsv_to_rgb(hsv)
-    cmap = colors.ListedColormap(rgb)
+    rgb = mcolors.hsv_to_rgb(hsv)
+    cmap = mcolors.ListedColormap(rgb)
 
     return cmap
 
@@ -349,6 +349,7 @@ def plot_region(
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
     detail_kwargs: dict = {},
+    show: bool = False,
 ):
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 8))
@@ -357,9 +358,12 @@ def plot_region(
     if edge_color is None:
         edge_color = fill_color
 
+    # The purity effect should never go below the following threshold
+    purity_effect_size = 0.75
+    purity_factor = variable.purity * purity_effect_size + (1 - purity_effect_size)
     if indicate_purity:
-        edge_alpha *= variable.purity
-        fill_alpha *= variable.purity
+        edge_alpha *= purity_factor
+        fill_alpha *= purity_factor
 
     for geom in variable.region.polygon.geoms:
         # Polygon plotting code taken from
@@ -375,6 +379,7 @@ def plot_region(
                 fill=True,
                 color=fill_color,
                 alpha=fill_alpha,
+                zorder=1,
             )
             ax.add_patch(fill_patch)
         # Boundary
@@ -395,6 +400,7 @@ def plot_region(
             "ha": "center",
             "va": "bottom" if draw_detail else "center",
             "fontsize": 9,
+            "zorder": 99,
         }
         label_kwargs_.update(label_kwargs)
         x, y = largest_polygon.centroid.coords[0]
@@ -443,6 +449,9 @@ def plot_region(
     ax.set_box_aspect(1)
     ax.axis("equal")
 
+    if show:
+        ax.get_figure().show()
+
     return ax
 
 
@@ -465,6 +474,7 @@ def plot_regions(
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
     detail_kwargs: dict = {},
+    show: bool = False,
 ):
     n_rows = len(variables) // per_row
     if len(variables) % per_row > 0:
@@ -507,6 +517,9 @@ def plot_regions(
     # Hide remaining axes
     for idx in range(idx + 1, n_rows * per_row):
         ax[idx].axis("off")
+
+    if show:
+        fig.show()
 
     if return_ax:
         return fig, ax
@@ -598,6 +611,8 @@ def plot_annotation(
     cmap: str = "tab10",
     ax=None,
     indicate_purity: bool = False,
+    indicate_membership: bool = False,
+    variable_colors: dict = None,
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
     detail_kwargs: dict = {},
@@ -608,12 +623,14 @@ def plot_annotation(
     if ax is None:
         fig, ax = plt.subplots(figsize=(figwidth, figwidth))
 
-    hues = iter(cycle(get_cmap_colors(cmap)))
+    if variable_colors is None:
+        colors = iter(cycle(get_cmap_colors(cmap)))
+        variable_colors = {variable: next(colors) for variable in variables}
 
     for variable in variables:
         plot_region(
             variable,
-            fill_color=next(hues),
+            fill_color=variable_colors[variable],
             ax=ax,
             draw_label=True,
             draw_detail=False,
@@ -626,13 +643,33 @@ def plot_annotation(
 
     embedding = variables[0].embedding.X
     scatter_kwargs_ = {
-        "zorder": 1,
-        "c": "#aaaaaa",
+        "zorder": 2,
         "s": 6,
         "alpha": 1,
         **scatter_kwargs,
     }
-    ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_, rasterized=True)
+
+    # Setup sample colors
+    point_colors = np.array([mcolors.to_rgb("#aaaaaa")] * embedding.shape[0])
+
+    if indicate_membership:
+        # Set sample colors inside regions
+        for variable in variables:
+            group_indices = list(variable.contained_samples_tp())
+            point_colors[group_indices] = variable_colors[variable]
+
+        # Desaturate colors slightly
+        point_colors = mcolors.rgb_to_hsv(point_colors)
+        point_colors[:, 1] *= 0.75
+        point_colors = mcolors.hsv_to_rgb(point_colors)
+
+    ax.scatter(
+        embedding[:, 0],
+        embedding[:, 1],
+        c=point_colors,
+        rasterized=True,
+        **scatter_kwargs_
+    )
 
     # Clear title from drawn regions
     ax.set_title("")
@@ -656,9 +693,12 @@ def plot_annotations(
     return_ax: bool = False,
     cmap: str = "tab10",
     indicate_purity: bool = False,
+    indicate_membership: bool = True,
+    variable_colors: dict = None,
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
     detail_kwargs: dict = {},
+    show: bool = False,
 ):
     n_rows = len(layouts) // per_row
     if len(layouts) % per_row > 0:
@@ -677,6 +717,8 @@ def plot_annotations(
             cmap=cmap,
             ax=ax[idx],
             indicate_purity=indicate_purity,
+            indicate_membership=indicate_membership,
+            variable_colors=variable_colors,
             scatter_kwargs=scatter_kwargs,
             label_kwargs=label_kwargs,
             detail_kwargs=detail_kwargs,
@@ -692,6 +734,9 @@ def plot_annotations(
     # Hide remaining axes
     for idx in range(idx + 1, n_rows * per_row):
         ax[idx].axis("off")
+
+    if show:
+        fig.show()
 
     if return_ax:
         return fig, ax
