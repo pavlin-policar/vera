@@ -61,8 +61,7 @@ class CompositeDensity(Density):
 
 
 class Region:
-    def __init__(self, density: Density, polygon: geom.MultiPolygon):
-        self.density = density
+    def __init__(self, polygon: geom.MultiPolygon):
         self.polygon = self._ensure_multipolygon(polygon)
 
     @property
@@ -74,7 +73,7 @@ class Region:
         return len(self.region_parts)
 
     def split_into_parts(self):
-        return [Region(self.density, g) for g in self.region_parts]
+        return [Region(g) for g in self.region_parts]
 
     @staticmethod
     def _ensure_multipolygon(polygon) -> geom.MultiPolygon:
@@ -111,13 +110,11 @@ class Region:
     @classmethod
     def from_density(cls, density: Density, level: float = 0.25):
         polygon = cls._ensure_multipolygon(density.get_polygons_at(level))
-        return cls(density, polygon)
+        return cls(polygon)
 
 
 class CompositeRegion(Region):
     def __init__(self, regions: list[Region]):
-        self.density = CompositeDensity([r.density for r in regions])
-
         self.base_regions = regions
 
         polygon = reduce(operator.or_, [r.polygon for r in regions])
