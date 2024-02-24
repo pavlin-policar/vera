@@ -39,6 +39,7 @@ def min_shared_sample_pct(v1: "ExplanatoryVariable", v2: "ExplanatoryVariable") 
 def shared_sample_pct(v1: "ExplanatoryVariable", v2: "ExplanatoryVariable") -> float:
     """Aka the Jaccard similarity."""
     v1_samples, v2_samples = v1.contained_samples, v2.contained_samples
+    return len(v1_samples & v2_samples) / (len(v1_samples | v2_samples) + 1e-8)  # TODO: should not happen
     return len(v1_samples & v2_samples) / len(v1_samples | v2_samples)
 
 
@@ -48,6 +49,13 @@ def intersection_area(v1: "ExplanatoryVariable", v2: "ExplanatoryVariable") -> f
 
 
 def intersection_percentage(v1: "ExplanatoryVariable", v2: "ExplanatoryVariable") -> float:
+    """The maximum percentage of the overlap between two regions."""
+    p1, p2 = v1.region.polygon, v2.region.polygon
+    i = p1.intersection(p2).area
+    return max(i / p1.area, i / p2.area)
+
+
+def max_intersection_percentage(v1: "ExplanatoryVariable", v2: "ExplanatoryVariable") -> float:
     """The maximum percentage of the overlap between two regions."""
     p1, p2 = v1.region.polygon, v2.region.polygon
     i = p1.intersection(p2).area

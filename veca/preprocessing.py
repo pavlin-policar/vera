@@ -303,7 +303,7 @@ def merge_overfragmented(
         if not v1.can_merge_with(v2):
             return 0
 
-        shared_sample_pct = metrics.min_shared_sample_pct(v1, v2)
+        shared_sample_pct = metrics.max_shared_sample_pct(v1, v2)
         if shared_sample_pct < min_sample_overlap:
             return 0
 

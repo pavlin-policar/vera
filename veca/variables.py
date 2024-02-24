@@ -1,3 +1,4 @@
+import itertools
 import operator
 from functools import cached_property, reduce
 
@@ -5,7 +6,7 @@ import numpy as np
 
 from veca import metrics
 from veca.region import Region, CompositeRegion
-from veca.rules import Rule
+from veca.rules import Rule, IncompatibleRuleError
 
 
 class MergeError(Exception):
@@ -167,6 +168,8 @@ class EmbeddingRegionMixin:
         region: Region,
         embedding: "Embedding",
     ):
+        # TODO: Can we indicate that this refers to all the samples with the
+        #  current value and not just the ones within the region
         self.values = values
         self.region = region
         self.embedding = embedding
@@ -185,6 +188,26 @@ class EmbeddingRegionMixin:
     @cached_property
     def contained_samples(self):
         return self.region.get_contained_samples(self.embedding)
+
+    def contained_samples_tp(self):
+        """The contained samples which are true positives."""
+        # Contained samples numpy array
+        x = np.zeros(self.embedding.shape[0], dtype=bool)
+        x[list(self.contained_samples)] = 1
+
+        vals = self.values.astype(bool)
+
+        return x & vals
+
+    def contained_samples_fp(self):
+        """The contained samples which are false positives."""
+        # Contained samples numpy array
+        x = np.zeros(self.embedding.shape[0], dtype=bool)
+        x[list(self.contained_samples)] = 1
+
+        vals = self.values.astype(bool)
+
+        return x & ~vals
 
     @cached_property
     def num_contained_samples(self) -> int:
@@ -208,6 +231,7 @@ class EmbeddingRegionMixin:
         return metrics.gearys_c(self.values, self.embedding.adj)
 
 
+# TODO: Rename to `ExplanatoryRegion`?
 class ExplanatoryVariable(DerivedVariable, EmbeddingRegionMixin):
     def __init__(
         self,
@@ -267,6 +291,12 @@ class ExplanatoryVariable(DerivedVariable, EmbeddingRegionMixin):
             ) for r in self.region.split_into_parts()
         ]
 
+    # @cached_property
+    # def values(self):
+    #     x = np.zeros(self.embedding.shape[0], dtype=bool)
+    #     x[list(self.contained_samples)] = 1
+    #     return x
+
     @property
     def contained_variables(self):
         return [self]
@@ -307,11 +337,10 @@ class CompositeExplanatoryVariable(ExplanatoryVariable):
             new_rule = variables[0].rule
             for v in variables[1:]:
                 new_rule = new_rule.merge_with(v.rule)
-        except MergeError as e:
+        except IncompatibleRuleError as e:
             raise MergeError(
                 f"CompositeExplanatoryVariable cannot be created because the "
-                f"variables given were incompatible:\n{e.message}\nPlease "
-                f"ensure that the variables are given in a valid merge order."
+                f"variables given were incompatible:\n{e.message}\n"
             )
 
         feature_values = np.vstack([v.values for v in variables])
@@ -348,19 +377,38 @@ class CompositeExplanatoryVariable(ExplanatoryVariable):
 
 class ExplanatoryVariableGroup(EmbeddingRegionMixin):
     def __init__(self, variables: list[ExplanatoryVariable], name: str = None):
-        self.variables = variables
         self.name = name
 
-        v0 = variables[0]
+        # In case the variables contain multiple instances of the same variable,
+        # join them up together into a composite variable.
+        # TODO: This will fail if we try to join up two variables with
+        #  non-compatible rules
+        # TODO: This probably doesn't belong here in the constructor
+        variables_ = []
 
-        feature_values = np.vstack([v.values for v in variables])
+        # itertools.groupby expects consecutive keys, but we accept them in any order
+        variables = sorted(variables, key=lambda v: v.base_variable.name)
+        for key, var_group in itertools.groupby(variables, lambda v: v.base_variable):
+            var_group = sorted(list(var_group))
+            if len(var_group) > 1:
+                try:
+                    var_group = [CompositeExplanatoryVariable(var_group)]
+                except MergeError:
+                    raise
+                    pass  # If merging failed, keep the variables unmerged
+            variables_ += var_group
+        self.variables = variables_
+
+        v0 = self.variables[0]
+
+        feature_values = np.vstack([v.values for v in self.variables])
         # Take min: if plotted together, we expect each point to fulfill all the
         # rules in the feature group
-        merged_values = np.max(feature_values, axis=0)
-        merged_region = CompositeRegion([v.region for v in variables])
+        merged_values = np.min(feature_values, axis=0)
+        merged_region = CompositeRegion([v.region for v in self.variables])
 
         embedding = v0.embedding
-        if not all(np.allclose(v.embedding.X, embedding.X) for v in variables[1:]):
+        if not all(np.allclose(v.embedding.X, embedding.X) for v in self.variables[1:]):
             raise MergeError(
                 "Cannot merge explanatory variables which do not share the "
                 "same embedding!"
@@ -370,15 +418,15 @@ class ExplanatoryVariableGroup(EmbeddingRegionMixin):
 
     @property
     def contained_variables(self):
-        return self.variables
+        return sorted(self.variables, key=lambda v: v.base_variable.name)
 
     def __repr__(self):
         attrs = [
             ("name", repr(self.name)),
             ("variables", repr(self.variables)),
-            ("values", "[...]"),
-            ("region", repr(self.region)),
-            ("embedding", "[[...]]"),
+            # ("values", "[...]"),
+            # ("region", repr(self.region)),
+            # ("embedding", "[[...]]"),
         ]
         attrs_str = ", ".join(f"{k}={v}" for k, v in attrs)
         return f"{self.__class__.__name__}({attrs_str})"
