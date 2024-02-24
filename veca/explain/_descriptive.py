@@ -133,10 +133,15 @@ def generate_descriptive_layout(
     # Create a working copy of our clusters
     clusters = list(clusters)
 
+    if max_panels is None:
+        max_panels = np.inf
+
     score_fns, score_weights = list(zip(*ranking_funcs))
 
+    # We keep generating new panels until we reach the panel limit or run out of
+    # explanatory variables to put into the panels
     layout = []
-    for _ in range(max_panels):
+    while len(layout) < max_panels and len(clusters) > 0:
         # Generate all non-overlapping layouts
         overlap = metrics.pdist(clusters, metrics.max_shared_sample_pct)
         graph = g.similarities_to_graph(overlap, threshold=max_overlap)
@@ -162,10 +167,6 @@ def generate_descriptive_layout(
         # Remove variables in the current panel from the remaining variables
         for var in selected_layout:
             clusters.remove(var)
-
-        # If we've run out of clusters to add to any new panel, we're done
-        if len(clusters) == 0:
-            break
 
     return layout
 
