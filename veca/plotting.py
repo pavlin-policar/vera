@@ -1,10 +1,13 @@
+import operator
 import string
 import warnings
 from collections.abc import Iterable
-from itertools import cycle
+from functools import reduce
+from itertools import cycle, chain
 from textwrap import wrap
 from typing import Any, Union
 
+import glasbey
 import matplotlib.colors as clr
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
@@ -15,7 +18,9 @@ from matplotlib.patches import PathPatch
 from matplotlib.path import Path
 
 from veca.region import Density, Region
-from veca.variables import ExplanatoryVariable, EmbeddingRegionMixin, Variable
+from veca.variables import (
+    ExplanatoryVariable, ExplanatoryVariableGroup, EmbeddingRegionMixin, Variable
+)
 
 
 def plot_feature(
@@ -624,8 +629,14 @@ def plot_annotation(
         fig, ax = plt.subplots(figsize=(figwidth, figwidth))
 
     if variable_colors is None:
-        colors = iter(cycle(get_cmap_colors(cmap)))
-        variable_colors = {variable: next(colors) for variable in variables}
+        # Glasbey crashes when requesting fewer colors than are in the cmap
+        cmap_len = len(get_cmap_colors(cmap))
+        request_len = max(cmap_len, len(variables))
+        cmap = glasbey.extend_palette(cmap, palette_size=request_len)
+        colors = iter(cmap)
+        variable_colors = {
+            variable: mcolors.to_rgb(next(colors)) for variable in variables
+        }
 
     for variable in variables:
         plot_region(
@@ -740,6 +751,33 @@ def plot_annotations(
 
     if return_ax:
         return fig, ax
+
+
+def layout_variable_colors(layout, cmap="tab10"):
+    layout_variables = list(chain.from_iterable(layout))
+
+    # Glasbey crashes when requesting fewer colors than the cmap contains
+    num_cmap_colors = len(get_cmap_colors(cmap))
+    num_colors_to_request = max(num_cmap_colors, len(layout_variables))
+    cmap = glasbey.extend_palette(
+        cmap, palette_size=num_colors_to_request, colorblind_safe=True
+    )
+
+    # We use the variable rule as the key
+    var_keys = {
+        var_group: frozenset(v.rule for v in var_group.variables)
+        for var_group in layout_variables
+    }
+    var_color_mapping = {
+        var_keys[var_group]: mcolors.to_rgb(c)
+        for var_group, c in zip(layout_variables, cmap)
+    }
+    var_group_colors = {
+        var_group: var_color_mapping[var_keys[var_group]]
+        for var_group in layout_variables
+    }
+
+    return var_group_colors
 
 
 def plot_discretization(

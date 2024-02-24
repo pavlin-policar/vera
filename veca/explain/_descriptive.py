@@ -10,10 +10,10 @@ from veca.variables import ExplanatoryVariable, ExplanatoryVariableGroup, Variab
 
 def group_similar_variables(
     variables: list[ExplanatoryVariable],
-    metric: Callable = metrics.shared_sample_pct,
+    metric: Callable = metrics.min_shared_sample_pct,
     metric_is_distance: bool = False,
     threshold: float = 0.9,
-    method: str = "max-cliques",
+    method: str = "connected-components",
 ):
     distances = metrics.pdist(variables, metric)
     g_func = [g.similarities_to_graph, g.distances_to_graph][metric_is_distance]
