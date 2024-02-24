@@ -336,6 +336,24 @@ def _add_region_info(variable: EmbeddingRegionMixin, ax, offset=0.025):
     return txt
 
 
+def _format_explanatory_variable(variable: ExplanatoryVariable, max_width=40):
+    return "\n".join(wrap(variable.name, width=max_width))
+
+
+def _format_explanatory_variable_group(var_group: ExplanatoryVariableGroup, max_width=40):
+    var_strings = [str(v) for v in var_group.contained_variables]
+    if max_width is not None:
+        var_strings = [wrap(s, width=max_width) for s in var_strings]
+    else:
+        # Ensure consistent format with wrapped version
+        var_strings = [[vs] for vs in var_strings]
+
+    # Flatten string parts
+    lines = reduce(operator.add, var_strings)
+
+    return "\n".join(lines)
+
+
 def plot_region(
     variable: ExplanatoryVariable,
     ax=None,
@@ -409,11 +427,16 @@ def plot_region(
         }
         label_kwargs_.update(label_kwargs)
         x, y = largest_polygon.centroid.coords[0]
-        label_parts = map(
-            lambda x: "\n".join(wrap(x, width=40)),
-            str(variable.plot_label).split("\n"),
-        )
-        label = ax.text(x, y, "\n".join(label_parts), **label_kwargs_)
+
+        # Obtain the label string to draw over the region
+        if isinstance(variable, ExplanatoryVariable):
+            label_str = _format_explanatory_variable(variable)
+        elif isinstance(variable, ExplanatoryVariableGroup):
+            label_str = _format_explanatory_variable_group(variable)
+        else:
+            label_str = str(variable)
+
+        label = ax.text(x, y, label_str, **label_kwargs_)
         if draw_detail and variable.plot_detail is not None:
             detail_kwargs_ = {
                 "ha": "center",

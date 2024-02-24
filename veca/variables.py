@@ -272,11 +272,6 @@ class ExplanatoryVariable(DerivedVariable, EmbeddingRegionMixin):
         return [self]
 
     @property
-    def plot_label(self) -> str:
-        """The main label to be shown in a plot."""
-        return self.name
-
-    @property
     def plot_detail(self) -> str:
         """Region details to be shown in a plot."""
         return None
@@ -341,11 +336,6 @@ class CompositeExplanatoryVariable(ExplanatoryVariable):
         )
 
     @property
-    def plot_label(self) -> str:
-        """The main label to be shown in a plot."""
-        return self.name
-
-    @property
     def plot_detail(self) -> str:
         """Region details to be shown in a plot."""
         return None
@@ -392,10 +382,6 @@ class ExplanatoryVariableGroup(EmbeddingRegionMixin):
         ]
         attrs_str = ", ".join(f"{k}={v}" for k, v in attrs)
         return f"{self.__class__.__name__}({attrs_str})"
-
-    @property
-    def plot_label(self) -> str:
-        return "\n".join(str(f) for f in self.contained_variables)
 
     @property
     def plot_detail(self) -> str:
