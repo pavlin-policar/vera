@@ -1,11 +1,21 @@
-from collections import defaultdict
-from typing import Callable, Any
+from typing import Callable
 
 import numpy as np
 from scipy import stats as stats
 
 from veca import metrics as metrics, graph as g
+from veca.explain import _layout_scores
+from veca.region import Region
 from veca.variables import ExplanatoryVariable, ExplanatoryVariableGroup, Variable
+
+
+DEFAULT_RANKING_FUNCS = [
+    (_layout_scores.variable_occurs_in_all_regions, 30),
+    (_layout_scores.mean_variable_occurence, 10),
+    (_layout_scores.mean_purity, 5),
+    (_layout_scores.sample_coverage, 2),
+    (_layout_scores.num_base_vars, 2),
+]
 
 
 def group_similar_variables(
@@ -49,133 +59,169 @@ def group_similar_variables(
     return variable_groups
 
 
-def find_layouts(
-    variables: list[ExplanatoryVariable], max_overlap: float = 0.2
-) -> list[list[Any]]:
-    overlap = metrics.pdist(variables, metrics.max_shared_sample_pct)
-    graph = g.similarities_to_graph(overlap, threshold=max_overlap)
-    node_labels = dict(enumerate(variables))
-    graph = g.label_nodes(graph, node_labels)
+def enrich_var_group_with_background(
+    var_group: ExplanatoryVariableGroup,
+    background_vars: list[ExplanatoryVariable],
+    threshold: float = 0.9,
+):
+    # Determine which base vars are present in the var group
+    contained_base_vars = {v.base_variable for v in var_group.variables}
 
-    independent_sets = g.independent_sets(graph)
+    to_add = []
+    for background_v in background_vars:
+        # If the background variable belongs to the same base variable
+        # as already present in the data, skip that
+        if background_v.base_variable in contained_base_vars:
+            continue
 
-    return independent_sets
+        # Determine if the background var encompasses the current variable
+        shared_samples = var_group.contained_samples & background_v.contained_samples
+        pct_shared = len(shared_samples) / len(var_group.contained_samples)
+
+        # If the region sufficiently overlaps, prepare the overlap for merge
+        if pct_shared > threshold:
+            new_polygon = background_v.region.polygon.intersection(
+                var_group.region.polygon
+            )
+            cloned_bg_var = ExplanatoryVariable(
+                background_v.base_variable,
+                background_v.rule,
+                background_v.values,
+                Region(new_polygon),
+                background_v.embedding
+            )
+            to_add.append(cloned_bg_var)
+
+    # If we found any background variables to add to the var group, create a new
+    # var group with all available explanatory vars
+    if len(to_add) > 0:
+        var_group = ExplanatoryVariableGroup(
+            var_group.variables + to_add, name=var_group.name
+        )
+
+    return var_group
 
 
-def rank_descriptive_layouts(layouts):
-    layouts = list(map(tuple, layouts))
+def enrich_panel_with_background(
+    panel: list[ExplanatoryVariableGroup],
+    background_vars: list[ExplanatoryVariable],
+    threshold: float = 0.9,
+):
+    return [
+        enrich_var_group_with_background(var_group, background_vars, threshold)
+        for var_group in panel
+    ]
 
-    # Determine the number of polygons each variable has
-    num_polygons = defaultdict(int)
-    num_variables = defaultdict(int)
-    for layout in layouts:
-        for v in layout:
-            num_polygons[layout] += v.region.num_parts
-            num_variables[layout] += 1
 
-    polygon_ratio = {
-        l: num_polygons[l] / num_variables[l] for l in layouts
-    }  # lower is better, min=1
+def enrich_layout_with_background(
+    layout: list[list[ExplanatoryVariableGroup]],
+    background_vars: list[ExplanatoryVariable],
+    threshold: float = 0.9,
+):
+    return [
+        enrich_panel_with_background(panel, background_vars, threshold)
+        for panel in layout
+    ]
 
-    # Determine the overlap area: shared sample pct, smaller is better
-    overlap_area = {
-        l: np.max(metrics.pdist(l, metrics.shared_sample_pct), initial=0.01) for l in layouts
-    }
 
-    # Determine how many of the data points are covered by the polygons
-    n_data_points = layouts[0][0].embedding.shape[0]
-    coverage = {}
-    for l in layouts:
-        contained_samples = set()
-        for v in l:
-            contained_samples.update(v.contained_samples)
-        # TODO: This here isn't ideal, because the contained samples also include
-        #  samples, which are incorrectly classified
-        coverage[l] = 1 - len(contained_samples) / n_data_points
+def generate_descriptive_layout(
+    clusters,
+    max_panels: int,
+    max_overlap: float = 0.0,
+    ranking_funcs=DEFAULT_RANKING_FUNCS,
+):
+    # Create a working copy of our clusters
+    clusters = list(clusters)
 
-    # Ideally, we want about three variables
-    pdf = stats.norm(loc=3, scale=2)
+    score_fns, score_weights = list(zip(*ranking_funcs))
 
-    layout_scores = {
-        l: 0.25 * np.log(polygon_ratio[l])
-        + 3 * -pdf.logpdf(num_variables[l])
-        + 2 * np.log(overlap_area[l] + 0.0001)
-        + 1 * np.log(coverage[l] + 0.0001)
-        for l in layouts
-    }
+    layout = []
+    for _ in range(max_panels):
+        # Generate all non-overlapping layouts
+        overlap = metrics.pdist(clusters, metrics.max_shared_sample_pct)
+        graph = g.similarities_to_graph(overlap, threshold=max_overlap)
+        node_labels = dict(enumerate(clusters))
+        graph = g.label_nodes(graph, node_labels)
 
-    candidate_layouts = list(layouts)
-    sorted_layouts = []
+        layouts = g.independent_sets(graph)
 
-    # We want to penalize subsequent uses of the same variable
-    variable_penalties = defaultdict(int)
-    while len(candidate_layouts):
-        layout_penalties = {
-            l: np.prod([variable_penalties[v] + 1 for v in l])
-            for l in candidate_layouts
-        }
-        final_layout_scores = [
-            layout_scores[l] + 1 * layout_penalties[l] for l in candidate_layouts
-        ]
+        # Sort the layouts according to our metrics
+        scores = np.array([
+            [score_fn(layout) for score_fn in score_fns]
+            for layout in layouts
+        ])
+        rankings = stats.rankdata(scores, method="max", axis=0)
 
-        next_layout = candidate_layouts[np.argmin(final_layout_scores)]
-        candidate_layouts.remove(next_layout)
-        sorted_layouts.append(next_layout)
+        score_weights = np.array(score_weights)
+        mean_ranks = np.mean(rankings * score_weights, axis=1)
 
-        # Apply penalty
-        for v in next_layout:
-            variable_penalties[v] += 10
-        for v in variable_penalties:
-            variable_penalties[v] /= 1.5
+        # Select the layout with the highest weighted mean rank
+        selected_layout = layouts[np.argmax(mean_ranks)]
+        layout.append(selected_layout)
 
-    return list(map(list, sorted_layouts))
+        # Remove variables in the current panel from the remaining variables
+        for var in selected_layout:
+            clusters.remove(var)
+
+        # If we've run out of clusters to add to any new panel, we're done
+        if len(clusters) == 0:
+            break
+
+    return layout
 
 
 def descriptive(
     variables: list[Variable],
+    max_panels: int = 4,
     merge_metric: Callable = metrics.min_shared_sample_pct,
     metric_is_distance: bool = False,
-    merge_method: str = "max-cliques",
-    merge_threshold: float = 0.75,
+    merge_method: str = "connected-components",
+    merge_threshold: float = 0.8,
     cluster_min_samples: int = 5,
     cluster_min_purity: float = 0.5,
     cluster_max_geary_index: float = 1,  # no geary filtering by default
-    layout_max_overlap: float = 0.2,
-    filter_layouts: bool = True,
+    max_overlap: float = 0.0,
+    enrich_with_background: bool = True,
     return_clusters: bool = False,
+    ranking_funcs=DEFAULT_RANKING_FUNCS,
 ):
-    # TODO: When constructing descriptive layouts, it may be useful to split the
-    # regions into the different polygon parts. We don't need to match the entire
-    # region of a variable value to describe what a particular cluster corresponds
-    # to
     explanatory_variables = [ex for v in variables for ex in v.explanatory_variables]
 
+    # Split explanatory features into their polygons
+    explanatory_variables_split = []
+    for expl_var in explanatory_variables:
+        explanatory_variables_split.extend(expl_var.split_region())
+
+    # Remove any split parts that do not pass the filtering criteria
+    explanatory_variables_split = filter_explanatory_features(
+        explanatory_variables_split,
+        min_samples=cluster_min_samples,
+        min_purity=cluster_min_purity,
+        max_geary_index=cluster_max_geary_index,
+    )
+
     clusters = group_similar_variables(
-        explanatory_variables,
+        explanatory_variables_split,
         metric=merge_metric,
         metric_is_distance=metric_is_distance,
         threshold=merge_threshold,
         method=merge_method,
     )
 
-    filtered_clusters = filter_explanatory_features(
+    layout = generate_descriptive_layout(
         clusters,
-        min_samples=cluster_min_samples,
-        min_purity=cluster_min_purity,
-        max_geary_index=cluster_max_geary_index,
+        max_panels=max_panels,
+        max_overlap=max_overlap,
+        ranking_funcs=ranking_funcs,
     )
 
-    layouts = find_layouts(filtered_clusters, max_overlap=layout_max_overlap)
-
-    layouts = rank_descriptive_layouts(layouts)
-
-    if filter_layouts:
-        layouts = [l for l in layouts if len(l) > 1]
+    if enrich_with_background:
+        layout = enrich_layout_with_background(layout, explanatory_variables)
 
     if return_clusters:
-        return layouts, filtered_clusters
+        return layout, clusters
     else:
-        return layouts
+        return layout
 
 
 def filter_explanatory_features(

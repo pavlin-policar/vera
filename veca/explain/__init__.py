@@ -1,2 +1,2 @@
-from .contrastive import contrastive
-from .descriptive import descriptive, filter_explanatory_features
+from ._contrastive import contrastive
+from ._descriptive import descriptive

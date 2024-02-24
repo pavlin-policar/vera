@@ -86,6 +86,7 @@ def merge_contrastive(variables: List[VariableGroup], threshold: float = 0.95):
 
 def contrastive(
     variables: list[Variable],
+    max_panels: int = 4,
     merge_threshold: float = 0.95,
     filter_layouts: bool = True,
 ):
@@ -98,11 +99,11 @@ def contrastive(
     mean_overlap, mean_purity, num_vars, num_polygons = {}, {}, {}, {}
     layout_scores = {}
     for v in variables:
+        # Compute the mean overlap between pairs of variables in the group
         overlaps = [
             metrics.shared_sample_pct(v1, v2)
             for v1, v2 in combinations(v.explanatory_variables, 2)
         ]
-        # Select the minimum overlap between any two variables in the group
         mean_overlap[v] = np.mean(overlaps)
 
         purities = [vi.purity for vi in v.explanatory_variables]
@@ -110,10 +111,6 @@ def contrastive(
 
         num_vars[v] = len(v.explanatory_variables)
         num_polygons[v] = sum(v.region.num_parts for v in v.explanatory_variables)
-
-        # polygon_ratio = num_vars[v] / num_polygons[v]  # lower is worse, max=1
-        # Polygon doesn't work well
-        # TODO: Perhaps it would be better to rank these by overlap area?
 
         # Ideally, we want about three variables
         pdf = stats.norm(loc=3, scale=2)
@@ -134,5 +131,8 @@ def contrastive(
 
     if filter_layouts:
         sorted_groups = [g for g in sorted_groups if len(g) > 1]
+
+    if max_panels is not None:
+        sorted_groups = sorted_groups[:max_panels]
 
     return sorted_groups
