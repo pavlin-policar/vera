@@ -223,6 +223,26 @@ def hue_colormap(
     return cmap
 
 
+def enumerate_plots(ax: list[matplotlib.axes.Axes], offset=0.025, text_params={}):
+    text_params_ = dict(
+        va="top",
+        ha="left",
+        fontweight="bold",
+        fontfamily="Arial Black",
+        fontsize=10,
+    )
+    text_params_.update(text_params)
+    for idx, ax_ in enumerate(ax):
+        letter = string.ascii_lowercase[idx % len(string.ascii_lowercase)]
+        ax[idx].text(
+            offset,
+            1 - offset,
+            letter,
+            transform=ax[idx].transAxes,
+            **text_params_,
+        )
+
+
 def plot_density(
     density: Union[ExplanatoryVariable, Region, Density],
     embedding: np.ndarray = None,
@@ -535,12 +555,7 @@ def plot_regions(
             detail_kwargs=detail_kwargs,
         )
 
-        offset = 0.025
-        l = string.ascii_lowercase[idx % len(string.ascii_lowercase)]
-        ax[idx].text(
-            offset, 1 - offset, l, transform=ax[idx].transAxes, va="top", ha="left",
-            fontweight="bold", fontsize=16
-        )
+    enumerate_plots(ax[:idx + 1])
 
     # Hide remaining axes
     for idx in range(idx + 1, n_rows * per_row):
@@ -616,12 +631,7 @@ def plot_regions_with_subregions(
             cmap=cmap,
         )
 
-        offset = 0.025
-        l = string.ascii_lowercase[idx % len(string.ascii_lowercase)]
-        ax[idx].text(
-            offset, 1 - offset, l, transform=ax[idx].transAxes, va="top", ha="left",
-            fontweight="bold", fontsize=16
-        )
+    enumerate_plots(ax[:idx + 1])
 
     # Hide remaining axes
     for idx in range(idx + 1, n_rows * per_row):
@@ -752,18 +762,14 @@ def plot_annotations(
             ax=ax[idx],
             indicate_purity=indicate_purity,
             indicate_membership=indicate_membership,
+            only_color_inside_members=only_color_inside_members,
             variable_colors=variable_colors,
             scatter_kwargs=scatter_kwargs,
             label_kwargs=label_kwargs,
             detail_kwargs=detail_kwargs,
         )
 
-        offset = 0.025
-        l = string.ascii_lowercase[idx % len(string.ascii_lowercase)]
-        ax[idx].text(
-            offset, 1 - offset, l, transform=ax[idx].transAxes, va="top", ha="left",
-            fontweight="bold", fontsize=16
-        )
+    enumerate_plots(ax[:idx + 1])
 
     # Hide remaining axes
     for idx in range(idx + 1, n_rows * per_row):
