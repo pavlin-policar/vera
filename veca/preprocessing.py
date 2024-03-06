@@ -293,7 +293,6 @@ def merge_overfragmented(
     variables: list[ExplanatoryVariable],
     min_purity_gain=0.05,
     min_sample_overlap=0.5,
-    min_geary_gain=0,
 ):
     # If we only have a single variable, there is nothing to merge
     if len(variables) == 1:
@@ -312,13 +311,7 @@ def merge_overfragmented(
         v2_purity_gain = new_variable.purity / v2.purity - 1
         purity_gain = np.mean([v1_purity_gain, v2_purity_gain])
 
-        v1_geary_gain = (1 - new_variable.gearys_c) / (1 - v1.gearys_c + 1e-16)
-        v2_geary_gain = (1 - new_variable.gearys_c) / (1 - v2.gearys_c + 1e-16)
-        geary_gain = np.mean([v1_geary_gain, v2_geary_gain])
-
-        return int(
-            purity_gain >= min_purity_gain and geary_gain >= min_geary_gain - 1e-4
-        )
+        return int(purity_gain >= min_purity_gain)
 
     def _merge_round(variables):
         variable_groups = defaultdict(list)

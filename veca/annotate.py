@@ -19,7 +19,6 @@ def generate_explanatory_features(
     contour_level: float = 0.25,
     merge_min_purity_gain=0.5,
     merge_min_sample_overlap=0.5,
-    merge_min_geary_gain=0,
     random_state: Any = None,
 ) -> list[Variable]:
     # Sample the data if necessary. Running on large data sets can be very slow
@@ -53,7 +52,6 @@ def generate_explanatory_features(
         explanatory_features,
         min_purity_gain=merge_min_purity_gain,
         min_sample_overlap=merge_min_sample_overlap,
-        min_geary_gain=merge_min_geary_gain,
     )
 
     # Return the list of base variables, which contain the explanatory variables
