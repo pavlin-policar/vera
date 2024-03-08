@@ -95,18 +95,6 @@ def ingested_to_pandas(df: pd.DataFrame) -> pd.DataFrame:
     return df_new
 
 
-def __impute_missing_continous_values(df: pd.DataFrame) -> pd.DataFrame:
-    from sklearn.impute import SimpleImputer
-
-    imputer = SimpleImputer(strategy="median")
-    df_imputed = imputer.fit_transform(df.values)
-    df_imputed = pd.DataFrame(
-        df_imputed, columns=df.columns, index=df.index
-    )
-
-    return df_imputed
-
-
 def __discretize_const_continuous_features(df: pd.DataFrame) -> pd.DataFrame:
     # Constant features are converted into discrete equality rules
     derived_features = []
@@ -133,39 +121,51 @@ def __discretize_nonconst_continuous_features(df: pd.DataFrame, n_bins: int) -> 
     from sklearn.preprocessing import KBinsDiscretizer
     from sklearn.exceptions import ConvergenceWarning
 
-    # Ensure that the number of bins is not larger than the number of unique
-    # values
-    n_bins = np.minimum(n_bins, df.nunique(axis=0).values)
+    discretized_dfs = []
+    for variable in df.columns:
+        col_values = df[variable]
+        col_values_non_nan = col_values.dropna()
 
-    discretizer = KBinsDiscretizer(
-        n_bins=n_bins,
-        strategy="kmeans",
-        encode="onehot-dense",
-    )
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", category=ConvergenceWarning)
-        x_discretized = discretizer.fit_transform(df.values)
+        # Ensure that the number of bins is not larger than the number of unique
+        # values
+        n_bins = np.minimum(n_bins, col_values.nunique())
 
-    derived_features = []
-    for variable, bin_edges in zip(df.columns, discretizer.bin_edges_):
+        discretizer = KBinsDiscretizer(
+            n_bins=n_bins,
+            strategy="kmeans",
+            encode="onehot-dense",
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=ConvergenceWarning)
+            x_discretized = discretizer.fit_transform(col_values_non_nan.values[:, None])
+
+        # We discretize the non-NaN values, so ensure that the rows containing
+        # NaNs are re-inserted as zeros
+        df_discretized = pd.DataFrame(x_discretized, index=col_values_non_nan.index)
+        df_discretized = df_discretized.reindex(col_values.index, fill_value=0)
+
+        # Prepare rules and variables
+        bin_edges = discretizer.bin_edges_[0]
+
         # Ensure open intervals
         bin_edges = np.array(bin_edges)
         bin_edges[0], bin_edges[-1] = -np.inf, np.inf
 
+        derived_vars = []
         for lower, upper in zip(bin_edges, bin_edges[1:]):
             rule = IntervalRule(lower, upper, value_name=variable.name)
             v = DerivedVariable(variable, rule)
-            derived_features.append(v)
+            derived_vars.append(v)
 
-    assert len(derived_features) == len(
-        discretizer.get_feature_names_out()
-    ), "The number of derived features do not match discretization output!"
+        assert len(derived_vars) == len(df_discretized.columns), \
+            "The number of derived features do not match discretization output!"
+        df_discretized.columns = derived_vars
 
-    df_cont_nonconst = pd.DataFrame(
-        x_discretized, columns=derived_features, index=df.index
-    )
+        discretized_dfs.append(df_discretized)
 
-    return df_cont_nonconst
+    df_discretized = pd.concat(discretized_dfs, axis=1)
+
+    return df_discretized
 
 
 def _discretize(df: pd.DataFrame, n_bins: int = 5) -> pd.DataFrame:
@@ -187,22 +187,19 @@ def _discretize(df: pd.DataFrame, n_bins: int = 5) -> pd.DataFrame:
     if not len(df_cont.columns):
         return df_ingested
 
-    # Sklearn discretization doesn't support NaNs, so perform imputation
-    df_cont_imputed = __impute_missing_continous_values(df_cont)
-
     # We can't perform discretization on constant features, so handle constant
     # and non-constant features separately
-    nuniq = df_cont_imputed.nunique()
+    nuniq = df_cont.nunique()
 
     # Handle constant continuous features
     cont_const_cols = nuniq.index[nuniq == 1].tolist()
-    df_cont_const = df_cont_imputed[cont_const_cols]
+    df_cont_const = df_cont[cont_const_cols]
     if len(cont_const_cols):
         df_cont_const = __discretize_const_continuous_features(df_cont_const)
 
     # Handle non-constant continuous features
     cont_nonconst_cols = nuniq.index[nuniq > 1].tolist()
-    df_cont_nonconst = df_cont_imputed[cont_nonconst_cols]
+    df_cont_nonconst = df_cont[cont_nonconst_cols]
     if len(cont_nonconst_cols):
         df_cont_nonconst = __discretize_nonconst_continuous_features(
             df_cont_nonconst, n_bins=n_bins,

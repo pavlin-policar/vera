@@ -57,6 +57,13 @@ class TestIngest(unittest.TestCase):
         self.assertTrue(all(isinstance(c, veca.variables.Variable) for c in result.columns))
         self.assertTrue(all(isinstance(c.name, str) for c in result.columns))
 
+    def test_ingest_with_nans(self):
+        df = self.df
+        df["nans"] = [1, 2, np.nan, np.nan, 5]
+        result = pp.ingest(df)
+        self.assertTrue(all(isinstance(c, veca.variables.Variable) for c in result.columns))
+        self.assertTrue(all(isinstance(c.name, str) for c in result.columns))
+
 
 class TestIngestedToPandas(unittest.TestCase):
     def setUp(self) -> None:
@@ -142,6 +149,25 @@ class TestDiscretize(unittest.TestCase):
 
         np.testing.assert_equal(df_discretized.values, 1)
 
+    def test_discretize_with_nans(self):
+        df = self.df
+        # Add a continuous column containing NaNs
+        df["nans"] = [1, 2, np.nan, np.nan, 5]
+        result = pp._discretize(df)
+
+        # Extract only the NaN columns
+        nan_cols = [
+            col for col in result.columns
+            if isinstance(col, veca.variables.DerivedVariable) and
+               col.base_variable.name == "nans"
+        ]
+        nan_cols_df = result[nan_cols]
+
+        # Ensure that the rows that had the NaNs haven't been assigned to any
+        # particular bin
+        nan_mask = df["nans"].isna()
+        self.assertEqual(np.sum(nan_cols_df[nan_mask].values), 0, "NaNs mapped to bin!")
+
 
 class TestOneHotEncoding(unittest.TestCase):
     def setUp(self) -> None:
@@ -210,3 +236,23 @@ class TestOneHotEncoding(unittest.TestCase):
         df = pp._discretize(pp.ingest(self.df[["cont1", "cont2"]]))
         df_encoded = pp._one_hot(df)
         self.assertTrue(df.equals(df_encoded))
+
+    def test_one_hot_encoding_with_nans(self):
+        df = self.df
+        # Add a categorical column containing NaNs
+        df["nans"] = pd.Categorical([0, np.nan, 1, 0, 1])
+        
+        result = pp._one_hot(df)
+
+        # Extract only the NaN columns
+        nan_cols = [
+            col for col in result.columns
+            if isinstance(col, veca.variables.DerivedVariable) and
+               col.base_variable.name == "nans"
+        ]
+        nan_cols_df = result[nan_cols]
+
+        # Ensure that the rows that had the NaNs haven't been assigned to any
+        # particular bin
+        nan_mask = df["nans"].isna()
+        self.assertEqual(np.sum(nan_cols_df[nan_mask].values), 0, "NaNs mapped to bin!")
