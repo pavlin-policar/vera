@@ -139,7 +139,6 @@ def descriptive(
     merge_threshold: float = 0.75,
     cluster_min_samples: int = 5,
     cluster_min_purity: float = 0.5,
-    cluster_max_geary_index: float = 1,  # no geary filtering by default
     layout_max_overlap: float = 0.2,
     filter_layouts: bool = True,
     return_clusters: bool = False,
@@ -162,7 +161,6 @@ def descriptive(
         clusters,
         min_samples=cluster_min_samples,
         min_purity=cluster_min_purity,
-        max_geary_index=cluster_max_geary_index,
     )
 
     layouts = find_layouts(filtered_clusters, max_overlap=layout_max_overlap)
@@ -182,12 +180,10 @@ def filter_explanatory_features(
     variables: list[ExplanatoryVariable],
     min_samples: int = 5,
     min_purity: float = 0.5,
-    max_geary_index: float = 1,  # no filtering by Geary
 ):
     return [
         v
         for v in variables
         if v.purity >= min_purity
-        and v.gearys_c <= max_geary_index
         and v.num_contained_samples >= min_samples
     ]

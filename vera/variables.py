@@ -222,14 +222,6 @@ class EmbeddingRegionMixin:
         # We only have binary features, so we can just compute the mean
         return np.mean(self.values[list(self.contained_samples)])
 
-    @cached_property
-    def morans_i(self):
-        return metrics.morans_i(self.values, self.embedding.adj)
-
-    @cached_property
-    def gearys_c(self):
-        return metrics.gearys_c(self.values, self.embedding.adj)
-
 
 # TODO: Rename to `ExplanatoryRegion`?
 class ExplanatoryVariable(DerivedVariable, EmbeddingRegionMixin):

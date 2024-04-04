@@ -338,28 +338,8 @@ def plot_densities(
         return fig, ax
 
 
-def _add_region_info(variable: EmbeddingRegionMixin, ax, offset=0.025):
-    info = [
-        ("Purity", "purity"),
-        ("Moran's I", "morans_i"),
-        ("Geary's C", "gearys_c"),
-    ]
-    s_parts = [f"{name}: {getattr(variable, attr):.2f}" for name, attr in info]
-    s = "\n".join(s_parts)
-    txt = ax.text(
-        1 - offset,
-        1 - offset,
-        s,
-        transform=ax.transAxes,
-        va="top",
-        ha="right",
-        linespacing=1.5,
-    )
-    return txt
-
-
 def _format_explanatory_variable(variable: ExplanatoryVariable, max_width=40):
-    return ";".join(wrap(variable.name, width=max_width))
+    return "\n".join(wrap(variable.name, width=max_width))
 
 
 def _format_explanatory_variable_group(var_group: ExplanatoryVariableGroup, max_width=40):
@@ -373,7 +353,7 @@ def _format_explanatory_variable_group(var_group: ExplanatoryVariableGroup, max_
     # Flatten string parts
     lines = reduce(operator.add, var_strings)
 
-    return ";".join(lines)
+    return "\n".join(lines)
 
 
 def plot_region(
@@ -389,7 +369,6 @@ def plot_region(
     draw_scatterplot=True,
     highlight_members=True,
     member_color="tab:red",
-    add_region_info=False,
     indicate_purity: bool = False,
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
@@ -477,9 +456,6 @@ def plot_region(
             detail_kwargs_.update(detail_kwargs)
             label = ax.text(x, y, f"({variable.plot_detail})", **detail_kwargs_)
         # label.set_bbox(dict(facecolor="white", alpha=0.75, edgecolor="white"))
-
-    if add_region_info:
-        _add_region_info(variable, ax)
 
     # Plot embedding scatter plot
     if draw_scatterplot:
