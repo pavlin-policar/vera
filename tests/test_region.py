@@ -3,10 +3,10 @@ import unittest
 import numpy as np
 import pandas as pd
 
-import veca
+import vera
 
 
-class TestRegion(unittest.TestCase):
+class TestIntersectWithOther(unittest.TestCase):
     def test_construct_region_with_single_hole(self):
         np.random.seed(0)
 
@@ -16,7 +16,7 @@ class TestRegion(unittest.TestCase):
         features["inner"] = np.linalg.norm(x, axis=1) < 0.5
 
         # The function returns the base variables, of which there should only be one
-        feature_list = veca.an.generate_explanatory_features(
+        feature_list = vera.an.generate_explanatory_features(
             features, embedding=x, scale_factor=0.5,
         )
         self.assertEqual(
@@ -55,7 +55,7 @@ class TestRegion(unittest.TestCase):
         features["holes"] = features["holes"]
 
         # The function returns the base variables, of which there should only be one
-        feature_list = veca.an.generate_explanatory_features(
+        feature_list = vera.an.generate_explanatory_features(
             features, embedding=x, scale_factor=0.5,
         )
         self.assertEqual(

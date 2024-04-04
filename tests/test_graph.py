@@ -1,6 +1,6 @@
 import unittest
 
-import veca.graph as g
+import vera.graph as g
 
 
 class TestMergeNodes(unittest.TestCase):

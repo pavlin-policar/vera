@@ -6,13 +6,13 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-import veca.graph as g
-import veca.metrics as metrics
-import veca.variables
-from veca.embedding import Embedding
-from veca.region import Region
-from veca.rules import IntervalRule, EqualityRule
-from veca.variables import (
+import vera.graph as g
+import vera.metrics as metrics
+import vera.variables
+from vera.embedding import Embedding
+from vera.region import Region
+from vera.rules import IntervalRule, EqualityRule
+from vera.variables import (
     DerivedVariable,
     ExplanatoryVariable,
     DiscreteVariable,
@@ -125,6 +125,10 @@ def __discretize_nonconst_continuous_features(df: pd.DataFrame, n_bins: int) -> 
     for variable in df.columns:
         col_values = df[variable]
         col_values_non_nan = col_values.dropna()
+
+        # If we have a sparse column, convert to dense
+        if isinstance(col_values_non_nan.dtype, pd.SparseDtype):
+            col_values_non_nan = col_values_non_nan.sparse.to_dense()
 
         # Ensure that the number of bins is not larger than the number of unique
         # values
@@ -288,8 +292,8 @@ def generate_explanatory_features(
 
 def merge_overfragmented(
     variables: list[ExplanatoryVariable],
-    min_purity_gain=0.05,
     min_sample_overlap=0.5,
+    min_purity_gain=0.5,
 ):
     # If we only have a single variable, there is nothing to merge
     if len(variables) == 1:
@@ -306,7 +310,7 @@ def merge_overfragmented(
         new_variable = v1.merge_with(v2)
         v1_purity_gain = new_variable.purity / v1.purity - 1
         v2_purity_gain = new_variable.purity / v2.purity - 1
-        purity_gain = np.mean([v1_purity_gain, v2_purity_gain])
+        purity_gain = np.max([v1_purity_gain, v2_purity_gain])
 
         return int(purity_gain >= min_purity_gain)
 
@@ -341,7 +345,7 @@ def merge_overfragmented(
                 # TODO: Rules on explanatory variables can be sorted. Can we use
                 # that to ensure the correct order?
                 var_order = sorted(list(c), key=lambda x: x.rule)
-                new_var = veca.variables.CompositeExplanatoryVariable(var_order)
+                new_var = vera.variables.CompositeExplanatoryVariable(var_order)
 
                 for node in var_order:
                     node.base_variable.unregister_explanatory_variable(node)

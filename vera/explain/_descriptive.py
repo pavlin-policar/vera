@@ -3,18 +3,18 @@ from typing import Callable
 import numpy as np
 from scipy import stats as stats
 
-from veca import metrics as metrics, graph as g
-from veca.explain import _layout_scores
-from veca.region import Region
-from veca.variables import ExplanatoryVariable, ExplanatoryVariableGroup, Variable
+from vera import metrics as metrics, graph as g
+from vera.explain import _layout_scores
+from vera.region import Region
+from vera.variables import ExplanatoryVariable, ExplanatoryVariableGroup, Variable
 
 
 DEFAULT_RANKING_FUNCS = [
     (_layout_scores.variable_occurs_in_all_regions, 30),
     (_layout_scores.mean_variable_occurence, 10),
+    (_layout_scores.num_regions_matches_perception, 10),
     (_layout_scores.mean_purity, 5),
     (_layout_scores.sample_coverage, 2),
-    (_layout_scores.num_base_vars, 2),
 ]
 
 
@@ -126,7 +126,7 @@ def enrich_layout_with_background(
 
 def generate_descriptive_layout(
     clusters,
-    max_panels: int,
+    max_panels: int | None = None,
     max_overlap: float = 0.0,
     ranking_funcs=DEFAULT_RANKING_FUNCS,
 ):
@@ -150,12 +150,12 @@ def generate_descriptive_layout(
 
         layouts = g.independent_sets(graph)
 
-        # Sort the layouts according to our metrics
-        scores = np.array([
+        # Sort the panels according to our metrics
+        panel_scores = np.array([
             [score_fn(layout) for score_fn in score_fns]
             for layout in layouts
         ])
-        rankings = stats.rankdata(scores, method="max", axis=0)
+        rankings = stats.rankdata(panel_scores, method="max", axis=0)
 
         score_weights = np.array(score_weights)
         mean_ranks = np.mean(rankings * score_weights, axis=1)
@@ -173,7 +173,7 @@ def generate_descriptive_layout(
 
 def descriptive(
     variables: list[Variable],
-    max_panels: int = 4,
+    max_panels: int | None = 4,
     merge_metric: Callable = metrics.min_shared_sample_pct,
     metric_is_distance: bool = False,
     merge_method: str = "connected-components",
@@ -182,6 +182,7 @@ def descriptive(
     cluster_min_purity: float = 0.5,
     max_overlap: float = 0.0,
     enrich_with_background: bool = True,
+    background_enrichment_threshold: float = 0.9,
     return_clusters: bool = False,
     ranking_funcs=DEFAULT_RANKING_FUNCS,
 ):
@@ -215,7 +216,11 @@ def descriptive(
     )
 
     if enrich_with_background:
-        layout = enrich_layout_with_background(layout, explanatory_variables)
+        layout = enrich_layout_with_background(
+            layout,
+            explanatory_variables,
+            threshold=background_enrichment_threshold,
+        )
 
     if return_clusters:
         return layout, clusters

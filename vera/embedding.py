@@ -7,7 +7,7 @@ import shapely.geometry as geom
 from sklearn import neighbors
 import KDEpy
 
-from veca.region import Density
+from vera.region import Density
 
 
 def kth_neighbor_distance(x: np.ndarray, k_neighbors: int, n_jobs: int = 1) -> float:

@@ -2,9 +2,11 @@ import unittest
 
 import numpy as np
 
-import veca as annotate
-import veca.embedding
-import veca.preprocessing
+import vera as annotate
+import vera.embedding
+import vera.explain._contrastive
+import vera.explain._descriptive
+import vera.preprocessing
 
 DATA_DIR = "data"
 
@@ -31,51 +33,51 @@ class TestAnnotator(unittest.TestCase):
         embedding, x = self.iris.embedding, self.iris.features
 
         # Desired API
-        features = veca.an.generate_explanatory_features()
-        features = veca.an.filter_explanatory_features(features)
+        features = vera.an.generate_explanatory_features()
+        features = vera.an.filter_explanatory_features(features)
 
-        feature_groups = veca.an.group_similar_features(features)
-        feature_groups = veca.an.filter_explanatory_features(feature_groups)
+        feature_groups = vera.an.group_similar_features(features)
+        feature_groups = vera.an.filter_explanatory_features(feature_groups)
 
-        layouts = veca.an.find_layouts(feature_groups)
+        layouts = vera.an.find_layouts(feature_groups)
 
         # Find contrastive features
-        veca.layouts.contrastive(features)
+        vera.explain.contrastive.contrastive(features)
         # find other
-        veca.layouts.descriptive(features)
+        vera.explain.descriptive.descriptive(features)
 
 
-        layouts = veca.rank.contrastive(layouts)
-        veca.pl.layouts(layouts)
+        layouts = vera.explain.contrastive.contrastive(layouts)
+        vera.pl.layouts(layouts)
 
         # END
 
-        features = veca.pp.generate_explanatory_features(x, embedding)
+        features = vera.pp.generate_explanatory_features(x, embedding)
 
         layouts = vasari.explain(features, embedding)
-        layouts = vasari.rank.contrastive(layouts)
+        layouts = vera.explain.contrastive.contrastive(layouts)
         vasari.plot.layouts(layouts, embedding)
 
         # Or, simlpy
         layouts = vasari.explain(features, embedding)
-        layouts = vasari.rank.contrastive(layouts)
+        layouts = vera.explain.contrastive.contrastive(layouts)
         vasari.plot.layouts(layouts, embedding)
 
         # Current implementation
-        features = veca.preprocessing.generate_explanatory_features(x)
+        features = vera.preprocessing.generate_explanatory_features(x)
 
         k_neighbors = int(np.floor(np.sqrt(embedding.shape[0])))
-        scale = veca.embedding.kth_neighbor_distance(embedding, k_neighbors)
+        scale = vera.embedding.kth_neighbor_distance(embedding, k_neighbors)
 
         candidates = annotate.fs.morans_i(embedding, features, scale=scale)
 
-        feature_densities = veca.preprocessing.estimate_feature_densities(
+        feature_densities = vera.preprocessing.estimate_feature_densities(
             candidates["feature"].tolist(),
             features,
             embedding,
             bw=scale,
         )
-        regions = veca.preprocessing.find_regions(feature_densities, level=0.25)
+        regions = vera.preprocessing.find_regions(feature_densities, level=0.25)
 
         merged_regions = annotate.an.stage_1_merge_regions(regions, overlap_threshold=0.75)
 

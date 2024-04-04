@@ -1,7 +1,10 @@
 from collections import defaultdict
-from itertools import chain
+from itertools import chain, combinations
 
 import numpy as np
+import scipy.stats as stats
+
+from vera import metrics
 
 
 def mean_variable_occurence(panel):
@@ -50,3 +53,17 @@ def sample_coverage(layout):
 def num_base_vars(layout):
     """How many different base variables are represented in the layout"""
     return len({v.base_variable for vg in layout for v in vg.variables})
+
+
+def mean_overlap(panel):
+    """Scoring function for overlap, 1 - mean overlap; higher is better."""
+    return 1 - np.mean([
+        metrics.shared_sample_pct(v1, v2)
+        for v1, v2 in combinations(panel, 2)
+    ])
+
+
+def num_regions_matches_perception(panel, target_num_regions=3):
+    num_regions = len(panel)
+    pdf = stats.norm(loc=target_num_regions, scale=2)
+    return pdf.pdf(num_regions)

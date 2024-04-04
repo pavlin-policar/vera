@@ -8,8 +8,8 @@ from textwrap import wrap
 from typing import Any, Union
 
 import glasbey
-import matplotlib.colors as clr
 import matplotlib.colors as mcolors
+import matplotlib.figure
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
@@ -17,9 +17,10 @@ import pandas as pd
 from matplotlib.patches import PathPatch
 from matplotlib.path import Path
 
-from veca.region import Density, Region
-from veca.variables import (
-    ExplanatoryVariable, ExplanatoryVariableGroup, EmbeddingRegionMixin, Variable
+from vera.region import Density, Region
+from vera.variables import (
+    ExplanatoryVariable, ExplanatoryVariableGroup, EmbeddingRegionMixin, Variable,
+    CompositeExplanatoryVariable
 )
 
 
@@ -86,7 +87,7 @@ def plot_feature(
 
         s = s * y
 
-        cmap = clr.LinearSegmentedColormap.from_list(
+        cmap = mcolors.LinearSegmentedColormap.from_list(
             "expression", [colors[0], colors[1]], N=256
         )
         ax.scatter(
@@ -280,6 +281,7 @@ def plot_density(
             "c": "k",
             "s": 6,
             "alpha": 0.1,
+            "lw": 0,
         }
         scatter_kwargs_.update(scatter_kwargs)
         ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_, rasterized=True)
@@ -357,7 +359,7 @@ def _add_region_info(variable: EmbeddingRegionMixin, ax, offset=0.025):
 
 
 def _format_explanatory_variable(variable: ExplanatoryVariable, max_width=40):
-    return "\n".join(wrap(variable.name, width=max_width))
+    return ";".join(wrap(variable.name, width=max_width))
 
 
 def _format_explanatory_variable_group(var_group: ExplanatoryVariableGroup, max_width=40):
@@ -371,7 +373,7 @@ def _format_explanatory_variable_group(var_group: ExplanatoryVariableGroup, max_
     # Flatten string parts
     lines = reduce(operator.add, var_strings)
 
-    return "\n".join(lines)
+    return ";".join(lines)
 
 
 def plot_region(
@@ -408,6 +410,7 @@ def plot_region(
         edge_alpha *= purity_factor
         fill_alpha *= purity_factor
 
+    # patches = []
     for geom in variable.region.polygon.geoms:
         # Polygon plotting code taken from
         # https://stackoverflow.com/questions/55522395/how-do-i-plot-shapely-polygons-and-objects-using-matplotlib
@@ -415,16 +418,7 @@ def plot_region(
             Path(np.asarray(geom.exterior.coords)[:, :2]),
             *[Path(np.asarray(ring.coords)[:, :2]) for ring in geom.interiors],
         )
-        # Fill
-        if fill_color is not None:
-            fill_patch = PathPatch(
-                path,
-                fill=True,
-                color=fill_color,
-                alpha=fill_alpha,
-                zorder=1,
-            )
-            ax.add_patch(fill_patch)
+
         # Boundary
         edge_patch = PathPatch(
             path,
@@ -435,6 +429,21 @@ def plot_region(
             zorder=10,
         )
         ax.add_patch(edge_patch)
+        # patches.append(edge_patch)
+        # Fill
+        if fill_color is not None:
+            fill_patch = PathPatch(
+                path,
+                fill=True,
+                color=fill_color,
+                alpha=fill_alpha,
+                zorder=1,
+            )
+            ax.add_patch(fill_patch)
+            # patches.append(fill_patch)
+
+    #patch_collection = mcollections.PatchCollection(patches, match_original=True, zorder=100)
+    #ax.add_collection(patch_collection)
 
     if draw_label:
         # Draw the lable on the largest polygon in the region
@@ -444,6 +453,7 @@ def plot_region(
             "va": "bottom" if draw_detail else "center",
             "fontsize": 9,
             "zorder": 99,
+            "color": fill_color,
         }
         label_kwargs_.update(label_kwargs)
         x, y = largest_polygon.centroid.coords[0]
@@ -479,10 +489,11 @@ def plot_region(
             "c": "#999999",
             "s": 6,
             "alpha": 1,
+            "lw": 0,
         }
         scatter_kwargs_.update(scatter_kwargs)
         if highlight_members:
-            other_color = scatter_kwargs_.get("c")
+            other_color = scatter_kwargs_["c"]
             c = np.array([other_color, member_color])[variable.values.astype(int)]
             scatter_kwargs_["c"] = c
             scatter_kwargs_["alpha"] = 1
@@ -650,6 +661,8 @@ def plot_annotation(
     ax=None,
     indicate_purity: bool = False,
     indicate_membership: bool = False,
+    only_color_inside_members: bool = True,
+    draw_labels=True,
     variable_colors: dict = None,
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
@@ -666,9 +679,8 @@ def plot_annotation(
         cmap_len = len(get_cmap_colors(cmap))
         request_len = max(cmap_len, len(variables))
         cmap = glasbey.extend_palette(cmap, palette_size=request_len)
-        colors = iter(cmap)
         variable_colors = {
-            variable: mcolors.to_rgb(next(colors)) for variable in variables
+            variable: mcolors.to_rgb(c) for variable, c in zip(variables, cmap)
         }
 
     for variable in variables:
@@ -676,7 +688,7 @@ def plot_annotation(
             variable,
             fill_color=variable_colors[variable],
             ax=ax,
-            draw_label=True,
+            draw_label=draw_labels,
             draw_detail=False,
             highlight_members=False,
             draw_scatterplot=False,
@@ -690,6 +702,7 @@ def plot_annotation(
         "zorder": 2,
         "s": 6,
         "alpha": 1,
+        "lw": 0,
         **scatter_kwargs,
     }
 
@@ -699,7 +712,10 @@ def plot_annotation(
     if indicate_membership:
         # Set sample colors inside regions
         for variable in variables:
-            group_indices = list(variable.contained_samples_tp())
+            if only_color_inside_members:
+                group_indices = list(variable.contained_samples_tp())
+            else:
+                group_indices = list(np.argwhere(variable.values).ravel())
             point_colors[group_indices] = variable_colors[variable]
 
         # Desaturate colors slightly
@@ -711,7 +727,6 @@ def plot_annotation(
         embedding[:, 0],
         embedding[:, 1],
         c=point_colors,
-        rasterized=True,
         **scatter_kwargs_
     )
 
@@ -738,6 +753,7 @@ def plot_annotations(
     cmap: str = "tab10",
     indicate_purity: bool = False,
     indicate_membership: bool = True,
+    only_color_inside_members: bool = True,
     variable_colors: dict = None,
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
@@ -792,10 +808,17 @@ def layout_variable_colors(layout, cmap="tab10"):
         cmap, palette_size=num_colors_to_request, colorblind_safe=True
     )
 
+    def get_key(v):
+        if isinstance(v, ExplanatoryVariableGroup):
+            return frozenset(v.rule for v in v.variables)
+        elif isinstance(v, CompositeExplanatoryVariable):
+            return frozenset(v.rule for v in v.contained_variables)
+        elif isinstance(v, ExplanatoryVariable):
+            return v.rule
+
     # We use the variable rule as the key
     var_keys = {
-        var_group: frozenset(v.rule for v in var_group.variables)
-        for var_group in layout_variables
+        var_group: get_key(var_group) for var_group in layout_variables
     }
     var_color_mapping = {
         var_keys[var_group]: mcolors.to_rgb(c)
@@ -815,6 +838,7 @@ def plot_discretization(
     hist_scatter_kwargs: dict = {},
     scatter_kwargs: dict = {},
     return_fig: bool = False,
+    fig: matplotlib.figure.Figure = None,
 ):
     import matplotlib.gridspec as gridspec
 
@@ -869,7 +893,7 @@ def plot_discretization(
         ax.scatter(x_jitter, y_jitter, c=x_bins, cmap=cmap, **hist_scatter_kwargs, rasterized=True)
 
         for edge in bin_edges[1:-1]:
-            ax.axvline(edge, c="tab:red", lw=2)
+            ax.axvline(edge, c="tab:red", lw=1)
 
         # ax.set_xticks(bin_edges[:-1] + 0.5)
         # ax.set_xticklabels([])
@@ -888,30 +912,35 @@ def plot_discretization(
     if pd.api.types.is_categorical_dtype(variable_values):
         variable_values = variable_values.codes.astype(float) + 1
 
-    fig = plt.figure(figsize=(8, 6), dpi=100)
-    fig.suptitle(variable.name, fontsize=16, ha="center")
-    gs = gridspec.GridSpec(2, 2, height_ratios=(1 / 4, 3 / 3), hspace=0., wspace=0.15)
+    if fig is None:
+        fig = plt.figure(figsize=(8, 6), dpi=100)
+
+    fig.set_layout_engine("compressed")
+
+    gs = gridspec.GridSpec(2, 2, height_ratios=(1 / 4, 3 / 4), hspace=0., wspace=0.15, figure=fig)
     # gs.tight_layout(fig, pad=0)
 
     # Unmerged feature bins
-    ax = fig.add_subplot(gs[0, 0])
+    ax0 = fig.add_subplot(gs[0, 0])
 
     if variable.is_continuous:
         bins = 20
     elif variable.is_discrete:
         bins = unmerged_feature_bin_edges
+
     plot_distribution_bins(
         variable_values,
         unmerged_feature_bin_edges,
         unmerged_feature_pt_bins,
         bins=bins,
-        ax=ax,
+        ax=ax0,
         cmap=cmap,
         hist_scatter_kwargs=hist_scatter_kwargs,
     )
+    ax0.set_box_aspect(1 / 3)
 
     ax = fig.add_subplot(gs[1, 0])
-    ax.scatter(embedding[:, 0], embedding[:, 1], c=unmerged_feature_pt_bins, cmap=cmap, **scatter_kwargs, rasterized=True)
+    ax.scatter(embedding[:, 0], embedding[:, 1], c=unmerged_feature_pt_bins, cmap=cmap, **scatter_kwargs)
     ax.axis("equal"), ax.set_box_aspect(1)
     ax.set_xticks([]), ax.set_yticks([])
 
@@ -922,6 +951,7 @@ def plot_discretization(
         bins = 20
     elif variable.is_discrete:
         bins = merged_feature_bin_edges
+
     plot_distribution_bins(
         variable_values,
         merged_feature_bin_edges,
@@ -931,11 +961,16 @@ def plot_discretization(
         cmap=cmap,
         hist_scatter_kwargs=hist_scatter_kwargs,
     )
+    ax.set_box_aspect(1 / 3)
 
     ax = fig.add_subplot(gs[1, 1])
-    ax.scatter(embedding[:, 0], embedding[:, 1], c=merged_feature_pt_bins, cmap=cmap, **scatter_kwargs, rasterized=True)
+    ax.scatter(embedding[:, 0], embedding[:, 1], c=merged_feature_pt_bins, cmap=cmap, **scatter_kwargs)
     ax.axis("equal"), ax.set_box_aspect(1)
     ax.set_xticks([]), ax.set_yticks([])
+
+    fig.draw_without_rendering()  # to calculate the Axes positions in the layout
+    pad = 0.02  # in fractions of the figure height
+    fig.suptitle(variable.name, fontsize=12, ha="center", y=ax0.get_position().y1 + pad, verticalalignment="bottom")
 
     if return_fig:
         return fig

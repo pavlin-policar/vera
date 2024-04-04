@@ -4,9 +4,9 @@ from functools import cached_property, reduce
 
 import numpy as np
 
-from veca import metrics
-from veca.region import Region, CompositeRegion
-from veca.rules import Rule, IncompatibleRuleError
+from vera import metrics
+from vera.region import Region, CompositeRegion
+from vera.rules import Rule, IncompatibleRuleError
 
 
 class MergeError(Exception):

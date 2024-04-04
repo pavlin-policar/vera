@@ -5,8 +5,15 @@ from typing import List
 import numpy as np
 from scipy import stats as stats
 
-from veca import metrics as metrics, graph as g
-from veca.variables import VariableGroup, ExplanatoryVariableGroup, Variable
+from vera import metrics as metrics, graph as g
+from vera.explain import _layout_scores
+from vera.variables import VariableGroup, ExplanatoryVariableGroup, Variable
+
+DEFAULT_RANKING_FUNCS = [
+    (_layout_scores.mean_overlap, 5),
+    (_layout_scores.mean_purity, 5),
+    (_layout_scores.num_regions_matches_perception, 1),
+]
 
 
 def merge_contrastive(variables: List[VariableGroup], threshold: float = 0.95):
@@ -21,7 +28,7 @@ def merge_contrastive(variables: List[VariableGroup], threshold: float = 0.95):
         if len(ex1) != len(ex2):
             continue
 
-        # if isinstace(v, veca.variables.ExplanatoryVariable):
+        # if isinstace(v, vera.variables.ExplanatoryVariable):
         base_vars_1 = {v.base_variable for v in ex1}
         base_vars_2 = {v.base_variable for v in ex2}
         assert len(base_vars_1) == 1
@@ -89,50 +96,43 @@ def contrastive(
     max_panels: int = 4,
     merge_threshold: float = 0.95,
     filter_layouts: bool = True,
+    ranking_funcs=DEFAULT_RANKING_FUNCS,
 ):
     variables = [VariableGroup([v], v.explanatory_variables) for v in variables]
 
     # See if we can merge different variables with almost perfectly overlap
     variables = merge_contrastive(variables, threshold=merge_threshold)
 
-    # Compute metrics for each variable group
-    mean_overlap, mean_purity, num_vars, num_polygons = {}, {}, {}, {}
-    layout_scores = {}
-    for v in variables:
-        # Compute the mean overlap between pairs of variables in the group
-        overlaps = [
-            metrics.shared_sample_pct(v1, v2)
-            for v1, v2 in combinations(v.explanatory_variables, 2)
-        ]
-        mean_overlap[v] = np.mean(overlaps)
-
-        purities = [vi.purity for vi in v.explanatory_variables]
-        mean_purity[v] = np.mean(purities)
-
-        num_vars[v] = len(v.explanatory_variables)
-        num_polygons[v] = sum(v.region.num_parts for v in v.explanatory_variables)
-
-        # Ideally, we want about three variables
-        pdf = stats.norm(loc=3, scale=2)
-
-        layout_scores[v] = (
-            np.log(np.mean(purities))
-            + np.log(1 - mean_overlap[v])
-            + 0.1 * pdf.logpdf(num_vars[v])
-        )
-
-    # Scores for variables with a single explanatory variable are 0
-    for v in variables:
-        if len(v.explanatory_variables) == 1:
-            layout_scores[v] = 0
-
-    sorted_keys = reversed(sorted(variables, key=layout_scores.get))
-    sorted_groups = [k.explanatory_variables for k in sorted_keys]
+    # Construct candidate panels
+    candidate_panels = [v.explanatory_variables for v in variables]
 
     if filter_layouts:
-        sorted_groups = [g for g in sorted_groups if len(g) > 1]
+        candidate_panels = [panel for panel in candidate_panels if len(panel) > 1]
 
+    # Compute scores for each candidate panel
+    score_fns, score_weights = list(zip(*ranking_funcs))
+
+    panel_scores = np.array([
+        [score_fn(layout) for score_fn in score_fns]
+        for layout in candidate_panels
+    ])
+    rankings = stats.rankdata(panel_scores, method="max", axis=0)
+
+    score_weights = np.array(score_weights)
+    mean_ranks = np.mean(rankings * score_weights, axis=1)
+
+    # Panels corresponding to a variable with a single explanatory variable
+    # aren't informative, so give them the lowest ranking
+    single_expl_var_idx = [
+        i for i in range(len(candidate_panels)) if len(candidate_panels) == 1
+    ]
+    mean_ranks[single_expl_var_idx] = -1
+
+    # Select the layouts with the highest weighted mean rank
+    selected_idx = np.argsort(mean_ranks)[::-1]
     if max_panels is not None:
-        sorted_groups = sorted_groups[:max_panels]
+        selected_idx = selected_idx[:max_panels]
 
-    return sorted_groups
+    layout = [candidate_panels[i] for i in selected_idx]
+
+    return layout

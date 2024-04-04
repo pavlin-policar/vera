@@ -3,9 +3,9 @@ import unittest
 import numpy as np
 import pandas as pd
 
-import veca.rules
-import veca.variables
-import veca.preprocessing as pp
+import vera.rules
+import vera.variables
+import vera.preprocessing as pp
 
 
 class TestIngest(unittest.TestCase):
@@ -24,18 +24,18 @@ class TestIngest(unittest.TestCase):
 
     def test_ingest_with_raw_dataframe(self):
         result = pp.ingest(self.df)
-        self.assertTrue(all(isinstance(c, veca.variables.Variable) for c in result.columns))
+        self.assertTrue(all(isinstance(c, vera.variables.Variable) for c in result.columns))
         self.assertTrue(all(isinstance(c.name, str) for c in result.columns))
 
     def test_ingest_with_mixed_types_dataframe(self):
         df = pd.DataFrame()
         df["cont1"] = [5, 2, 3, 1, 5]
-        v = veca.variables.ContinuousVariable(
+        v = vera.variables.ContinuousVariable(
             "cont2", [2.1, 5.2, 5.1, 5.2, 2.0]
         )
         df[v] = v.values
         df["disc1"] = pd.Categorical([0, 0, 1, 0, 1])
-        v = veca.variables.DiscreteVariable(
+        v = vera.variables.DiscreteVariable(
             "disc2",
             pd.Categorical(["r", "g", "b", "r", "b"]),
             categories=["r", "g", "b"]
@@ -48,20 +48,20 @@ class TestIngest(unittest.TestCase):
         )
 
         result = pp.ingest(df)
-        self.assertTrue(all(isinstance(c, veca.variables.Variable) for c in result.columns))
+        self.assertTrue(all(isinstance(c, vera.variables.Variable) for c in result.columns))
         self.assertTrue(all(isinstance(c.name, str) for c in result.columns))
 
     def test_already_ingested_dataframe_does_nothing(self):
         ingested = pp.ingest(self.df)
         result = pp.ingest(ingested)
-        self.assertTrue(all(isinstance(c, veca.variables.Variable) for c in result.columns))
+        self.assertTrue(all(isinstance(c, vera.variables.Variable) for c in result.columns))
         self.assertTrue(all(isinstance(c.name, str) for c in result.columns))
 
     def test_ingest_with_nans(self):
         df = self.df
         df["nans"] = [1, 2, np.nan, np.nan, 5]
         result = pp.ingest(df)
-        self.assertTrue(all(isinstance(c, veca.variables.Variable) for c in result.columns))
+        self.assertTrue(all(isinstance(c, vera.variables.Variable) for c in result.columns))
         self.assertTrue(all(isinstance(c.name, str) for c in result.columns))
 
 
@@ -115,13 +115,13 @@ class TestDiscretize(unittest.TestCase):
     def test_discretize_mixed_variable_types(self):
         df_discretized = pp._discretize(self.df)
         self.assertFalse(
-            any(isinstance(c, veca.variables.ContinuousVariable) for c in df_discretized.columns),
+            any(isinstance(c, vera.variables.ContinuousVariable) for c in df_discretized.columns),
             "Discretized dataframe contains continuous variables!",
         )
 
         self.assertTrue(
             any(
-                isinstance(c, veca.variables.DerivedVariable) for c in df_discretized.columns
+                isinstance(c, vera.variables.DerivedVariable) for c in df_discretized.columns
             ),
             "Discretized dataframe contains no explanatory variables!",
         )
@@ -130,7 +130,7 @@ class TestDiscretize(unittest.TestCase):
         df_discretized = pp._discretize(self.df[["cont1", "cont2"]])
         self.assertTrue(
             all(
-                isinstance(c, veca.variables.DerivedVariable) for c in df_discretized.columns
+                isinstance(c, vera.variables.DerivedVariable) for c in df_discretized.columns
             ),
             "Discretized dataframe should contain only explanatory variables!",
         )
@@ -158,7 +158,7 @@ class TestDiscretize(unittest.TestCase):
         # Extract only the NaN columns
         nan_cols = [
             col for col in result.columns
-            if isinstance(col, veca.variables.DerivedVariable) and
+            if isinstance(col, vera.variables.DerivedVariable) and
                col.base_variable.name == "nans"
         ]
         nan_cols_df = result[nan_cols]
@@ -210,7 +210,7 @@ class TestOneHotEncoding(unittest.TestCase):
         self.assertEqual(df_encoded.shape[1], 8)
 
         self.assertTrue(
-            all(isinstance(c, veca.variables.DerivedVariable) for c in df_encoded.columns),
+            all(isinstance(c, vera.variables.DerivedVariable) for c in df_encoded.columns),
             "Encoded dataframe should contain only explanatory variables!",
         )
 
@@ -219,12 +219,12 @@ class TestOneHotEncoding(unittest.TestCase):
         self.assertEqual(df_encoded.shape[1], 10)
 
         self.assertFalse(
-            any(type(c) is veca.variables.DiscreteVariable for c in df_encoded.columns),
+            any(type(c) is vera.variables.DiscreteVariable for c in df_encoded.columns),
             "Encoded dataframe contains discrete variables!",
         )
 
         self.assertTrue(
-            any(isinstance(c, veca.variables.DerivedVariable) for c in df_encoded.columns),
+            any(isinstance(c, vera.variables.DerivedVariable) for c in df_encoded.columns),
             "Encoded dataframe contains no explanatory variables!",
         )
 
@@ -247,7 +247,7 @@ class TestOneHotEncoding(unittest.TestCase):
         # Extract only the NaN columns
         nan_cols = [
             col for col in result.columns
-            if isinstance(col, veca.variables.DerivedVariable) and
+            if isinstance(col, vera.variables.DerivedVariable) and
                col.base_variable.name == "nans"
         ]
         nan_cols_df = result[nan_cols]
