@@ -8,15 +8,20 @@ from textwrap import wrap
 from typing import Any, Union
 
 import glasbey
+import matplotlib.axes
+import matplotlib.collections
 import matplotlib.colors as mcolors
 import matplotlib.figure
+import matplotlib.patches
 import matplotlib.pyplot as plt
+import matplotlib.text
 import matplotlib.ticker as ticker
 import numpy as np
 import pandas as pd
 from matplotlib.patches import PathPatch
 from matplotlib.path import Path
 
+from vera.label_placement import initial_text_location_placement, get_2d_coordinates, fix_crossings
 from vera.region import Density, Region
 from vera.variables import (
     ExplanatoryVariable, ExplanatoryVariableGroup, EmbeddingRegionMixin, Variable,
@@ -102,7 +107,8 @@ def plot_feature(
         )
 
     # Hide ticks and axis
-    ax.set_xticks([]), ax.set_yticks([]), ax.axis("equal")
+    ax.set(xticks=[], yticks=[])
+    ax.axis("equal")
     ax.set_box_aspect(1)
 
     marker_str = ", ".join(map(str, feature_names))
@@ -288,8 +294,7 @@ def plot_density(
 
     # Hide ticks and axis
     ax.set_xticks([]), ax.set_yticks([])
-    ax.set_box_aspect(1)
-    ax.axis("equal")
+    ax.set(box_aspect=1, aspect=1)
 
     return ax
 
@@ -356,28 +361,7 @@ def _format_explanatory_variable_group(var_group: ExplanatoryVariableGroup, max_
     return "\n".join(lines)
 
 
-def plot_region(
-    variable: ExplanatoryVariable,
-    ax=None,
-    fill_color="tab:blue",
-    edge_color=None,
-    fill_alpha=0.25,
-    edge_alpha=1,
-    lw=1,
-    draw_label=False,
-    draw_detail=False,
-    draw_scatterplot=True,
-    highlight_members=True,
-    member_color="tab:red",
-    indicate_purity: bool = False,
-    scatter_kwargs: dict = {},
-    label_kwargs: dict = {},
-    detail_kwargs: dict = {},
-    show: bool = False,
-):
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(8, 8))
-
+def _plot_region(variable, ax, fill_color, edge_color, fill_alpha, edge_alpha, lw, indicate_purity=False):
     # If no edge color is specified, use the same color as the fill
     if edge_color is None:
         edge_color = fill_color
@@ -389,7 +373,7 @@ def plot_region(
         edge_alpha *= purity_factor
         fill_alpha *= purity_factor
 
-    # patches = []
+    fill_patches, edge_patches = [], []
     for geom in variable.region.polygon.geoms:
         # Polygon plotting code taken from
         # https://stackoverflow.com/questions/55522395/how-do-i-plot-shapely-polygons-and-objects-using-matplotlib
@@ -408,7 +392,7 @@ def plot_region(
             zorder=10,
         )
         ax.add_patch(edge_patch)
-        # patches.append(edge_patch)
+        edge_patches.append(edge_patch)
         # Fill
         if fill_color is not None:
             fill_patch = PathPatch(
@@ -419,24 +403,43 @@ def plot_region(
                 zorder=1,
             )
             ax.add_patch(fill_patch)
-            # patches.append(fill_patch)
+            fill_patches.append(fill_patch)
 
-    #patch_collection = mcollections.PatchCollection(patches, match_original=True, zorder=100)
-    #ax.add_collection(patch_collection)
+    return fill_patches, edge_patches
+
+
+def plot_region(
+    variable: ExplanatoryVariable,
+    ax=None,
+    fill_color="tab:blue",
+    edge_color=None,
+    fill_alpha=0.25,
+    edge_alpha=1,
+    lw=1,
+    draw_label=False,
+    draw_scatterplot=True,
+    highlight_members=True,
+    member_color="tab:red",
+    indicate_purity: bool = False,
+    scatter_kwargs: dict = {},
+    label_kwargs: dict = {},
+    show: bool = False,
+):
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 8))
+
+    _plot_region(
+        variable,
+        ax,
+        fill_color=fill_color,
+        edge_color=edge_color,
+        fill_alpha=fill_alpha,
+        edge_alpha=edge_alpha,
+        lw=lw,
+        indicate_purity=indicate_purity,
+    )
 
     if draw_label:
-        # Draw the lable on the largest polygon in the region
-        largest_polygon = max(variable.region.polygon.geoms, key=lambda x: x.area)
-        label_kwargs_ = {
-            "ha": "center",
-            "va": "bottom" if draw_detail else "center",
-            "fontsize": 9,
-            "zorder": 99,
-            "color": fill_color,
-        }
-        label_kwargs_.update(label_kwargs)
-        x, y = largest_polygon.centroid.coords[0]
-
         # Obtain the label string to draw over the region
         if isinstance(variable, ExplanatoryVariable):
             label_str = _format_explanatory_variable(variable)
@@ -445,16 +448,20 @@ def plot_region(
         else:
             label_str = str(variable)
 
+        # Draw the lable on the largest polygon in the region
+        largest_polygon = max(variable.region.polygon.geoms, key=lambda x: x.area)
+        label_kwargs_ = {
+            "ha": "center",
+            "va": "center",
+            "ma": "center",
+            "fontsize": 9,
+            "zorder": 99,
+            "color": fill_color,
+        }
+        label_kwargs_.update(label_kwargs)
+        x, y = largest_polygon.centroid.coords[0]
+
         label = ax.text(x, y, label_str, **label_kwargs_)
-        if draw_detail and variable.plot_detail is not None:
-            detail_kwargs_ = {
-                "ha": "center",
-                "va": "top",
-                "fontsize": 9,
-                "zorder": 99,
-            }
-            detail_kwargs_.update(detail_kwargs)
-            label = ax.text(x, y, f"({variable.plot_detail})", **detail_kwargs_)
         # label.set_bbox(dict(facecolor="white", alpha=0.75, edgecolor="white"))
 
     # Plot embedding scatter plot
@@ -501,14 +508,12 @@ def plot_regions(
     edge_alpha=1,
     lw=1,
     draw_labels=False,
-    draw_details=False,
     highlight_members=True,
     member_color="tab:red",
     add_region_info=False,
     indicate_purity: bool = False,
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
-    detail_kwargs: dict = {},
     show: bool = False,
 ):
     n_rows = len(variables) // per_row
@@ -532,14 +537,12 @@ def plot_regions(
             edge_alpha=edge_alpha,
             lw=lw,
             draw_label=draw_labels,
-            draw_detail=draw_details,
             highlight_members=highlight_members,
             member_color=member_color,
             add_region_info=add_region_info,
             indicate_purity=indicate_purity,
             scatter_kwargs=scatter_kwargs,
             label_kwargs=label_kwargs,
-            detail_kwargs=detail_kwargs,
         )
 
     enumerate_plots(ax[:idx + 1])
@@ -634,7 +637,7 @@ def plot_regions_with_subregions(
 def plot_annotation(
     variables: list[ExplanatoryVariable],
     cmap: str = "tab10",
-    ax=None,
+    ax: matplotlib.axes.Axes = None,
     indicate_purity: bool = False,
     indicate_membership: bool = False,
     only_color_inside_members: bool = True,
@@ -642,13 +645,13 @@ def plot_annotation(
     variable_colors: dict = None,
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
-    detail_kwargs: dict = {},
-    figwidth: int = 8,
+    figwidth: int = 4,
     return_ax: bool = False,
     show: bool = False,
+    min_embedding_size: float = 0.25,
 ):
     if ax is None:
-        fig, ax = plt.subplots(figsize=(figwidth, figwidth))
+        fig, ax = plt.subplots(figsize=(figwidth, figwidth), dpi=150)
 
     if variable_colors is None:
         # Glasbey crashes when requesting fewer colors than are in the cmap
@@ -659,19 +662,22 @@ def plot_annotation(
             variable: mcolors.to_rgb(c) for variable, c in zip(variables, cmap)
         }
 
+    # Save region patches to be used for label placement. We don't need both 
+    # fill and edge patches, so use either of the two. Here, we use fill patches
+    region_patches = []
     for variable in variables:
-        plot_region(
+        fill_patches, edge_patches = _plot_region(
             variable,
-            fill_color=variable_colors[variable],
             ax=ax,
-            draw_label=draw_labels,
-            draw_detail=False,
-            highlight_members=False,
-            draw_scatterplot=False,
+            fill_color=variable_colors[variable],
+            edge_color=variable_colors[variable],
+            fill_alpha=0.25,
+            edge_alpha=1,
+            lw=1,
             indicate_purity=indicate_purity,
-            label_kwargs=label_kwargs,
-            detail_kwargs=detail_kwargs,
         )
+        # region_patches.extend(fill_patches)
+        region_patches.extend(variable.region.polygon.geoms)
 
     embedding = variables[0].embedding.X
     scatter_kwargs_ = {
@@ -699,26 +705,283 @@ def plot_annotation(
         point_colors[:, 1] *= 0.75
         point_colors = mcolors.hsv_to_rgb(point_colors)
 
-    ax.scatter(
+    scatter_obj = ax.scatter(
         embedding[:, 0],
         embedding[:, 1],
         c=point_colors,
         **scatter_kwargs_
     )
+    print(scatter_obj)
+    print(len(scatter_obj.get_offsets()))
 
-    # Clear title from drawn regions
-    ax.set_title("")
+    if draw_labels:
+        label_data = []
+        for variable in variables:
+            # Obtain the label string to draw over the region
+            if isinstance(variable, ExplanatoryVariable):
+                label_str = _format_explanatory_variable(variable)
+            elif isinstance(variable, ExplanatoryVariableGroup):
+                label_str = _format_explanatory_variable_group(variable)
+            else:
+                label_str = str(variable)
 
-    # Hide ticks and axis
-    ax.set_xticks([]), ax.set_yticks([])
-    ax.set_box_aspect(1)
-    ax.axis("equal")
+            # Draw the lable on the largest polygon in the region
+            largest_polygon = max(variable.region.polygon.geoms, key=lambda x: x.area)
+            x, y = largest_polygon.centroid.coords[0]
+
+            label_data.append({"text": label_str, "pos": [x, y], "color": variable_colors[variable]})
+
+        label_positions = [lbl["pos"] for lbl in label_data]
+        label_text_positions = initial_text_location_placement(
+            embedding, label_positions, radius_factor=0.5
+        )
+        # label_text_positions[:] = 0
+        fix_crossings(label_text_positions, label_positions)
+
+        label_kwargs_ = dict(
+            ha="center",
+            ma="center",
+            va="center",
+            fontsize=7,
+            zorder=99,
+        )
+        label_kwargs_.update(label_kwargs)
+
+        label_objs = []
+        for lbl_data, label_text_pos in zip(label_data, label_text_positions):
+            # label_objs.append(ax.annotate(
+            #     lbl_data["text"],
+            #     lbl_data["pos"],
+            #     xytext=label_text_pos,
+            #     color=lbl_data["color"],
+            #     **label_kwargs_,
+            #     arrowprops={
+            #         "arrowstyle": "-",
+            #         "linewidth": 1,
+            #         "color": lbl_data["color"],
+            #     },
+            # ))
+            label_objs.append(
+                ax.text(
+                    *label_text_pos,
+                    lbl_data["text"],
+                    color=lbl_data["color"],
+                    **label_kwargs_,
+                )
+            )
+    
+    # Calculate how small we want the final embedding to actually be, or, 
+    # equivalently, what are the maximum limits we want to allow
+    min_coords = np.min(embedding, axis=0)
+    max_coords = np.max(embedding, axis=0)
+    embedding_scale = np.max(max_coords - min_coords)
+    max_axis_limits = embedding_scale / min_embedding_size
+
+    # Rescale the axes so the text doesn't overflow the canvas
+    rescale_axes(label_objs, ax, padding=0, max_axis_limits=max_axis_limits, scatter_obj=scatter_obj)
+
+    # Where are the labels supposed to point to?
+    label_targets = np.array([data["pos"] for data in label_data])
+
+    # Optimize label positions so that there is minimal overlap and the labels 
+    # are as compact as possible
+    optimize_label_positions(label_objs, label_targets, region_patches, ax, scatter_obj=scatter_obj, max_axis_limits=max_axis_limits)
+
+    import matplotlib.patches as mpatches
+    coords = get_2d_coordinates(label_objs, expand=(1, 1))
+    for x0, x1, y0, y1 in coords:
+        x0y0t = ax.transData.inverted().transform([x0, y0])
+        x1y1t = ax.transData.inverted().transform([x1, y1])
+        wt, ht = x1y1t - x0y0t
+        ax.add_patch(mpatches.Rectangle(x0y0t, wt, ht, fill=False))
+
+    ax.set(xticks=[], yticks=[])
+    # ax.set(box_aspect=1, aspect=1)
 
     if show:
         fig.show()
 
     if return_ax:
-        return fig, ax
+        return label_objs, fig, ax
+
+
+def rescale_axes(
+    label_objs: list[matplotlib.text.Text],
+    ax: matplotlib.axes.Axes,
+    max_iter: int = 25,
+    padding: float = 0,
+    eps: float = 0.1,
+    scatter_obj: matplotlib.collections.LineCollection = None,
+    max_axis_limits: float = 0.25,
+):
+    """Ensure that the labels fit onto the plot canvas. Because the label 
+    fontsize is kept consistent, and rescaling the axes changes the size and 
+    positions of the labels, this is run multiple times until a maximum number
+    of iterations has been reached or until the label bounding boxes stop
+    changing."""
+    # Determine scatter plot bounds if available
+    if scatter_obj is not None:
+        scatter_positions = scatter_obj.get_offsets()
+        sc_x_min, sc_y_min = np.min(scatter_positions, axis=0)
+        sc_x_max, sc_y_max = np.max(scatter_positions, axis=0)
+
+    coords = get_2d_coordinates(label_objs)
+    for i in range(max_iter):
+        # Get label bounding box limits
+        bb_x_min, bb_y_min = ax.transData.inverted().transform(
+            (coords[:, [0, 2]].copy().min(axis=0))
+        )
+        bb_x_max, bb_y_max = ax.transData.inverted().transform(
+            (coords[:, [1, 3]].copy().max(axis=0))
+        )
+
+        # Apply padding to label bounding boxes if necessary
+        if padding > 0:
+            width = bb_x_max - bb_x_min
+            height = bb_y_max - bb_y_min
+            bb_x_min -= padding * width
+            bb_x_max += padding * width
+            bb_y_min -= padding * height
+            bb_y_max += padding * height
+
+        if scatter_obj is not None:
+            x_new_min = min(bb_x_min, sc_x_min)
+            y_new_min = min(bb_y_min, sc_y_min)
+            x_new_max = max(bb_x_max, sc_x_max)
+            y_new_max = max(bb_y_max, sc_y_max)
+        else:
+            x_new_min = bb_x_min
+            y_new_min = bb_y_min
+            x_new_max = bb_x_max
+            y_new_max = bb_y_max
+
+        # Force aspect ratio to 1
+        # Determine which of the spans is larger
+        x_span = x_new_max - x_new_min
+        y_span = y_new_max - y_new_min
+        long_span = max(x_span, y_span)
+        # How much do we need to add to the shorter span to match the longer one
+        x_span_diff = long_span - x_span
+        y_span_diff = long_span - y_span
+
+        ax.set_xlim(x_new_min - x_span_diff / 2, x_new_max + x_span_diff / 2)
+        ax.set_ylim(y_new_min - y_span_diff / 2, y_new_max + y_span_diff / 2)
+
+        # Get new coordinates after rescaling
+        new_coords = get_2d_coordinates(label_objs)
+        if np.allclose(coords, new_coords, atol=eps):
+            print(f"Stopped after {i} iterations")
+            break
+        coords = new_coords
+
+
+def optimize_label_positions(
+    label_objs: list[matplotlib.text.Text],
+    label_targets,
+    region_objs: list[matplotlib.patches.PathPatch],
+    ax: matplotlib.axes.Axes,
+    scatter_obj: matplotlib.collections.LineCollection,
+    eps: float = 0.1,
+    max_axis_limits: float = None,
+):
+    import shapely
+
+    for epoch in range(500):
+        updates = np.zeros(shape=(len(label_objs), 2), dtype=float)
+
+        # Get the bounding boxes of each label object as shapely objects
+        label_coords = get_2d_coordinates(label_objs, expand=(1, 1))
+        bounding_boxes = []
+        bounding_box_centroids = []
+        for x0, x1, y0, y1 in label_coords:
+            x0, y0 = ax.transData.inverted().transform([x0, y0])
+            x1, y1 = ax.transData.inverted().transform([x1, y1])
+            bounding_box = shapely.Polygon([(x0, y0), (x0, y1), (x1, y1), (x1, y0)])
+            bounding_boxes.append(bounding_box)
+            bounding_box_centroids.append([
+                bounding_box.centroid.xy[0][0],
+                bounding_box.centroid.xy[1][0],
+            ])
+        bounding_box_centroids = np.array(bounding_box_centroids)
+
+        # Compute gravity: center of mass to origin
+        # F_gravity = -bounding_box_centroids
+        F_gravity = np.zeros_like(updates)
+        # Compute gravity: because labels are horizontally long, instead of 
+        # using the center of mass, we will apply gravity to all four corner 
+        # points of the bounding box. This should *hopefully* encourage wide 
+        # bounding boxes to be more centrally positioned. Additionally, we will
+        # apply stronger gravity to the x-coordinate than to the y-coordinate
+        xy_gravity_weights = np.array([4, 1])
+        for i, bb_i in enumerate(bounding_boxes):
+            x_min, y_min, x_max, y_max = bb_i.bounds
+            boundary_points = np.array([
+                [x_min, y_min],
+                [x_max, y_min],
+                [x_max, y_max],
+                [x_min, y_max],
+            ])
+            # dists = np.linalg.norm(boundary_points, axis=1)
+            # i_max = np.argmax(dists)
+            F_gravity[i] -= xy_gravity_weights * np.sum(boundary_points, axis=0)
+
+        # Label-target attraction
+        F_attr = label_targets - bounding_box_centroids
+
+        # Label-label repulsion
+        F_label_rep = np.zeros_like(updates)
+        for i in range(len(label_objs)):
+            for j in range(i + 1, len(label_objs)):
+                # Compute direction of repulsion
+                repulsion_vector = bounding_box_centroids[i] - bounding_box_centroids[j]
+                repulsion_vector /= np.linalg.norm(repulsion_vector)
+
+                # Compute the distance between the nearest points on both 
+                # bounding boxes
+                dist = bounding_boxes[i].distance(bounding_boxes[j])
+                # After a certain point, we don't really care how far apart the 
+                # labels are
+                margin = 5
+                weight = 1 - min(margin, dist) / margin
+                #weight = 1 / max(dist, 1)
+                F_label_rep[i] += weight * repulsion_vector
+                F_label_rep[j] -= weight * repulsion_vector
+
+        # Label-region repulsion
+        F_region_rep = np.zeros_like(updates)
+        # path = region_objs[0].get_path()
+        # print(shapely.Polygon(path.vertices))
+        for i, bb_i in enumerate(bounding_boxes):
+            for j, region_j in enumerate(region_objs):
+                region_centroid = np.array(region_j.centroid.xy).ravel()
+
+                # Compute direction of repulsion
+                repulsion_vector = bounding_box_centroids[i] - region_centroid
+                repulsion_vector /= np.linalg.norm(repulsion_vector)
+
+                # Compute the distance between the nearest points on both 
+                # bounding boxes
+                dist = bb_i.distance(region_j)
+                # After a certain point, we don't really care how far apart the 
+                # labels are
+                margin = 5
+                weight = 1 - min(margin, dist) / margin
+                #weight = 1 / max(dist, 1)
+                F_region_rep[i] += weight * repulsion_vector
+
+        updates = 0.001 * F_gravity + 0.001 * F_attr + 1 * F_region_rep + 1 * F_label_rep
+
+        lr = 10
+        for label_obj, label_update in zip(label_objs, updates):
+            text_pos = np.array(label_obj.get_position())
+            label_obj.set_position(text_pos + lr * label_update)
+
+        rescale_axes(label_objs, ax, max_axis_limits=max_axis_limits, scatter_obj=scatter_obj)
+
+        print("update norm", np.linalg.norm(updates))
+        # Check if stopping criteria met
+        if np.linalg.norm(updates) < eps:
+            break
 
 
 def plot_annotations(
@@ -733,7 +996,6 @@ def plot_annotations(
     variable_colors: dict = None,
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
-    detail_kwargs: dict = {},
     show: bool = False,
 ):
     n_rows = len(layouts) // per_row
@@ -758,7 +1020,6 @@ def plot_annotations(
             variable_colors=variable_colors,
             scatter_kwargs=scatter_kwargs,
             label_kwargs=label_kwargs,
-            detail_kwargs=detail_kwargs,
         )
 
     enumerate_plots(ax[:idx + 1])
@@ -917,7 +1178,7 @@ def plot_discretization(
 
     ax = fig.add_subplot(gs[1, 0])
     ax.scatter(embedding[:, 0], embedding[:, 1], c=unmerged_feature_pt_bins, cmap=cmap, **scatter_kwargs)
-    ax.axis("equal"), ax.set_box_aspect(1)
+    ax.set(box_aspect=1, aspect=1)
     ax.set_xticks([]), ax.set_yticks([])
 
     # Merged feature bins
@@ -941,8 +1202,8 @@ def plot_discretization(
 
     ax = fig.add_subplot(gs[1, 1])
     ax.scatter(embedding[:, 0], embedding[:, 1], c=merged_feature_pt_bins, cmap=cmap, **scatter_kwargs)
-    ax.axis("equal"), ax.set_box_aspect(1)
-    ax.set_xticks([]), ax.set_yticks([])
+    ax.set(box_aspect=1, aspect=1)
+    ax.set(xticks=[], yticks=[])
 
     fig.draw_without_rendering()  # to calculate the Axes positions in the layout
     pad = 0.02  # in fractions of the figure height

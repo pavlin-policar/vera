@@ -1,18 +1,21 @@
+import io
+
 import numpy as np
+from matplotlib import pyplot as plt
 from sklearn.metrics import pairwise_distances
 
-from vera.overlap_computations import (
-    get_2d_coordinates,
-    overlap_intervals,
-    text_line_overlaps,
-    intersect,
-)
-
-from matplotlib import pyplot as plt
+try:
+    from matplotlib.backend_bases import _get_renderer as matplot_get_renderer
+except ImportError:
+    matplot_get_renderer = None
 
 
-def row_norm(an_array):
-    return np.linalg.norm(an_array, axis=1)
+def ccw(a, b, c):
+    return (c[1] - a[1]) * (b[0] - a[0]) > (b[1] - a[1]) * (c[0] - a[0])
+
+
+def intersect(a, b, c, d):
+    return ccw(a, c, d) != ccw(b, c, d) and ccw(a, b, c) != ccw(a, b, d)
 
 
 def fix_crossings(text_locations, label_locations, n_iter=3):
@@ -31,279 +34,148 @@ def fix_crossings(text_locations, label_locations, n_iter=3):
                     text_locations[j] = swap
 
 
+# From adjustText (https://github.com/Phlya/adjustText)
+def get_renderer(fig):
+    # If the backend support get_renderer() or renderer, use that.
+    if hasattr(fig.canvas, "get_renderer"):
+        return fig.canvas.get_renderer()
+
+    if hasattr(fig.canvas, "renderer"):
+        return fig.canvas.renderer
+
+    # Otherwise, if we have the matplotlib function available, use that.
+    if matplot_get_renderer:
+        return matplot_get_renderer(fig)
+
+    # No dice, try and guess.
+    # Write the figure to a temp location, and then retrieve whichever
+    # render was used (doesn't work in all matplotlib versions).
+    fig.canvas.print_figure(io.BytesIO())
+    try:
+        return fig._cachedRenderer
+
+    except AttributeError:
+        # No luck.
+        # We're out of options.
+        raise ValueError("Unable to determine renderer") from None
+
+
+# From adjustText (https://github.com/Phlya/adjustText)
+def get_bboxes(objs, r=None, expand=(1, 1), ax=None):
+    ax = ax or plt.gca()
+    r = r or get_renderer(ax.get_figure())
+    return [i.get_window_extent(r).expanded(*expand) for i in objs]
+
+
+# From adjustText (https://github.com/Phlya/adjustText)
+def get_2d_coordinates(objs, expand=(1, 1)):
+    try:
+        ax = objs[0].axes
+    except:
+        ax = objs.axes
+    bboxes = get_bboxes(objs, get_renderer(ax.get_figure()), expand, ax)
+    xs = [
+        (ax.convert_xunits(bbox.xmin), ax.convert_yunits(bbox.xmax)) for bbox in bboxes
+    ]
+    ys = [
+        (ax.convert_xunits(bbox.ymin), ax.convert_yunits(bbox.ymax)) for bbox in bboxes
+    ]
+    coords = np.hstack([np.array(xs), np.array(ys)])
+    return coords
+
+
+# Adapted from datamapplot (https://github.com/TutteInstitute/datamapplot)
 def initial_text_location_placement(
-    embedding, label_locations, base_radius=None, base_radius_factor=0.25
+    embedding, label_locations, label_radius=None, radius_factor=0.25
 ):
-    # Find a center for label locations, ring radii, and how much to stretch theta; all heuristics
-    mean_embedding_coord = np.mean(embedding, axis=0)
-    centered_label_locations = label_locations - mean_embedding_coord
+    """Find an initial placement for labels.
 
-    if base_radius is None:
-        centered_embedding = embedding - mean_embedding_coord
-        base_radius = np.max(row_norm(centered_embedding)) + base_radius_factor * np.mean(
-            row_norm(centered_embedding)
-        )
+    Parameters
+    ----------
+    embedding : np.ndarray
+    label_locations : np.ndarray
+        Initial label positions, where the labels are pointing at.
+    label_radius : float, optional
+        If provided, all the labels will be at this distance from the middle of
+        the embedding. If this parameter is set, `radius_factor` will be ignored
+    radius_factor : float, optional
+        If `label_radius` is not provided, the labels will be placed at
+        (1 + radius_factor) * max(distance from center) around the plot.
 
-    centered_label_locations = (
-        centered_label_locations / row_norm(centered_label_locations)[:, None]
-    )
+    Returns
+    -------
+    np.ndarray
+
+    """
+    # Center the labels
+    embedding_center_point = (
+        np.min(embedding, axis=0) + np.max(embedding, axis=0)
+    ) / 2
+    label_locations = label_locations - embedding_center_point
+
+    if label_radius is None:
+        centered_embedding = embedding - embedding_center_point
+        dists_from_origin = np.linalg.norm(centered_embedding, axis=1)
+        label_radius = np.max(dists_from_origin) * (1 + radius_factor)
 
     # Determine the angles of the label positions
-    label_thetas = np.arctan2(
-        centered_label_locations.T[0], centered_label_locations.T[1]
-    )
+    label_thetas = np.arctan2(label_locations.T[0], label_locations.T[1])
 
-    # Construct a ring of possible label placements around the embedding
+    # Construct a ring of possible label placements around the embedding, we
+    # refer to these as spokes
     xs = np.linspace(0, 1, max(len(label_thetas) + 1, 8), endpoint=False)
-    uniform_thetas = xs * 2 * np.pi
+    spoke_thetas = xs * 2 * np.pi
 
-    # Find an optimal rotation of the ring to match the existing label locations
-    optimal_rotation = 0.0
+    # Rotate the spokes little by little and see how well it matches the label
+    # locations, and select the rotation which achieves the best matching
+    best_rotation = 0
     min_score = np.inf
+    best_dists_to_labels = None
     for rotation in np.linspace(
         -np.pi / int(len(label_thetas) + 5), np.pi / int(len(label_thetas) + 5), 32
     ):
-        test_label_locations = np.vstack(
-            [
-                base_radius * np.cos(uniform_thetas + rotation),
-                base_radius * np.sin(uniform_thetas + rotation),
-            ]
-        ).T
-        score = np.sum(
-            pairwise_distances(
-                centered_label_locations, test_label_locations, metric="cosine"
-            ).min(axis=1)
+        # We can use unit vectors since we're calcualting cosine similarity
+        test_spoke_label_locations = np.vstack([
+            np.cos(spoke_thetas + rotation), np.sin(spoke_thetas + rotation),
+        ]).T
+        distances = pairwise_distances(
+            label_locations, test_spoke_label_locations, metric="cosine"
         )
+        # The score is the sum of the distances to the nearest spoke
+        score = np.sum(np.min(distances, axis=1))
         if score < min_score:
             min_score = score
-            optimal_rotation = rotation
+            best_rotation = rotation
+            # Store the distances to each labels' nearest spoke for later
+            best_dists_to_labels = np.min(distances, axis=1)
 
-    uniform_thetas += optimal_rotation
+    # Convert the spoke locations to cartesian coordinates
+    spoke_label_locations = np.vstack([
+        label_radius * np.cos(spoke_thetas + best_rotation),
+        label_radius * np.sin(spoke_thetas + best_rotation),
+    ]).T
 
-    # Convert the ring locations to cartesian coordinates
-    uniform_label_locations = np.vstack(
-        [base_radius * np.cos(uniform_thetas), base_radius * np.sin(uniform_thetas)]
-    ).T
-
-    # Sort labels by radius of the label location and pick the closest position in order;
-    # This works surprisingly well
-    order = np.argsort(-row_norm(label_locations - mean_embedding_coord))
-    taken = set([])
+    # Sort the labels by distance to their best matching ring spoke
+    label_order = np.argsort(best_dists_to_labels)
+    taken = set()
     adjustment_dict_alt = {}
-    for i in order:
-        candidates = list(set(range(uniform_label_locations.shape[0])) - taken)
+    for label_idx in label_order:
+        # Compute the distance from the current label to the remaining available
+        # spoke locations
+        candidates = list(set(range(spoke_label_locations.shape[0])) - taken)
         candidate_distances = pairwise_distances(
-            [centered_label_locations[i]],
-            uniform_label_locations[candidates],
+            [label_locations[label_idx]],
+            spoke_label_locations[candidates],
             metric="cosine",
         )
         selection = candidates[np.argmin(candidate_distances[0])]
-        adjustment_dict_alt[i] = selection
+        adjustment_dict_alt[label_idx] = selection
         taken.add(selection)
 
-    result = (
-        np.asarray(
-            [
-                uniform_label_locations[adjustment_dict_alt[i]]
-                for i in sorted(adjustment_dict_alt.keys())
-            ]
-        )
-        + mean_embedding_coord
-    )
+    label_locations = np.asarray([
+        spoke_label_locations[adjustment_dict_alt[i]]
+        for i in sorted(adjustment_dict_alt.keys())
+    ])
 
-    return result
-
-
-def adjust_text_locations(
-    text_locations,
-    label_locations,
-    label_text,
-    font_size=12,
-    fontfamily="DejaVu Sans",
-    linespacing=0.95,
-    expand=(1.5, 1.5),
-    max_iter=100,
-    label_size_adjustments=None,
-    highlight=frozenset([]),
-    highlight_label_keywords={},
-    ax=None,
-):
-    if ax is None:
-        ax = plt.gca()
-
-    # Add text to the axis and set up for optimization
-    new_text_locations = text_locations.copy()
-    texts = [
-        ax.text(
-            *new_text_locations[i],
-            label_text[i],
-            ha="center",
-            ma="center",
-            va="center",
-            linespacing=linespacing,
-            alpha=0.0,
-            fontfamily=fontfamily,
-            fontsize=(
-                highlight_label_keywords.get("fontsize", font_size)
-                if label_text[i] in highlight
-                else font_size
-            )
-            + (
-                label_size_adjustments[i] if label_size_adjustments is not None else 0.0
-            ),
-            fontweight="bold" if label_text[i] in highlight else "normal",
-        )
-        for i in range(label_locations.shape[0])
-    ]
-
-    coords = get_2d_coordinates(texts, expand=expand)
-    xoverlaps = overlap_intervals(
-        coords[:, 0], coords[:, 1], coords[:, 0], coords[:, 1]
-    )
-    xoverlaps = xoverlaps[xoverlaps[:, 0] != xoverlaps[:, 1]]
-    yoverlaps = overlap_intervals(
-        coords[:, 2], coords[:, 3], coords[:, 2], coords[:, 3]
-    )
-    yoverlaps = yoverlaps[yoverlaps[:, 0] != yoverlaps[:, 1]]
-    overlaps = yoverlaps[(yoverlaps[:, None] == xoverlaps).all(-1).any(-1)]
-
-    tight_coords = get_2d_coordinates(texts, expand=(0.9, 0.9))
-    bottom_lefts = ax.transData.inverted().transform(tight_coords[:, [0, 2]])
-    top_rights = ax.transData.inverted().transform(tight_coords[:, [1, 3]])
-    coords_in_dataspace = np.vstack(
-        [bottom_lefts.T[0], top_rights.T[0], bottom_lefts.T[1], top_rights.T[1]]
-    ).T
-    box_line_overlaps = text_line_overlaps(
-        text_locations, label_locations, coords_in_dataspace
-    )
-    n_iter = 0
-
-    # While we have overlaps, tweak the label positions
-    while (len(overlaps) > 0 or len(box_line_overlaps) > 0) and n_iter < max_iter:
-        # Check for text boxes overlapping each other
-        coords = get_2d_coordinates(texts, expand=expand)
-        xoverlaps = overlap_intervals(
-            coords[:, 0], coords[:, 1], coords[:, 0], coords[:, 1]
-        )
-        xoverlaps = xoverlaps[xoverlaps[:, 0] != xoverlaps[:, 1]]
-        yoverlaps = overlap_intervals(
-            coords[:, 2], coords[:, 3], coords[:, 2], coords[:, 3]
-        )
-        yoverlaps = yoverlaps[yoverlaps[:, 0] != yoverlaps[:, 1]]
-        overlaps = yoverlaps[(yoverlaps[:, None] == xoverlaps).all(-1).any(-1)]
-
-        # Convert the text locations to polar coordinates, centered around the
-        # mean position of all labels
-        recentered_locations = new_text_locations - label_locations.mean(axis=0)
-        radii = np.linalg.norm(recentered_locations, axis=1)
-        thetas = np.arctan2(recentered_locations.T[1], recentered_locations.T[0])
-
-        for left, right in overlaps:
-            # adjust thetas
-            direction = thetas[left] - thetas[right]
-            if direction > np.pi or direction < -np.pi:
-                thetas[left] -= 0.005 * np.sign(direction)
-                thetas[right] += 0.005 * np.sign(direction)
-            else:
-                thetas[left] += 0.005 * np.sign(direction)
-                thetas[right] -= 0.005 * np.sign(direction)
-
-        # Check for indicator lines crossing text boxes
-        recentered_locations = np.vstack(
-            [radii * np.cos(thetas), radii * np.sin(thetas)]
-        ).T
-        new_text_locations = recentered_locations + label_locations.mean(axis=0)
-        fix_crossings(new_text_locations, label_locations)
-        for i, text in enumerate(texts):
-            text.set_position(new_text_locations[i])
-
-        tight_coords = get_2d_coordinates(texts, expand=expand)
-        bottom_lefts = ax.transData.inverted().transform(tight_coords[:, [0, 2]])
-        top_rights = ax.transData.inverted().transform(tight_coords[:, [1, 3]])
-        coords_in_dataspace = np.vstack(
-            [bottom_lefts.T[0], top_rights.T[0], bottom_lefts.T[1], top_rights.T[1]]
-        ).T
-        box_line_overlaps = text_line_overlaps(
-            new_text_locations, label_locations, coords_in_dataspace
-        )
-        recentered_locations = new_text_locations - label_locations.mean(axis=0)
-        radii = np.linalg.norm(recentered_locations, axis=1)
-        thetas = np.arctan2(recentered_locations.T[1], recentered_locations.T[0])
-
-        for i, j in box_line_overlaps:
-            direction = np.arctan2(
-                np.sum(coords_in_dataspace[i, 2:]) / 2.0 - label_locations[j, 1],
-                np.sum(coords_in_dataspace[i, :2]) / 2.0 - label_locations[j, 0],
-            ) - np.arctan2(
-                text_locations[j, 1] - label_locations[j, 1],
-                text_locations[j, 0] - label_locations[j, 0],
-            )
-            if direction > np.pi or direction < -np.pi:
-                thetas[i] -= 0.005 * np.sign(direction)
-                thetas[j] += 0.0025 * np.sign(direction)
-            else:
-                thetas[i] += 0.005 * np.sign(direction)
-                thetas[j] -= 0.0025 * np.sign(direction)
-
-        radii *= 1.003
-
-        recentered_locations = np.vstack(
-            [radii * np.cos(thetas), radii * np.sin(thetas)]
-        ).T
-        new_text_locations = recentered_locations + label_locations.mean(axis=0)
-        fix_crossings(new_text_locations, label_locations)
-        for i, text in enumerate(texts):
-            text.set_position(new_text_locations[i])
-
-        n_iter += 1
-
-    return new_text_locations
-
-
-# def estimate_font_size(
-#     text_locations,
-#     label_text,
-#     initial_font_size,
-#     fontfamily="DejaVu Sans",
-#     linespacing=0.95,
-#     expand=(1.5, 1.5),
-#     ax=None,
-# ):
-#     if ax is None:
-#         ax = plt.gca()
-#
-#     font_size = initial_font_size
-#     overlap_percentage = 1.0
-#     while overlap_percentage > 0.5 and font_size > 3.0:
-#         texts = [
-#             ax.text(
-#                 *text_locations[i],
-#                 label_text[i],
-#                 ha="center",
-#                 ma="center",
-#                 va="center",
-#                 linespacing=linespacing,
-#                 alpha=0.0,
-#                 fontfamily=fontfamily,
-#                 fontsize=font_size,
-#             )
-#             for i in range(text_locations.shape[0])
-#         ]
-#         coords = get_2d_coordinates(texts, expand=expand)
-#         xoverlaps = overlap_intervals(
-#             coords[:, 0], coords[:, 1], coords[:, 0], coords[:, 1]
-#         )
-#         xoverlaps = xoverlaps[xoverlaps[:, 0] != xoverlaps[:, 1]]
-#         yoverlaps = overlap_intervals(
-#             coords[:, 2], coords[:, 3], coords[:, 2], coords[:, 3]
-#         )
-#         yoverlaps = yoverlaps[yoverlaps[:, 0] != yoverlaps[:, 1]]
-#         overlaps = yoverlaps[(yoverlaps[:, None] == xoverlaps).all(-1).any(-1)]
-#         overlap_percentage = len(overlaps) / (2 * text_locations.shape[0])
-#         # remove texts
-#         for t in texts:
-#             t.remove()
-#
-#         font_size = 0.9 * font_size
-#
-#     return font_size
+    # Un-center label positions
+    return label_locations + embedding_center_point

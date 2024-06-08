@@ -1,7 +1,6 @@
 from typing import Any, Callable
 
 import numpy as np
-import scipy.sparse as sp
 
 
 def pdist(l: list[Any], metric: Callable):
