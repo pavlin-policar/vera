@@ -8,17 +8,16 @@ from tqdm import tqdm
 
 import vera.graph as g
 import vera.metrics as metrics
-import vera.variables
 from vera.embedding import Embedding
 from vera.region import Region
 from vera.rules import IntervalRule, EqualityRule
 from vera.variables import (
-    DerivedVariable,
-    ExplanatoryVariable,
+    Variable,
     DiscreteVariable,
     ContinuousVariable,
-    Variable,
+    IndicatorVariable,
 )
+from vera.region_annotations import RegionAnnotation, CompositeRegionAnnotation
 
 
 def _pd_dtype_to_variable(col_name: Union[str, Variable], col_type, col_vals) -> Variable:
@@ -38,9 +37,11 @@ def _pd_dtype_to_variable(col_name: Union[str, Variable], col_type, col_vals) ->
         return col_name
 
     if pd.api.types.is_categorical_dtype(col_type):
+        vals = col_vals[1].values.codes.astype(float)
+        vals[col_vals[1].values.isna()] = np.nan
         variable = DiscreteVariable(
             col_name,
-            values=col_vals[1].values,
+            values=vals,
             categories=col_type.categories.tolist(),
             ordered=col_type.ordered,
         )
@@ -54,217 +55,157 @@ def _pd_dtype_to_variable(col_name: Union[str, Variable], col_type, col_vals) ->
     return variable
 
 
-def ingest(df: pd.DataFrame) -> pd.DataFrame:
-    """Convert a pandas DataFrame to a DataFrame the library can understand.
-
-    This really just creates a copy of the data frame, but swaps out the columns
-    for instances of our `Variable` objects, so we know which derived
-    variables can be merged later on.
-
-    Parameters
-    ----------
-    df: pd.DataFrame
-
-    Returns
-    -------
-    pd.DataFrame
-
-    """
-    df_new = df.copy()
-    new_index = map(lambda p: _pd_dtype_to_variable(*p), zip(df.columns, df.dtypes, df.items()))
-    df_new.columns = pd.Index(list(new_index))
-    return df_new
-
-
-def ingested_to_pandas(df: pd.DataFrame) -> pd.DataFrame:
-    df_new = pd.DataFrame(index=df.index)
-
-    for column in df.columns:
-        if isinstance(column, DerivedVariable):
-            df_new[column.name] = pd.Categorical(df[column])
-        elif isinstance(column, DiscreteVariable):
-            col = pd.Categorical(
-                df[column], ordered=column.ordered, categories=column.categories
-            )
-            df_new[column.name] = col
-        elif isinstance(column, ContinuousVariable):
-            df_new[column.name] = df[column]
-        else:  # probably an uningested df column
-            df_new[column] = df[column]
-
-    return df_new
-
-
-def __discretize_const_continuous_features(df: pd.DataFrame) -> pd.DataFrame:
-    # Constant features are converted into discrete equality rules
-    derived_features = []
-    for variable in df.columns:
-        # All values are the same, so we can just take the first one
-        uniq_val = df.loc[0, variable]
-        rule = EqualityRule(uniq_val, value_name=variable.name)
-        v = DerivedVariable(variable, rule)
-        derived_features.append(v)
-
-    df_cont_const = pd.DataFrame(
-        df.values, columns=derived_features, index=df.index
+def ingest(df: pd.DataFrame) -> list[Variable]:
+    """Convert a pandas DataFrame to a list of VERA variables."""
+    return list(
+        _pd_dtype_to_variable(*p) for p in zip(df.columns, df.dtypes, df.items())
     )
 
-    # Constant variables are discretized into binary indicator variables
-    # indicating membership. Therefore, their values should all be set to 1
-    df_cont_const.loc[:, :] = 1
 
-    return df_cont_const
+def ingested_to_pandas(variables: list[Variable]) -> pd.DataFrame:
+    df_new = pd.DataFrame()
+
+    for v in variables:
+        if isinstance(v, IndicatorVariable):
+            df_new[v.name] = pd.Categorical(v.values)
+        elif isinstance(v, DiscreteVariable):
+            vals = np.full_like(v.values, fill_value=np.nan, dtype=object)
+            mask = ~np.isnan(v.values)
+            vals[mask] = np.array(v.categories)[v.values[mask].astype(int)]
+            # vals = np.array(v.categories)[v.values.astype(int)]
+            col = pd.Categorical(vals, ordered=v.ordered, categories=v.categories)
+            df_new[v.name] = col
+        elif isinstance(v, ContinuousVariable):
+            df_new[v.name] = v.values
+        else:
+            raise ValueError(f"Unrecognized variable type `{v.__class__.__name__}`!")
+
+    return df_new
 
 
-def __discretize_nonconst_continuous_features(df: pd.DataFrame, n_bins: int) -> pd.DataFrame:
+def __discretize_const(variable: ContinuousVariable) -> IndicatorVariable:
+    """Convert constant features into discrete equality rules"""
+    uniq_val = variable.values[0]
+    rule = EqualityRule(uniq_val, value_name=variable.name)
+    const_vals = np.ones(variable.values.shape[0])
+    return [IndicatorVariable(variable, rule, const_vals)]
+
+
+def __discretize_nonconst(variable: ContinuousVariable, n_bins: int) -> IndicatorVariable:
     # Discretize non-constant features
     from sklearn.preprocessing import KBinsDiscretizer
     from sklearn.exceptions import ConvergenceWarning
 
-    discretized_dfs = []
-    for variable in df.columns:
-        col_values = df[variable]
-        col_values_non_nan = col_values.dropna()
+    col_vals = pd.Series(variable.values)
+    col_vals_non_nan = col_vals.dropna()
 
-        # If we have a sparse column, convert to dense
-        if isinstance(col_values_non_nan.dtype, pd.SparseDtype):
-            col_values_non_nan = col_values_non_nan.sparse.to_dense()
+    n_bins = np.minimum(n_bins, col_vals_non_nan.nunique())
 
-        # Ensure that the number of bins is not larger than the number of unique
-        # values
-        n_bins = np.minimum(n_bins, col_values.nunique())
+    discretizer = KBinsDiscretizer(
+        n_bins=n_bins,
+        strategy="kmeans",
+        encode="onehot-dense",
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=ConvergenceWarning)
+        x_discretized = discretizer.fit_transform(col_vals_non_nan.values[:, None])
 
-        discretizer = KBinsDiscretizer(
-            n_bins=n_bins,
-            strategy="kmeans",
-            encode="onehot-dense",
-        )
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=ConvergenceWarning)
-            x_discretized = discretizer.fit_transform(col_values_non_nan.values[:, None])
+    # We discretize the non-NaN values, so ensure that the rows containing
+    # NaNs are re-inserted as zeros
+    df_discretized = pd.DataFrame(x_discretized, index=col_vals_non_nan.index)
+    df_discretized = df_discretized.reindex(col_vals.index, fill_value=0)
 
-        # We discretize the non-NaN values, so ensure that the rows containing
-        # NaNs are re-inserted as zeros
-        df_discretized = pd.DataFrame(x_discretized, index=col_values_non_nan.index)
-        df_discretized = df_discretized.reindex(col_values.index, fill_value=0)
+    # Prepare rules and variables
+    bin_edges = discretizer.bin_edges_[0]
 
-        # Prepare rules and variables
-        bin_edges = discretizer.bin_edges_[0]
+    # Ensure open intervals
+    bin_edges = np.array(bin_edges)
+    bin_edges[0], bin_edges[-1] = -np.inf, np.inf
 
-        # Ensure open intervals
-        bin_edges = np.array(bin_edges)
-        bin_edges[0], bin_edges[-1] = -np.inf, np.inf
+    derived_vars = []
+    for idx, (lower, upper) in enumerate(zip(bin_edges, bin_edges[1:])):
+        rule = IntervalRule(lower, upper, value_name=variable.name)
+        values = df_discretized.loc[:, idx].values
+        v = IndicatorVariable(variable, rule, values)
+        derived_vars.append(v)
 
-        derived_vars = []
-        for lower, upper in zip(bin_edges, bin_edges[1:]):
-            rule = IntervalRule(lower, upper, value_name=variable.name)
-            v = DerivedVariable(variable, rule)
-            derived_vars.append(v)
+    assert len(derived_vars) == len(df_discretized.columns), \
+        "The number of derived features do not match discretization output!"
 
-        assert len(derived_vars) == len(df_discretized.columns), \
-            "The number of derived features do not match discretization output!"
-        df_discretized.columns = derived_vars
-
-        discretized_dfs.append(df_discretized)
-
-    df_discretized = pd.concat(discretized_dfs, axis=1)
-
-    return df_discretized
+    return derived_vars
 
 
-def _discretize(df: pd.DataFrame, n_bins: int = 5) -> pd.DataFrame:
+def _discretize(variables: list[Variable] | pd.DataFrame, n_bins: int = 5) -> list[Variable]:
     """Discretize all continuous variables in the data frame.
 
     TODO: This function does imputation, but this really shouldn't be done here
     It should be up to the user to ensure there are no NaNs in the data, or up
     to us to ignore them.
     """
-    df_ingested = ingest(df)
+    if not isinstance(variables, list):
+        variables = ingest(variables)
 
-    # We can only discretize continuous columns
-    cont_cols = [c for c in df_ingested.columns if c.is_continuous]
-    othr_cols = [c for c in df_ingested.columns if not c.is_continuous]
-    df_cont = df_ingested[cont_cols]
-    df_cat = df_ingested[othr_cols]
+    new_vars = []
+    for v in variables:
+        # If the variable is not continuous, there is nothing to do
+        if not v.is_continuous:
+            new_vars.append(v)
 
-    # If there are no continuous features to be discretized, return
-    if not len(df_cont.columns):
-        return df_ingested
+        else:
+            if len(np.unique(v.values)) == 1:
+                disc_vars = __discretize_const(v)
+            else:
+                disc_vars = __discretize_nonconst(v, n_bins)
 
-    # We can't perform discretization on constant features, so handle constant
-    # and non-constant features separately
-    nuniq = df_cont.nunique()
+            new_vars.extend(disc_vars)
 
-    # Handle constant continuous features
-    cont_const_cols = nuniq.index[nuniq == 1].tolist()
-    df_cont_const = df_cont[cont_const_cols]
-    if len(cont_const_cols):
-        df_cont_const = __discretize_const_continuous_features(df_cont_const)
-
-    # Handle non-constant continuous features
-    cont_nonconst_cols = nuniq.index[nuniq > 1].tolist()
-    df_cont_nonconst = df_cont[cont_nonconst_cols]
-    if len(cont_nonconst_cols):
-        df_cont_nonconst = __discretize_nonconst_continuous_features(
-            df_cont_nonconst, n_bins=n_bins,
-        )
-
-    return pd.concat([df_cat, df_cont_const, df_cont_nonconst], axis=1)
+    return new_vars
 
 
-def _one_hot(df: pd.DataFrame) -> pd.DataFrame:
+def _one_hot(variables: list[Variable] | pd.DataFrame) -> list[Variable]:
     """Create one-hot encodings for all discrete variables in the data frame."""
-    df_ingested = ingest(df)
+    if not isinstance(variables, list):
+        variables = ingest(variables)
 
-    # We can only discretize continuous columns
-    disc_cols = [c for c in df_ingested.columns if c.is_discrete]
-    if len(disc_cols) == 0:
-        return df_ingested
+    new_vars = []
+    for v in variables:
+        # If the variable is not discrete, there is nothing to do
+        if not v.is_discrete:
+            new_vars.append(v)
 
-    othr_cols = [c for c in df_ingested.columns if not c.is_discrete]
-    df_disc = df_ingested[disc_cols]
-    df_othr = df_ingested[othr_cols]
+        else:
+            xi_onehot = pd.get_dummies(v.values).values.astype(np.float32)
+            for idx, category in enumerate(v.categories):
+                rule = EqualityRule(category, value_name=v.name)
+                values = xi_onehot[:, idx]
+                new_var = IndicatorVariable(v, rule, values)
+                new_vars.append(new_var)
 
-    x_onehot = pd.get_dummies(df_disc).values.astype(float)
-
-    # Create derived features
-    derived_features = []
-    for variable in df_disc.columns:
-        for category in variable.categories:
-            rule = EqualityRule(category, value_name=variable.name)
-            v = DerivedVariable(variable, rule)
-            derived_features.append(v)
-
-    assert (
-        len(derived_features) == x_onehot.shape[1]
-    ), "The number of derived features do not match one-hot output!"
-
-    df_disc = pd.DataFrame(x_onehot, columns=derived_features, index=df.index)
-    return pd.concat([df_othr, df_disc], axis=1)
+    return new_vars
 
 
-def expand_to_indicator(
+def expand_df(
     df: pd.DataFrame, n_discretization_bins: int = 5, filter_constant: bool = True
-) -> pd.DataFrame:
+) -> list[IndicatorVariable]:
     # Filter out features with identical values
     if filter_constant:
         df = df.loc[:, df.nunique(axis=0) > 1]
 
-    df = _one_hot(_discretize(ingest(df), n_bins=n_discretization_bins))
+    variables = _one_hot(_discretize(ingest(df), n_bins=n_discretization_bins))
 
     # Filter out columns with zero occurences
-    df = df.loc[:, df.sum(axis=0) > 0]
+    variables = [v for v in variables if v.values.sum() > 0]
 
-    return df
+    return variables
 
 
-def generate_explanatory_features(
-    df,
-    embedding,
+def generate_region_annotations(
+    variables: list[Variable],
+    embedding: Embedding | np.ndarray,
     scale_factor: float = 1,
     kernel: str = "gaussian",
     contour_level: float = 0.25,
-):
+) -> list[RegionAnnotation]:
     # Create embedding instance which will be shared across all explanatory
     # variables. The shared instance is necessary to avoid slow recomputation of
     # adjacency matrices
@@ -272,93 +213,66 @@ def generate_explanatory_features(
         embedding = Embedding(embedding, scale_factor=scale_factor)
 
     # Create explanatory variables from each of the derived features
-    explanatory_features = []
-    for v in tqdm(df.columns.tolist()):
-        values = df[v].values
-        density = embedding.estimate_density(values, kernel=kernel)
-        region = Region.from_density(density=density, level=contour_level)
-        explanatory_v = ExplanatoryVariable(
-            v.base_variable,
-            v.rule,
-            values,
-            region,
-            embedding,
+    region_annotations = []
+    for v in tqdm(variables):
+        density = embedding.estimate_density(v.values, kernel=kernel)
+        region = Region.from_density(
+            embedding=embedding, density=density, level=contour_level
         )
-        explanatory_v.base_variable.register_explanatory_variable(explanatory_v)
-        explanatory_features.append(explanatory_v)
+        ra = RegionAnnotation(v, region)
+        region_annotations.append(ra)
 
-    return explanatory_features
+    return region_annotations
 
 
 def merge_overfragmented(
-    variables: list[ExplanatoryVariable],
-    min_sample_overlap=0.5,
-    min_purity_gain=0.5,
-):
+    region_annotations: list[RegionAnnotation],
+    min_sample_overlap: float = 0.5,
+    min_purity_gain: float = 0.5,
+) -> list[RegionAnnotation]:
     # If we only have a single variable, there is nothing to merge
-    if len(variables) == 1:
-        return variables
+    if len(region_annotations) == 1:
+        return region_annotations
 
-    def _dist(v1, v2):
-        if not v1.can_merge_with(v2):
+    def _dist(ra1, ra2):
+        if not ra1.can_merge_with(ra2):
             return 0
 
-        shared_sample_pct = metrics.max_shared_sample_pct(v1, v2)
+        shared_sample_pct = metrics.max_shared_sample_pct(ra1, ra2)
         if shared_sample_pct < min_sample_overlap:
             return 0
 
-        new_variable = v1.merge_with(v2)
-        v1_purity_gain = new_variable.purity / v1.purity - 1
-        v2_purity_gain = new_variable.purity / v2.purity - 1
-        purity_gain = np.max([v1_purity_gain, v2_purity_gain])
+        new_ra = ra1.merge_with(ra2)
+        ra1_purity_gain = metrics.purity(new_ra) / metrics.purity(ra1) - 1
+        ra2_purity_gain = metrics.purity(new_ra) / metrics.purity(ra2) - 1
+        purity_gain = np.max([ra1_purity_gain, ra2_purity_gain])
 
         return int(purity_gain >= min_purity_gain)
 
-    def _merge_round(variables):
-        variable_groups = defaultdict(list)
-        for v in variables:
-            variable_groups[v.base_variable].append(v)
+    def _merge_round(region_annotations):
+        # Group region annotatins based on base variables
+        var_groups = defaultdict(list)
+        for ra in region_annotations:
+            var_groups[ra.variable.base_variable].append(ra)
 
-        merged_variables = []
-        for k, variable_group in tqdm(variable_groups.items()):
-            dists = metrics.pdist(variable_group, _dist)
+        merged_ras = []
+        for k, var_group in tqdm(var_groups.items()):
+            dists = metrics.pdist(var_group, _dist)
             graph = g.similarities_to_graph(dists, threshold=0.5)
-            node_labels = dict(enumerate(variable_group))
+            node_labels = dict(enumerate(var_group))
             graph = g.label_nodes(graph, node_labels)
             merge_groups = g.connected_components(graph)
-            # merge_groups = g.max_cliques(graph)  # TODO: max cliques puts nodes into multiple cliques
-
-            # # Check which subgraphs each node appears in
-            # node_occurence = defaultdict(list)
-            # for subgraph in merge_groups:
-            #     for node in subgraph:
-            #         node_occurence[node].append(subgraph)
 
             for c in merge_groups:
-                # Merging all the nodes in the graph into a single node. It is
-                # important that the nodes are merged in the correct order, to
-                # respect the `.can_merge_with` constraint
+                new_ra = CompositeRegionAnnotation(list(c))
+                merged_ras.append(new_ra)
 
-                # For some reason, this is automatically sorted so that the
-                # variables can be merged immediately
-
-                # TODO: Rules on explanatory variables can be sorted. Can we use
-                # that to ensure the correct order?
-                var_order = sorted(list(c), key=lambda x: x.rule)
-                new_var = vera.variables.CompositeExplanatoryVariable(var_order)
-
-                for node in var_order:
-                    node.base_variable.unregister_explanatory_variable(node)
-                new_var.base_variable.register_explanatory_variable(new_var)
-
-                merged_variables.append(new_var)
-
-        return merged_variables
+        return merged_ras
 
     # TODO: This can be sped up by only recomputing variable groups that have
     # changed in the last round. We now recompute all variable groups every time
-    prev_len = len(variables)
-    while len(variables := _merge_round(variables)) < prev_len:
-        prev_len = len(variables)
+    prev_len = len(region_annotations)
+    while len(region_annotations := _merge_round(region_annotations)) < prev_len:
+        prev_len = len(region_annotations)
 
-    return variables
+    return region_annotations

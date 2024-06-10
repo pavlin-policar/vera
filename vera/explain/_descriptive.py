@@ -6,8 +6,8 @@ from scipy import stats as stats
 from vera import metrics as metrics, graph as g
 from vera.explain import _layout_scores
 from vera.region import Region
-from vera.variables import ExplanatoryVariable, ExplanatoryVariableGroup, Variable
-
+from vera.variables import Variable
+from vera.region_annotations import RegionAnnotation, RegionAnnotationGroup
 
 DEFAULT_RANKING_FUNCS = [
     (_layout_scores.variable_occurs_in_all_regions, 30),
@@ -19,17 +19,17 @@ DEFAULT_RANKING_FUNCS = [
 
 
 def group_similar_variables(
-    variables: list[ExplanatoryVariable],
+    region_annotations: list[RegionAnnotation],
     metric: Callable = metrics.min_shared_sample_pct,
     metric_is_distance: bool = False,
     threshold: float = 0.9,
     method: str = "connected-components",
 ):
-    distances = metrics.pdist(variables, metric)
+    distances = metrics.pdist(region_annotations, metric)
     g_func = [g.similarities_to_graph, g.distances_to_graph][metric_is_distance]
     graph = g_func(distances, threshold=threshold)
 
-    node_labels = dict(enumerate(variables))
+    node_labels = dict(enumerate(region_annotations))
     graph = g.label_nodes(graph, node_labels)
 
     # Once we construct the graph, find the max-cliques. These will serve as our
@@ -52,7 +52,7 @@ def group_similar_variables(
         )
 
     variable_groups = [
-        ExplanatoryVariableGroup(variables=clust_vars, name=cid)
+        RegionAnnotationGroup(region_annotations=clust_vars, name=cid)
         for cid, clust_vars in clusts.items()
     ]
 
@@ -60,8 +60,8 @@ def group_similar_variables(
 
 
 def enrich_var_group_with_background(
-    var_group: ExplanatoryVariableGroup,
-    background_vars: list[ExplanatoryVariable],
+    var_group: RegionAnnotationGroup,
+    background_vars: list[RegionAnnotation],
     threshold: float = 0.9,
 ):
     # Determine which base vars are present in the var group
@@ -83,19 +83,18 @@ def enrich_var_group_with_background(
             new_polygon = background_v.region.polygon.intersection(
                 var_group.region.polygon
             )
-            cloned_bg_var = ExplanatoryVariable(
+            cloned_bg_var = RegionAnnotation(
                 background_v.base_variable,
                 background_v.rule,
                 background_v.values,
-                Region(new_polygon),
-                background_v.embedding
+                Region(background_v.region.embedding, new_polygon),
             )
             to_add.append(cloned_bg_var)
 
     # If we found any background variables to add to the var group, create a new
     # var group with all available explanatory vars
     if len(to_add) > 0:
-        var_group = ExplanatoryVariableGroup(
+        var_group = RegionAnnotationGroup(
             var_group.variables + to_add, name=var_group.name
         )
 
@@ -103,8 +102,8 @@ def enrich_var_group_with_background(
 
 
 def enrich_panel_with_background(
-    panel: list[ExplanatoryVariableGroup],
-    background_vars: list[ExplanatoryVariable],
+    panel: list[RegionAnnotationGroup],
+    background_vars: list[RegionAnnotation],
     threshold: float = 0.9,
 ):
     return [
@@ -114,8 +113,8 @@ def enrich_panel_with_background(
 
 
 def enrich_layout_with_background(
-    layout: list[list[ExplanatoryVariableGroup]],
-    background_vars: list[ExplanatoryVariable],
+    layout: list[list[RegionAnnotationGroup]],
+    background_vars: list[RegionAnnotation],
     threshold: float = 0.9,
 ):
     return [
@@ -186,7 +185,7 @@ def descriptive(
     return_clusters: bool = False,
     ranking_funcs=DEFAULT_RANKING_FUNCS,
 ):
-    explanatory_variables = [ex for v in variables for ex in v.explanatory_variables]
+    explanatory_variables = [ex for v in variables for ex in v.region_annotations]
 
     # Split explanatory features into their polygons
     explanatory_variables_split = []
@@ -229,13 +228,13 @@ def descriptive(
 
 
 def filter_explanatory_features(
-    variables: list[ExplanatoryVariable],
+    region_annotations: list[RegionAnnotation],
     min_samples: int = 5,
     min_purity: float = 0.5,
 ):
     return [
-        v
-        for v in variables
-        if v.purity >= min_purity
-        and v.num_contained_samples >= min_samples
+        ra
+        for ra in region_annotations
+        if metrics.purity(ra) >= min_purity
+        and len(ra.contained_samples) >= min_samples
     ]

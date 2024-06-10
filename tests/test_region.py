@@ -24,10 +24,10 @@ class TestIntersectWithOther(unittest.TestCase):
             "`an.generate_explanatory_features` returned more than one variable"
         )
         self.assertEqual(
-            len(feature_list[0].explanatory_variables), 2,
+            len(feature_list[0].region_annotations), 2,
             "The number of explanatory features was not 2!"
         )
-        outer, inner = feature_list[0].explanatory_variables
+        outer, inner = feature_list[0].region_annotations
 
         outer_region, inner_region = outer.region, inner.region
         self.assertEqual(
@@ -63,10 +63,10 @@ class TestIntersectWithOther(unittest.TestCase):
             "`an.generate_explanatory_features` returned more than one variable"
         )
         self.assertEqual(
-            len(feature_list[0].explanatory_variables), 2,
+            len(feature_list[0].region_annotations), 2,
             "The number of explanatory features was not 2!"
         )
-        outer, inner = feature_list[0].explanatory_variables
+        outer, inner = feature_list[0].region_annotations
 
         outer_region, inner_region = outer.region, inner.region
         self.assertEqual(

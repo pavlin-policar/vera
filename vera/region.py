@@ -1,9 +1,11 @@
 import operator
-from functools import reduce
+from functools import cached_property, reduce
 
 import contourpy
 import numpy as np
 from shapely import geometry as geom
+
+from vera.embedding import Embedding
 
 
 class Density:
@@ -53,6 +55,7 @@ class CompositeDensity(Density):
         joint_density = np.sum(np.vstack([d.values for d in densities]), axis=0)
         grid = densities[0].grid
         super().__init__(grid, joint_density)
+
         if not all(np.allclose(d.grid, self.grid) for d in densities):
             raise RuntimeError(
                 "All densities must have the same grid when constructing "
@@ -61,7 +64,8 @@ class CompositeDensity(Density):
 
 
 class Region:
-    def __init__(self, polygon: geom.MultiPolygon):
+    def __init__(self, embedding: Embedding, polygon: geom.MultiPolygon):
+        self.embedding = embedding
         self.polygon = self._ensure_multipolygon(polygon)
 
     @property
@@ -73,13 +77,22 @@ class Region:
         return len(self.region_parts)
 
     def split_into_parts(self):
-        return [Region(g) for g in self.region_parts]
+        return [Region(self.embedding, p) for p in self.region_parts]
 
     @staticmethod
     def _ensure_multipolygon(polygon) -> geom.MultiPolygon:
         if not isinstance(polygon, geom.MultiPolygon):
             polygon = geom.MultiPolygon([polygon])
         return polygon
+
+    @cached_property
+    def contained_samples(self) -> set[int]:
+        contained_indices = set()
+        for i in range(len(self.embedding.points)):
+            if self.polygon.contains(self.embedding.points[i]):
+                contained_indices.add(i)
+
+        return contained_indices
 
     def __eq__(self, other: "Region"):
         if not isinstance(other, Region):
@@ -88,15 +101,6 @@ class Region:
 
     def __hash__(self):
         return hash((self.__class__.__name__, self.polygon))
-
-    def get_contained_samples(self, embedding: "Embedding") -> set[int]:
-        """Get the indices of the samples contained within the region."""
-        contained_indices = set()
-        for i in range(len(embedding.points)):
-            if self.polygon.contains(embedding.points[i]):
-                contained_indices.add(i)
-
-        return contained_indices
 
     def __add__(self, other: "Region") -> "CompositeRegion":
         if not isinstance(other, Region):
@@ -108,14 +112,30 @@ class Region:
         return f"{self.__class__.__name__}: {n} part{'s'[:n^1]}"
 
     @classmethod
-    def from_density(cls, density: Density, level: float = 0.25):
+    def from_density(cls, embedding: Embedding, density: Density, level: float = 0.25):
         polygon = cls._ensure_multipolygon(density.get_polygons_at(level))
-        return cls(polygon)
+        return cls(embedding, polygon)
 
 
 class CompositeRegion(Region):
-    def __init__(self, regions: list[Region]):
-        self.base_regions = regions
+    def __init__(self, regions: list[Region], merge_method="union"):
+        # Ensure that the regions all belong to the same embedding, otherwise
+        # they can't be merged
+        embedding = regions[0].embedding
+        if not all(r.embedding == embedding for r in regions[1:]):
+            raise RuntimeError(
+                "Merged regions must originate belong to the same embedding!"
+            )
 
-        polygon = reduce(operator.or_, [r.polygon for r in regions])
-        self.polygon = self._ensure_multipolygon(polygon)
+        if merge_method == "union":
+            new_polygon = reduce(operator.or_, [r.polygon for r in regions])
+        elif merge_method == "intersection":
+            new_polygon = reduce(operator.and_, [r.polygon for r in regions])
+        else:
+            raise ValueError(
+                "Unsupported `merge_method`. Supported methods are `union` and "
+                "`interscection`."
+            )
+
+        super().__init__(embedding=embedding, polygon=new_polygon)
+        self.base_regions = regions

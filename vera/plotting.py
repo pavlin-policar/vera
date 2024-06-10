@@ -21,11 +21,13 @@ import pandas as pd
 from matplotlib.patches import PathPatch
 from matplotlib.path import Path
 
+import vera.metrics as metrics
 from vera.label_placement import initial_text_location_placement, get_2d_coordinates, fix_crossings
 from vera.region import Density, Region
-from vera.variables import (
-    ExplanatoryVariable, ExplanatoryVariableGroup, EmbeddingRegionMixin, Variable,
-    CompositeExplanatoryVariable
+from vera.region_annotations import (
+    RegionAnnotation,
+    CompositeRegionAnnotation,
+    RegionAnnotationGroup,
 )
 
 
@@ -41,7 +43,7 @@ def plot_feature(
     threshold=0,
     zorder=1,
     title=None,
-    ax=None,
+    ax: matplotlib.axes.Axes = None,
     agg="max",
 ):
     if ax is None:
@@ -251,11 +253,11 @@ def enumerate_plots(ax: list[matplotlib.axes.Axes], offset=0.025, text_params={}
 
 
 def plot_density(
-    density: Union[ExplanatoryVariable, Region, Density],
+    density: Union[RegionAnnotation, Region, Density],
     embedding: np.ndarray = None,
     levels: Union[int, np.ndarray] = 5,
     skip_first: bool = True,
-    ax=None,
+    ax: matplotlib.axes.Axes = None,
     cmap="RdBu_r",
     contour_kwargs: dict = {},
     contourf_kwargs: dict = {},
@@ -300,7 +302,7 @@ def plot_density(
 
 
 def plot_densities(
-    variables: list[ExplanatoryVariable],
+    variables: list[RegionAnnotation],
     levels: Union[int, np.ndarray] = 5,
     skip_first: bool = True,
     per_row: int = 4,
@@ -326,7 +328,7 @@ def plot_densities(
 
         plot_density(
             variable.region.density,
-            embedding=variable.embedding.X,
+            embedding=variable.region.embedding.X,
             levels=levels,
             skip_first=skip_first,
             ax=ax[idx],
@@ -343,11 +345,11 @@ def plot_densities(
         return fig, ax
 
 
-def _format_explanatory_variable(variable: ExplanatoryVariable, max_width=40):
+def _format_explanatory_variable(variable: RegionAnnotation, max_width=40):
     return "\n".join(wrap(variable.name, width=max_width))
 
 
-def _format_explanatory_variable_group(var_group: ExplanatoryVariableGroup, max_width=40):
+def _format_explanatory_variable_group(var_group: RegionAnnotationGroup, max_width=40):
     var_strings = [str(v) for v in var_group.contained_variables]
     if max_width is not None:
         var_strings = [wrap(s, width=max_width) for s in var_strings]
@@ -361,20 +363,29 @@ def _format_explanatory_variable_group(var_group: ExplanatoryVariableGroup, max_
     return "\n".join(lines)
 
 
-def _plot_region(variable, ax, fill_color, edge_color, fill_alpha, edge_alpha, lw, indicate_purity=False):
+def _plot_region(
+    region_annotation: RegionAnnotation,
+    ax: matplotlib.axes.Axes,
+    fill_color: str,
+    edge_color: str,
+    fill_alpha: float,
+    edge_alpha: float,
+    lw: float,
+    indicate_purity: bool = False
+):
     # If no edge color is specified, use the same color as the fill
     if edge_color is None:
         edge_color = fill_color
 
     # The purity effect should never go below the following threshold
-    purity_effect_size = 0.75
-    purity_factor = variable.purity * purity_effect_size + (1 - purity_effect_size)
     if indicate_purity:
+        purity_effect_size = 0.75
+        purity_factor = metrics.purity(region_annotation) * purity_effect_size + (1 - purity_effect_size)
         edge_alpha *= purity_factor
         fill_alpha *= purity_factor
 
     fill_patches, edge_patches = [], []
-    for geom in variable.region.polygon.geoms:
+    for geom in region_annotation.region.polygon.geoms:
         # Polygon plotting code taken from
         # https://stackoverflow.com/questions/55522395/how-do-i-plot-shapely-polygons-and-objects-using-matplotlib
         path = Path.make_compound_path(
@@ -382,7 +393,7 @@ def _plot_region(variable, ax, fill_color, edge_color, fill_alpha, edge_alpha, l
             *[Path(np.asarray(ring.coords)[:, :2]) for ring in geom.interiors],
         )
 
-        # Boundary
+        # Edge
         edge_patch = PathPatch(
             path,
             fill=False,
@@ -409,7 +420,7 @@ def _plot_region(variable, ax, fill_color, edge_color, fill_alpha, edge_alpha, l
 
 
 def plot_region(
-    variable: ExplanatoryVariable,
+    region_annotation: RegionAnnotation,
     ax=None,
     fill_color="tab:blue",
     edge_color=None,
@@ -429,7 +440,7 @@ def plot_region(
         fig, ax = plt.subplots(figsize=(8, 8))
 
     _plot_region(
-        variable,
+        region_annotation,
         ax,
         fill_color=fill_color,
         edge_color=edge_color,
@@ -441,15 +452,15 @@ def plot_region(
 
     if draw_label:
         # Obtain the label string to draw over the region
-        if isinstance(variable, ExplanatoryVariable):
-            label_str = _format_explanatory_variable(variable)
-        elif isinstance(variable, ExplanatoryVariableGroup):
-            label_str = _format_explanatory_variable_group(variable)
+        if isinstance(region_annotation, RegionAnnotation):
+            label_str = _format_explanatory_variable(region_annotation)
+        elif isinstance(region_annotation, RegionAnnotationGroup):
+            label_str = _format_explanatory_variable_group(region_annotation)
         else:
-            label_str = str(variable)
+            label_str = str(region_annotation)
 
         # Draw the lable on the largest polygon in the region
-        largest_polygon = max(variable.region.polygon.geoms, key=lambda x: x.area)
+        largest_polygon = max(region_annotation.region.polygon.geoms, key=lambda x: x.area)
         label_kwargs_ = {
             "ha": "center",
             "va": "center",
@@ -466,7 +477,7 @@ def plot_region(
 
     # Plot embedding scatter plot
     if draw_scatterplot:
-        embedding = variable.embedding.X
+        embedding = region_annotation.region.embedding.X
         scatter_kwargs_ = {
             "zorder": 1,
             "c": "#999999",
@@ -477,14 +488,14 @@ def plot_region(
         scatter_kwargs_.update(scatter_kwargs)
         if highlight_members:
             other_color = scatter_kwargs_["c"]
-            c = np.array([other_color, member_color])[variable.values.astype(int)]
+            c = np.array([other_color, member_color])[region_annotation.variable.values.astype(int)]
             scatter_kwargs_["c"] = c
             scatter_kwargs_["alpha"] = 1
 
         ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_, rasterized=True)
 
     # Set title
-    ax.set_title(variable.name)
+    ax.set_title(region_annotation.variable.name)
 
     # Hide ticks and axis
     ax.set_xticks([]), ax.set_yticks([])
@@ -498,7 +509,7 @@ def plot_region(
 
 
 def plot_regions(
-    variables: list[ExplanatoryVariable],
+    region_annotations: list[RegionAnnotation],
     per_row: int = 4,
     figwidth: int = 24,
     return_ax: bool = False,
@@ -510,24 +521,23 @@ def plot_regions(
     draw_labels=False,
     highlight_members=True,
     member_color="tab:red",
-    add_region_info=False,
     indicate_purity: bool = False,
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
     show: bool = False,
 ):
-    n_rows = len(variables) // per_row
-    if len(variables) % per_row > 0:
+    n_rows = len(region_annotations) // per_row
+    if len(region_annotations) % per_row > 0:
         n_rows += 1
 
     figheight = figwidth / per_row * n_rows
     fig, ax = plt.subplots(nrows=n_rows, ncols=per_row, figsize=(figwidth, figheight))
 
-    if len(variables) == 1:
+    if len(region_annotations) == 1:
         ax = np.array([ax])
     ax = ax.ravel()
 
-    for idx, variable in enumerate(variables):
+    for idx, variable in enumerate(region_annotations):
         plot_region(
             variable,
             ax=ax[idx],
@@ -539,7 +549,6 @@ def plot_regions(
             draw_label=draw_labels,
             highlight_members=highlight_members,
             member_color=member_color,
-            add_region_info=add_region_info,
             indicate_purity=indicate_purity,
             scatter_kwargs=scatter_kwargs,
             label_kwargs=label_kwargs,
@@ -559,15 +568,15 @@ def plot_regions(
 
 
 def plot_region_with_subregions(
-    variable: ExplanatoryVariable,
-    ax=None,
+    region_annotation: RegionAnnotation,
+    ax: matplotlib.axes.Axes = None,
     cmap: str = "tab10",
 ):
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 8))
 
     plot_region(
-        variable,
+        region_annotation,
         ax=ax,
         highlight_members=False,
         fill_color="#cccccc",
@@ -575,9 +584,9 @@ def plot_region_with_subregions(
     )
 
     hues = iter(cycle(get_cmap_colors(cmap)))
-    for subvariable, c in zip(variable.contained_variables, hues):
+    for sub_ra, c in zip(region_annotation.contained_region_annotations, hues):
         plot_region(
-            subvariable,
+            sub_ra,
             ax=ax,
             highlight_members=False,
             fill_color=c,
@@ -585,7 +594,7 @@ def plot_region_with_subregions(
         )
 
     # Set title
-    ax.set_title(variable.name)
+    ax.set_title(region_annotation.name)
 
     # Hide ticks and axis
     ax.set_xticks([]), ax.set_yticks([])
@@ -596,30 +605,26 @@ def plot_region_with_subregions(
 
 
 def plot_regions_with_subregions(
-    variables: list[ExplanatoryVariable],
+    region_annotations: list[RegionAnnotation],
     per_row: int = 4,
     figwidth: int = 24,
     return_ax: bool = False,
     cmap: str = "tab10",
     show: bool = False,
 ):
-    n_rows = len(variables) // per_row
-    if len(variables) % per_row > 0:
+    n_rows = len(region_annotations) // per_row
+    if len(region_annotations) % per_row > 0:
         n_rows += 1
 
     figheight = figwidth / per_row * n_rows
     fig, ax = plt.subplots(nrows=n_rows, ncols=per_row, figsize=(figwidth, figheight))
 
-    if len(variables) == 1:
+    if len(region_annotations) == 1:
         ax = np.array([ax])
     ax = ax.ravel()
 
-    for idx, variable in enumerate(variables):
-        plot_region_with_subregions(
-            variable,
-            ax=ax[idx],
-            cmap=cmap,
-        )
+    for idx, ra in enumerate(region_annotations):
+        plot_region_with_subregions(ra, ax=ax[idx], cmap=cmap)
 
     enumerate_plots(ax[:idx + 1])
 
@@ -635,14 +640,14 @@ def plot_regions_with_subregions(
 
 
 def plot_annotation(
-    variables: list[ExplanatoryVariable],
+    region_annotations: list[RegionAnnotation],
     cmap: str = "tab10",
     ax: matplotlib.axes.Axes = None,
     indicate_purity: bool = False,
     indicate_membership: bool = False,
     only_color_inside_members: bool = True,
     draw_labels=True,
-    variable_colors: dict = None,
+    ra_colors: dict = None,
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
     figwidth: int = 4,
@@ -653,33 +658,33 @@ def plot_annotation(
     if ax is None:
         fig, ax = plt.subplots(figsize=(figwidth, figwidth), dpi=150)
 
-    if variable_colors is None:
+    if ra_colors is None:
         # Glasbey crashes when requesting fewer colors than are in the cmap
         cmap_len = len(get_cmap_colors(cmap))
-        request_len = max(cmap_len, len(variables))
+        request_len = max(cmap_len, len(region_annotations))
         cmap = glasbey.extend_palette(cmap, palette_size=request_len)
-        variable_colors = {
-            variable: mcolors.to_rgb(c) for variable, c in zip(variables, cmap)
+        ra_colors = {
+            ra: mcolors.to_rgb(c) for ra, c in zip(region_annotations, cmap)
         }
 
     # Save region patches to be used for label placement. We don't need both 
     # fill and edge patches, so use either of the two. Here, we use fill patches
     region_patches = []
-    for variable in variables:
+    for region_annotation in region_annotations:
         fill_patches, edge_patches = _plot_region(
-            variable,
+            region_annotation,
             ax=ax,
-            fill_color=variable_colors[variable],
-            edge_color=variable_colors[variable],
+            fill_color=ra_colors[region_annotation],
+            edge_color=ra_colors[region_annotation],
             fill_alpha=0.25,
             edge_alpha=1,
             lw=1,
             indicate_purity=indicate_purity,
         )
         # region_patches.extend(fill_patches)
-        region_patches.extend(variable.region.polygon.geoms)
+        region_patches.extend(region_annotation.region.polygon.geoms)
 
-    embedding = variables[0].embedding.X
+    embedding = region_annotations[0].region.embedding.X
     scatter_kwargs_ = {
         "zorder": 2,
         "s": 6,
@@ -693,12 +698,12 @@ def plot_annotation(
 
     if indicate_membership:
         # Set sample colors inside regions
-        for variable in variables:
+        for region_annotation in region_annotations:
             if only_color_inside_members:
-                group_indices = list(variable.contained_samples_tp())
+                group_indices = list(region_annotation.contained_members)
             else:
-                group_indices = list(np.argwhere(variable.values).ravel())
-            point_colors[group_indices] = variable_colors[variable]
+                group_indices = list(region_annotation.all_members)
+            point_colors[group_indices] = ra_colors[region_annotation]
 
         # Desaturate colors slightly
         point_colors = mcolors.rgb_to_hsv(point_colors)
@@ -711,25 +716,23 @@ def plot_annotation(
         c=point_colors,
         **scatter_kwargs_
     )
-    print(scatter_obj)
-    print(len(scatter_obj.get_offsets()))
 
     if draw_labels:
         label_data = []
-        for variable in variables:
+        for region_annotation in region_annotations:
             # Obtain the label string to draw over the region
-            if isinstance(variable, ExplanatoryVariable):
-                label_str = _format_explanatory_variable(variable)
-            elif isinstance(variable, ExplanatoryVariableGroup):
-                label_str = _format_explanatory_variable_group(variable)
+            if isinstance(region_annotation, RegionAnnotation):
+                label_str = _format_explanatory_variable(region_annotation)
+            elif isinstance(region_annotation, RegionAnnotationGroup):
+                label_str = _format_explanatory_variable_group(region_annotation)
             else:
-                label_str = str(variable)
+                label_str = str(region_annotation)
 
             # Draw the lable on the largest polygon in the region
-            largest_polygon = max(variable.region.polygon.geoms, key=lambda x: x.area)
+            largest_polygon = max(region_annotation.region.polygon.geoms, key=lambda x: x.area)
             x, y = largest_polygon.centroid.coords[0]
 
-            label_data.append({"text": label_str, "pos": [x, y], "color": variable_colors[variable]})
+            label_data.append({"text": label_str, "pos": [x, y], "color": ra_colors[region_annotation]})
 
         label_positions = [lbl["pos"] for lbl in label_data]
         label_text_positions = initial_text_location_placement(
@@ -743,6 +746,9 @@ def plot_annotation(
             ma="center",
             va="center",
             fontsize=7,
+            # fontstretch="condensed",
+            # fontweight="light",
+            fontfamily="Helvetica Neue",
             zorder=99,
         )
         label_kwargs_.update(label_kwargs)
@@ -819,6 +825,11 @@ def rescale_axes(
     positions of the labels, this is run multiple times until a maximum number
     of iterations has been reached or until the label bounding boxes stop
     changing."""
+
+    # TODO: Move this out of the function
+    import logging
+    logger = logging.getLogger("VERA")
+
     # Determine scatter plot bounds if available
     if scatter_obj is not None:
         scatter_positions = scatter_obj.get_offsets()
@@ -870,7 +881,7 @@ def rescale_axes(
         # Get new coordinates after rescaling
         new_coords = get_2d_coordinates(label_objs)
         if np.allclose(coords, new_coords, atol=eps):
-            print(f"Stopped after {i} iterations")
+            logger.debug(f"Stopped after {i} iterations")
             break
         coords = new_coords
 
@@ -885,6 +896,10 @@ def optimize_label_positions(
     max_axis_limits: float = None,
 ):
     import shapely
+
+    # TODO: Move this out of the function
+    import logging
+    logger = logging.getLogger("VERA")
 
     for epoch in range(500):
         updates = np.zeros(shape=(len(label_objs), 2), dtype=float)
@@ -978,14 +993,14 @@ def optimize_label_positions(
 
         rescale_axes(label_objs, ax, max_axis_limits=max_axis_limits, scatter_obj=scatter_obj)
 
-        print("update norm", np.linalg.norm(updates))
+        logger.debug("update norm", np.linalg.norm(updates))
         # Check if stopping criteria met
         if np.linalg.norm(updates) < eps:
             break
 
 
 def plot_annotations(
-    layouts: list[list[ExplanatoryVariable]],
+    layouts: list[list[RegionAnnotation]],
     per_row: int = 4,
     figwidth: int = 24,
     return_ax: bool = False,
@@ -1017,7 +1032,7 @@ def plot_annotations(
             indicate_purity=indicate_purity,
             indicate_membership=indicate_membership,
             only_color_inside_members=only_color_inside_members,
-            variable_colors=variable_colors,
+            ra_colors=variable_colors,
             scatter_kwargs=scatter_kwargs,
             label_kwargs=label_kwargs,
         )
@@ -1045,13 +1060,13 @@ def layout_variable_colors(layout, cmap="tab10"):
         cmap, palette_size=num_colors_to_request, colorblind_safe=True
     )
 
-    def get_key(v):
-        if isinstance(v, ExplanatoryVariableGroup):
-            return frozenset(v.rule for v in v.variables)
-        elif isinstance(v, CompositeExplanatoryVariable):
-            return frozenset(v.rule for v in v.contained_variables)
-        elif isinstance(v, ExplanatoryVariable):
-            return v.rule
+    def get_key(ra):
+        if isinstance(ra, RegionAnnotation):
+            return frozenset(v.rule for v in ra.variables)
+        elif isinstance(ra, CompositeRegionAnnotation):
+            return frozenset(v.rule for v in ra.contained_region_annotations)
+        elif isinstance(ra, RegionAnnotation):
+            return ra.rule
 
     # We use the variable rule as the key
     var_keys = {
@@ -1070,7 +1085,7 @@ def layout_variable_colors(layout, cmap="tab10"):
 
 
 def plot_discretization(
-    variable: Variable,
+    variable: list[RegionAnnotation],
     cmap: str = "viridis",
     hist_scatter_kwargs: dict = {},
     scatter_kwargs: dict = {},
@@ -1079,7 +1094,7 @@ def plot_discretization(
 ):
     import matplotlib.gridspec as gridspec
 
-    def _get_bin_edges_continuous(explanatory_variables: list[ExplanatoryVariable]):
+    def _get_bin_edges_continuous(explanatory_variables: list[RegionAnnotation]):
         edges = [v.rule.lower for v in explanatory_variables]
         edges += [explanatory_variables[-1].rule.upper]
         if np.isinf(edges[0]):
@@ -1089,21 +1104,21 @@ def plot_discretization(
 
         return edges
 
-    def _get_bin_edges_discrete(explanatory_variables: list[ExplanatoryVariable]):
-        num_contained_variables = [len(v.contained_variables) for v in explanatory_variables]
+    def _get_bin_edges_discrete(explanatory_variables: list[RegionAnnotation]):
+        num_contained_variables = [len(v.contained_region_annotations) for v in explanatory_variables]
         edges = np.concatenate([[0], np.cumsum(num_contained_variables)]) + 0.5
 
         return edges
 
-    def _get_sample_bin_indices(explanatory_variables: list[ExplanatoryVariable]):
+    def _get_sample_bin_indices(explanatory_variables: list[RegionAnnotation]):
         variable_values = np.vstack([v.values for v in explanatory_variables])
         variable_group_values = np.argmax(variable_values, axis=0)
         return variable_group_values
 
     unmerged_explanatory_variables = [
         expl_var
-        for expl_vars in variable.explanatory_variables
-        for expl_var in expl_vars.contained_variables
+        for expl_vars in variable.region_annotations
+        for expl_var in expl_vars.contained_region_annotations
     ]
 
     if variable.is_continuous:
@@ -1113,8 +1128,8 @@ def plot_discretization(
 
     unmerged_feature_pt_bins = _get_sample_bin_indices(unmerged_explanatory_variables)
     unmerged_feature_bin_edges = _get_bin_edges_func(unmerged_explanatory_variables)
-    merged_feature_pt_bins = _get_sample_bin_indices(variable.explanatory_variables)
-    merged_feature_bin_edges = _get_bin_edges_func(variable.explanatory_variables)
+    merged_feature_pt_bins = _get_sample_bin_indices(variable.region_annotations)
+    merged_feature_bin_edges = _get_bin_edges_func(variable.region_annotations)
 
     def plot_distribution_bins(x, bin_edges, x_bins, bins, ax, cmap=None, hist_scatter_kwargs={}):
         d, bins, *_ = ax.hist(
@@ -1143,7 +1158,7 @@ def plot_discretization(
         return ax
 
     v = variable  # The variable in question
-    embedding = v.explanatory_variables[0].embedding.X
+    embedding = v.region_annotations[0].region.embedding.X
 
     variable_values = v.values
     if pd.api.types.is_categorical_dtype(variable_values):

@@ -11,7 +11,7 @@ def mean_variable_occurence(panel):
     """Count the number of times each base variable appears in a layout."""
     base_variable_count = defaultdict(int)
     for variable_group in panel:
-        for variable in variable_group.variables:
+        for variable in variable_group.variable_dict:
             base_variable_count[variable.base_variable] += 1
 
     return np.mean(list(base_variable_count.values()))
@@ -23,7 +23,7 @@ def variable_occurs_in_all_regions(panel, all_region_threshold=0.9):
 
     base_variable_count = defaultdict(int)
     for variable_group in panel:
-        for variable in variable_group.variables:
+        for variable in variable_group.variable_dict:
             base_variable_count[variable.base_variable] += 1
     base_variable_freq = {k: v / num_regions for k, v in base_variable_count.items()}
     occurence = np.array(list(base_variable_freq.values()))
@@ -52,7 +52,7 @@ def sample_coverage(layout):
 
 def num_base_vars(layout):
     """How many different base variables are represented in the layout"""
-    return len({v.base_variable for vg in layout for v in vg.variables})
+    return len({v.base_variable for vg in layout for v in vg.variable_dict})
 
 
 def mean_overlap(panel):

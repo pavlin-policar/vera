@@ -2,6 +2,12 @@ from typing import Any, Callable
 
 import numpy as np
 
+from vera.region_annotations import RegionAnnotation
+
+
+def purity(ra: RegionAnnotation) -> float:
+    return np.mean(ra.variable.values[list(ra.region.contained_samples)])
+
 
 def pdist(l: list[Any], metric: Callable):
     n = len(l)
@@ -19,62 +25,62 @@ def dict_pdist(d: dict[Any, Any], metric: Callable):
     return pdist(list(d.values()), metric=metric)
 
 
-def max_shared_sample_pct(v1: "ExplanatoryVariable", v2: "ExplanatoryVariable") -> float:
-    v1_samples, v2_samples = v1.contained_samples, v2.contained_samples
+def max_shared_sample_pct(ra1: "RegionAnnotation", ra2: "RegionAnnotation") -> float:
+    v1_samples, v2_samples = ra1.contained_samples, ra2.contained_samples
     shared_samples = v1_samples & v2_samples
     v1_shared_sample_pct = len(shared_samples) / len(v1_samples)
     v2_shared_sample_pct = len(shared_samples) / len(v2_samples)
     return max(v1_shared_sample_pct, v2_shared_sample_pct)
 
 
-def min_shared_sample_pct(v1: "ExplanatoryVariable", v2: "ExplanatoryVariable") -> float:
-    v1_samples, v2_samples = v1.contained_samples, v2.contained_samples
+def min_shared_sample_pct(ra1: "RegionAnnotation", ra2: "RegionAnnotation") -> float:
+    v1_samples, v2_samples = ra1.contained_samples, ra2.contained_samples
     shared_samples = v1_samples & v2_samples
     v1_shared_sample_pct = len(shared_samples) / len(v1_samples)
     v2_shared_sample_pct = len(shared_samples) / len(v2_samples)
     return min(v1_shared_sample_pct, v2_shared_sample_pct)
 
 
-def shared_sample_pct(v1: "ExplanatoryVariable", v2: "ExplanatoryVariable") -> float:
+def shared_sample_pct(ra1: "RegionAnnotation", ra2: "RegionAnnotation") -> float:
     """Aka the Jaccard similarity."""
-    v1_samples, v2_samples = v1.contained_samples, v2.contained_samples
+    v1_samples, v2_samples = ra1.contained_samples, ra2.contained_samples
     return len(v1_samples & v2_samples) / (len(v1_samples | v2_samples) + 1e-8)  # TODO: should not happen
     return len(v1_samples & v2_samples) / len(v1_samples | v2_samples)
 
 
-def intersection_area(v1: "ExplanatoryVariable", v2: "ExplanatoryVariable") -> float:
-    p1, p2 = v1.region.polygon, v2.region.polygon
+def intersection_area(ra1: "RegionAnnotation", ra2: "RegionAnnotation") -> float:
+    p1, p2 = ra1.region.polygon, ra2.region.polygon
     return p1.intersection(p2).area
 
 
-def intersection_percentage(v1: "ExplanatoryVariable", v2: "ExplanatoryVariable") -> float:
+def intersection_percentage(ra1: "RegionAnnotation", ra2: "RegionAnnotation") -> float:
     """The maximum percentage of the overlap between two regions."""
-    p1, p2 = v1.region.polygon, v2.region.polygon
+    p1, p2 = ra1.region.polygon, ra2.region.polygon
     i = p1.intersection(p2).area
     return max(i / p1.area, i / p2.area)
 
 
-def max_intersection_percentage(v1: "ExplanatoryVariable", v2: "ExplanatoryVariable") -> float:
+def max_intersection_percentage(ra1: "RegionAnnotation", ra2: "RegionAnnotation") -> float:
     """The maximum percentage of the overlap between two regions."""
-    p1, p2 = v1.region.polygon, v2.region.polygon
+    p1, p2 = ra1.region.polygon, ra2.region.polygon
     i = p1.intersection(p2).area
     return max(i / p1.area, i / p2.area)
 
 
-def intersection_over_union(v1: "ExplanatoryVariable", v2: "ExplanatoryVariable") -> float:
-    p1, p2 = v1.region.polygon, v2.region.polygon
+def intersection_over_union(ra1: "RegionAnnotation", ra2: "RegionAnnotation") -> float:
+    p1, p2 = ra1.region.polygon, ra2.region.polygon
     return p1.intersection(p2).area / p1.union(p2).area
 
 
-def intersection_over_union_dist(r1: "ExplanatoryVariable", r2: "ExplanatoryVariable") -> float:
+def intersection_over_union_dist(ra1: "RegionAnnotation", ra2: "RegionAnnotation") -> float:
     """Like intersection over union, but in distance form."""
-    return 1 - intersection_over_union(r1, r2)
+    return 1 - intersection_over_union(ra1, ra2)
 
 
-def inbetween_convex_hull_ratio(v1: "ExplanatoryVariable", v2: "ExplanatoryVariable") -> float:
+def inbetween_convex_hull_ratio(ra1: "RegionAnnotation", ra2: "RegionAnnotation") -> float:
     """Calculate the ratio between the area of the empty space and the polygon
     areas if we were to compute the convex hull around both p1 and p2"""
-    p1, p2 = v1.region.polygon, v2.region.polygon
+    p1, p2 = ra1.region.polygon, ra2.region.polygon
 
     total = (p1 | p2).convex_hull
     # Remove convex hulls of p1 and p2 from total area

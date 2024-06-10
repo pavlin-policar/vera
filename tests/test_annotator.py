@@ -52,7 +52,7 @@ class TestAnnotator(unittest.TestCase):
 
         # END
 
-        features = vera.pp.generate_explanatory_features(x, embedding)
+        features = vera.pp.generate_region_annotations(x, embedding)
 
         layouts = vasari.explain(features, embedding)
         layouts = vera.explain.contrastive.contrastive(layouts)
@@ -64,7 +64,7 @@ class TestAnnotator(unittest.TestCase):
         vasari.plot.layouts(layouts, embedding)
 
         # Current implementation
-        features = vera.preprocessing.generate_explanatory_features(x)
+        features = vera.preprocessing.generate_region_annotations(x)
 
         k_neighbors = int(np.floor(np.sqrt(embedding.shape[0])))
         scale = vera.embedding.kth_neighbor_distance(embedding, k_neighbors)

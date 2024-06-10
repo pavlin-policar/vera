@@ -7,7 +7,8 @@ from scipy import stats as stats
 
 from vera import metrics as metrics, graph as g
 from vera.explain import _layout_scores
-from vera.variables import VariableGroup, ExplanatoryVariableGroup, Variable
+from vera.variables import VariableGroup, Variable
+from vera.region_annotations import RegionAnnotationGroup
 
 DEFAULT_RANKING_FUNCS = [
     (_layout_scores.mean_overlap, 5),
@@ -84,7 +85,7 @@ def merge_contrastive(variables: List[VariableGroup], threshold: float = 0.95):
         cc_parts = g.connected_components(graph)
 
         merged_expl_vars = [
-            ExplanatoryVariableGroup(cc_part) for cc_part in map(g.nodes, cc_parts)
+            RegionAnnotationGroup(cc_part) for cc_part in map(g.nodes, cc_parts)
         ]
         merged_variables.append(VariableGroup(var_groups_to_merge, merged_expl_vars))
 
@@ -98,7 +99,7 @@ def contrastive(
     filter_layouts: bool = True,
     ranking_funcs=DEFAULT_RANKING_FUNCS,
 ):
-    variables = [VariableGroup([v], v.explanatory_variables) for v in variables]
+    variables = [VariableGroup([v]) for v in variables]
 
     # See if we can merge different variables with almost perfectly overlap
     variables = merge_contrastive(variables, threshold=merge_threshold)

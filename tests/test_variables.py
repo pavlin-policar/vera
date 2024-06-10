@@ -4,9 +4,8 @@ import numpy as np
 import pandas as pd
 
 import vera
-import vera.rules
-from tests.utils import generate_clusters
 from vera import preprocessing as pp
+from tests.utils import generate_clusters
 
 
 class TestExplanatoryVariableSplit(unittest.TestCase):
@@ -26,10 +25,10 @@ class TestExplanatoryVariableSplit(unittest.TestCase):
         assert len(feature_list) == 1, "We should only have one feature"
 
         v = feature_list[0]
-        assert len(v.explanatory_variables) == 1, \
+        assert len(v.region_annotations) == 1, \
             "The constant feature should only have one explanatory variable"
 
-        expl_v = v.explanatory_variables[0]
+        expl_v = v.region_annotations[0]
         split_parts = expl_v.split_region()
         self.assertEqual(
             len(split_parts), 2, "Region was split into incorrect number of parts."
@@ -50,11 +49,11 @@ class TestExplanatoryVariableSplit(unittest.TestCase):
         assert len(feature_list) == 1, "We should only have one feature"
 
         v = feature_list[0]
-        assert len(v.explanatory_variables) == 1
-        expl_v = v.explanatory_variables[0]
+        assert len(v.region_annotations) == 1
+        expl_v = v.region_annotations[0]
 
-        assert isinstance(expl_v, vera.variables.CompositeExplanatoryVariable)
-        expl_v = v.explanatory_variables[0]
+        assert isinstance(expl_v, vera.explanation.CompositeRegionAnnotation)
+        expl_v = v.region_annotations[0]
         split_parts = expl_v.split_region()
         self.assertEqual(
             len(split_parts), 2, "Region was split into incorrect number of parts."
@@ -73,10 +72,10 @@ class TestExplanatoryVariableSplit(unittest.TestCase):
         assert len(feature_list) == 1, "We should only have one feature"
 
         v = feature_list[0]
-        assert len(v.explanatory_variables) == 1, \
+        assert len(v.region_annotations) == 1, \
             "The constant feature should only have one explanatory variable"
 
-        expl_v = v.explanatory_variables[0]
+        expl_v = v.region_annotations[0]
         split_parts = expl_v.split_region()
         assert len(split_parts) == 2
         part1, part2 = split_parts
@@ -97,10 +96,10 @@ class TestExplanatoryVariableSplit(unittest.TestCase):
         assert len(feature_list) == 1, "We should only have one feature"
 
         v = feature_list[0]
-        assert len(v.explanatory_variables) == 1, \
+        assert len(v.region_annotations) == 1, \
             "The constant feature should only have one explanatory variable"
 
-        expl_v = v.explanatory_variables[0]
+        expl_v = v.region_annotations[0]
         split_parts = expl_v.split_region()
         assert len(split_parts) == 2
         part1, part2 = split_parts
@@ -123,7 +122,7 @@ class TestExplanatoryVariable(unittest.TestCase):
         z = np.random.normal(0, 1, size=(50, 2))
         df = pd.DataFrame(x, columns=["x"])
         variables = vera.an.generate_explanatory_features(df, z, scale_factor=0.5)
-        expl = variables[0].explanatory_variables
+        expl = variables[0].region_annotations
 
         assert len(expl) >= 3, "Too few discretized bins to perform test"
         v1, v2, v3, *_ = expl
@@ -143,14 +142,14 @@ class TestExplanatoryVariable(unittest.TestCase):
         x = np.random.normal(0, 1, size=50)
         z = np.random.normal(0, 1, size=(50, 2))
         df = pd.DataFrame(x, columns=["x"])
-        df_discretized = pp.generate_explanatory_features(df, z)
+        df_discretized = pp.generate_region_annotations(df, z)
 
         variables = df_discretized.columns
         assert len(variables) >= 3, "Too few discretized bins to perform test"
         v1, v2, v3, *_ = variables
 
         v1v2 = v1.merge_with(v2)
-        self.assertIsInstance(v1v2, vera.data.variable.DerivedVariable)
+        self.assertIsInstance(v1v2, vera.data.variable.IndicatorVariable)
         self.assertEqual(v1v2.rule.lower, v1.rule.lower)
         self.assertEqual(v1v2.rule.upper, v2.rule.upper)
 
@@ -174,7 +173,7 @@ class TestExplanatoryVariable(unittest.TestCase):
         z = np.random.normal(0, 1, size=(15, 2))
 
         df = pd.DataFrame(pd.Categorical(x), columns=["x"])
-        df_encoded = pp.generate_explanatory_features(df, z)
+        df_encoded = pp.generate_region_annotations(df, z)
 
         variables = df_encoded.columns
         assert len(variables) == 3, "One hot encoding should produce exactly 3 variables"
@@ -195,21 +194,21 @@ class TestExplanatoryVariable(unittest.TestCase):
         z = np.random.normal(0, 1, size=(15, 2))
 
         df = pd.DataFrame(pd.Categorical(x), columns=["x"])
-        df_encoded = pp.generate_explanatory_features(df, z)
+        df_encoded = pp.generate_region_annotations(df, z)
 
         variables = df_encoded.columns
         assert len(variables) == 3, "One hot encoding should produce exactly 3 variables"
         v1, v2, v3 = variables
 
         v1v2 = v1.merge_with(v2)
-        self.assertIsInstance(v1v2, vera.data.variable.DerivedVariable)
+        self.assertIsInstance(v1v2, vera.data.variable.IndicatorVariable)
         self.assertEqual(v1v2.rule, vera.rules.OneOfRule({v1.rule.value, v2.rule.value}))
 
         v2v1 = v2.merge_with(v1)
         self.assertEqual(v1v2, v2v1)
 
         v1v3 = v1.merge_with(v3)
-        self.assertIsInstance(v1v3, vera.data.variable.DerivedVariable)
+        self.assertIsInstance(v1v3, vera.data.variable.IndicatorVariable)
         self.assertEqual(v1v3.rule, vera.rules.OneOfRule({v1.rule.value, v3.rule.value}))
 
         v3v1 = v3.merge_with(v1)
