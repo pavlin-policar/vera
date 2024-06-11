@@ -1,14 +1,14 @@
 from functools import reduce
 from itertools import combinations
-from typing import List
 
 import numpy as np
 from scipy import stats as stats
 
 from vera import metrics as metrics, graph as g
 from vera.explain import _layout_scores
-from vera.variables import VariableGroup, Variable
-from vera.region_annotations import RegionAnnotationGroup
+from vera.utils import group_by_base_var, flatten
+from vera.variables import VariableGroup
+from vera.region_annotations import RegionAnnotationGroup, RegionAnnotation
 
 DEFAULT_RANKING_FUNCS = [
     (_layout_scores.mean_overlap, 5),
@@ -17,35 +17,25 @@ DEFAULT_RANKING_FUNCS = [
 ]
 
 
-def merge_contrastive(variables: List[VariableGroup], threshold: float = 0.95):
-    explanatory_variables = {v: v.explanatory_variables for v in variables}
-
+def merge_contrastive(region_annotations: list[list[RegionAnnotation]], threshold: float = 0.95):
     merge_candidates = {}
 
-    for v1, v2 in combinations(explanatory_variables, 2):
-        ex1, ex2 = explanatory_variables[v1], explanatory_variables[v2]
-
+    for ra_group1, ra_group2 in combinations(region_annotations, 2):
         # If the number of explantory variables does not match, we can't merge
-        if len(ex1) != len(ex2):
+        if len(ra_group1) != len(ra_group2):
             continue
 
-        # if isinstace(v, vera.variables.ExplanatoryVariable):
-        base_vars_1 = {v.base_variable for v in ex1}
-        base_vars_2 = {v.base_variable for v in ex2}
-        assert len(base_vars_1) == 1
-        assert len(base_vars_2) == 1
-
         # See if we can find a bipartite matching
-        expl_vars = ex1 + ex2
-        expl_var_mapping = dict(enumerate(expl_vars))
-        distances = metrics.pdist(expl_vars, metrics.shared_sample_pct)
+        merged_ra = ra_group1 + ra_group2
+        merged_ra_mapping = dict(enumerate(merged_ra))
+        distances = metrics.pdist(merged_ra, metrics.shared_sample_pct)
         graph = g.similarities_to_graph(distances, threshold=threshold)
-        graph = g.label_nodes(graph, expl_var_mapping)
+        graph = g.label_nodes(graph, merged_ra_mapping)
 
         # The number of connected components should be the same as the
         # number of explanatory variables
         connected_components = g.connected_components(graph)
-        if len(connected_components) != len(ex1):
+        if len(connected_components) != len(ra_group1):
             continue
 
         # Each connected component should contain both base variables to be merged
@@ -61,7 +51,7 @@ def merge_contrastive(variables: List[VariableGroup], threshold: float = 0.95):
 
         merge_candidates[frozenset([v1, v2])] = connected_components
 
-    graph = g.edgelist_to_graph(variables, list(merge_candidates))
+    graph = g.edgelist_to_graph(region_annotations, list(merge_candidates))
     graph = g.to_undirected(graph)
     connected_components = g.connected_components(graph)
 
@@ -93,19 +83,21 @@ def merge_contrastive(variables: List[VariableGroup], threshold: float = 0.95):
 
 
 def contrastive(
-    variables: list[Variable],
+    region_annotations: list[list[RegionAnnotation]],
     max_panels: int = 4,
     merge_threshold: float = 0.95,
     filter_layouts: bool = True,
     ranking_funcs=DEFAULT_RANKING_FUNCS,
 ):
-    variables = [VariableGroup([v]) for v in variables]
+    # Although the region annotations may already be grouped by base variable,
+    # don't trust the user with this
+    region_annotations = group_by_base_var(flatten(region_annotations))
 
     # See if we can merge different variables with almost perfectly overlap
-    variables = merge_contrastive(variables, threshold=merge_threshold)
+    # region_annotations = merge_contrastive(region_annotations, threshold=merge_threshold)
 
     # Construct candidate panels
-    candidate_panels = [v.explanatory_variables for v in variables]
+    candidate_panels = region_annotations
 
     if filter_layouts:
         candidate_panels = [panel for panel in candidate_panels if len(panel) > 1]

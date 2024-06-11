@@ -12,18 +12,18 @@ class TestRegion(unittest.TestCase):
         np.random.seed(0)
         x, features = generate_clusters([1, -1], [0.25, 0.25], n_samples=50)
 
-        ra_collection = vera.an.generate_explanatory_features(
+        region_annotations = vera.an.generate_region_annotations(
             features, embedding=x, scale_factor=0.5,
         )
 
         self.assertEqual(
-            len(ra_collection.variables),
             1,
+            len(region_annotations),
             "Incorrect number of variables returned",
         )
         self.assertEqual(
-            len(ra_collection["cluster"]),
             2,
+            len(region_annotations[0]),
             "Incorrect number of region annotations returned",
         )
 
@@ -35,7 +35,7 @@ class TestRegion(unittest.TestCase):
             [[1, 1], [1, -1], [-1, -1], [-1, 1]], [0.25] * 4, n_samples=50
         )
 
-        ra_collection = vera.an.generate_explanatory_features(
+        region_annotations = vera.an.generate_region_annotations(
             features, embedding=x, scale_factor=0.5,
         )
 
@@ -45,13 +45,13 @@ class TestRegion(unittest.TestCase):
         # )
 
         self.assertEqual(
-            len(ra_collection.variables),
             1,
+            len(region_annotations),
             "Incorrect number of variables returned",
         )
         self.assertEqual(
-            len(ra_collection["cluster"]),
             4,
+            len(region_annotations[0]),
             "Incorrect number of region annotations returned",
         )
 
@@ -61,7 +61,7 @@ class TestRegion(unittest.TestCase):
         # Two separated Gaussians. These should not be merged
         x, features = generate_clusters([1, 1, 1, -1], [0.25] * 4, n_samples=50)
 
-        ra_collection = vera.an.generate_explanatory_features(
+        region_annotations = vera.an.generate_region_annotations(
             features, embedding=x, scale_factor=0.5,
         )
 
@@ -71,13 +71,13 @@ class TestRegion(unittest.TestCase):
         # )
 
         self.assertEqual(
-            len(ra_collection.variables),
             1,
+            len(region_annotations),
             "Incorrect number of variables returned",
         )
         self.assertEqual(
-            len(ra_collection["cluster"]),
             2,
+            len(region_annotations[0]),
             "Incorrect number of region annotations returned",
         )
 
@@ -87,7 +87,7 @@ class TestRegion(unittest.TestCase):
         # Two slightly-overlapping Gaussians. These should not be merged
         x, features = generate_clusters([0.5, -0.5], [1] * 2, n_samples=100)
 
-        ra_collection = vera.an.generate_explanatory_features(
+        region_annotations = vera.an.generate_region_annotations(
             features, embedding=x, scale_factor=0.5,
         )
 
@@ -97,13 +97,13 @@ class TestRegion(unittest.TestCase):
         # )
 
         self.assertEqual(
-            len(ra_collection.variables),
             1,
+            len(region_annotations),
             "Incorrect number of variables returned",
         )
         self.assertEqual(
-            len(ra_collection["cluster"]),
             2,
+            len(region_annotations[0]),
             "Incorrect number of region annotations returned",
         )
 
@@ -114,7 +114,7 @@ class TestRegion(unittest.TestCase):
         # be merged
         x, features = generate_clusters([0.5, 0, -0.5], [0.25] * 3, n_samples=100)
 
-        ra_collection = vera.an.generate_explanatory_features(
+        region_annotations = vera.an.generate_region_annotations(
             features, embedding=x, scale_factor=0.5,
         )
 
@@ -126,13 +126,13 @@ class TestRegion(unittest.TestCase):
         #     cluster.explanatory_variables, show=True, figwidth=8
         # )
         self.assertEqual(
-            len(ra_collection.variables),
             1,
+            len(region_annotations),
             "Incorrect number of variables returned",
         )
         self.assertEqual(
-            len(ra_collection["cluster"]),
             3,
+            len(region_annotations[0]),
             "Incorrect number of region annotations returned",
         )
 
@@ -145,7 +145,7 @@ class TestRegion(unittest.TestCase):
             [1, 0, -1], [1.3] * 3, n_samples=100
         )
 
-        ra_collection = vera.an.generate_explanatory_features(
+        region_annotations = vera.an.generate_region_annotations(
             features, embedding=x, scale_factor=0.5,
         )
 
@@ -154,12 +154,12 @@ class TestRegion(unittest.TestCase):
         # vera.plotting.plot_annotation(cluster_ras, show=True, figwidth=8)
 
         self.assertEqual(
-            len(ra_collection.variables),
             1,
+            len(region_annotations),
             "Incorrect number of variables returned",
         )
         self.assertEqual(
-            len(ra_collection["cluster"]),
             3,
+            len(region_annotations[0]),
             "Incorrect number of region annotations returned",
         )

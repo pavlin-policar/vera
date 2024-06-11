@@ -26,7 +26,7 @@ class TestDescriptiveRanking(unittest.TestCase):
         data = datasets.Dataset.load("titanic")
         x, embedding = data.features, data.embedding
 
-        variables = vera.an.generate_explanatory_features(
+        variables = vera.an.generate_region_annotations(
             x,
             embedding,
             n_discretization_bins=10,
@@ -44,7 +44,7 @@ class TestDescriptiveRanking(unittest.TestCase):
         # Split explanatory variables into subgroups
         all_features = []
         for e in explanatory_features:
-            all_features.extend(e.split_region())
+            all_features.extend(e.split())
 
         clusters = vera.explain.descriptive.group_similar_variables(all_features, threshold=0.8)
         filtered_clusters = vera.explain.descriptive.filter_explanatory_features(clusters)
@@ -78,7 +78,7 @@ class TestDescriptiveRanking(unittest.TestCase):
         data = datasets.Dataset.load("iris")
         x, embedding = data.features, data.embedding
 
-        variables = vera.an.generate_explanatory_features(
+        variables = vera.an.generate_region_annotations(
             x,
             embedding,
             n_discretization_bins=10,
@@ -96,7 +96,7 @@ class TestDescriptiveRanking(unittest.TestCase):
         # Split explanatory variables into subgroups
         all_features = []
         for e in explanatory_features:
-            all_features.extend(e.split_region())
+            all_features.extend(e.split())
 
         filtered_features = vera.explain.descriptive.filter_explanatory_features(all_features)
 

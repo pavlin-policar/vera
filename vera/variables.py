@@ -129,17 +129,12 @@ class VariableGroup:
     def __init__(
         self,
         variables: list[Variable],
+        values: np.ndarray,
         name: str = None,
     ):
         self.variables = variables
+        self.values = values
         self.name = name
-
-    @property
-    def explanatory_regions(self) -> list["RegionAnnotation"]:
-        all_ra = []
-        for v in self.variables:
-            all_ra.extend(v.region_annotations)
-        return all_ra
 
     def __hash__(self):
         return hash((self.__class__.__name__, self.name, self.variables))

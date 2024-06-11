@@ -49,20 +49,6 @@ class Density:
         return geom.MultiPolygon(polygons)
 
 
-class CompositeDensity(Density):
-    def __init__(self, densities: list[Density]):
-        self.base_densities = densities
-        joint_density = np.sum(np.vstack([d.values for d in densities]), axis=0)
-        grid = densities[0].grid
-        super().__init__(grid, joint_density)
-
-        if not all(np.allclose(d.grid, self.grid) for d in densities):
-            raise RuntimeError(
-                "All densities must have the same grid when constructing "
-                "composite density!"
-            )
-
-
 class Region:
     def __init__(self, embedding: Embedding, polygon: geom.MultiPolygon):
         self.embedding = embedding
@@ -102,11 +88,6 @@ class Region:
     def __hash__(self):
         return hash((self.__class__.__name__, self.polygon))
 
-    def __add__(self, other: "Region") -> "CompositeRegion":
-        if not isinstance(other, Region):
-            raise NotImplementedError()
-        return CompositeRegion([self, other])
-
     def __repr__(self):
         n = self.num_parts
         return f"{self.__class__.__name__}: {n} part{'s'[:n^1]}"
@@ -116,11 +97,10 @@ class Region:
         polygon = cls._ensure_multipolygon(density.get_polygons_at(level))
         return cls(embedding, polygon)
 
-
-class CompositeRegion(Region):
-    def __init__(self, regions: list[Region], merge_method="union"):
-        # Ensure that the regions all belong to the same embedding, otherwise
-        # they can't be merged
+    @classmethod
+    def merge_regions(cls, regions: list["Region"], merge_method: str = "union"):
+        # Ensure that all regions belong to the same embedding, otherwise they
+        # can't be merged
         embedding = regions[0].embedding
         if not all(r.embedding == embedding for r in regions[1:]):
             raise RuntimeError(
@@ -128,14 +108,13 @@ class CompositeRegion(Region):
             )
 
         if merge_method == "union":
-            new_polygon = reduce(operator.or_, [r.polygon for r in regions])
+            merged_polygon = reduce(operator.or_, [r.polygon for r in regions])
         elif merge_method == "intersection":
-            new_polygon = reduce(operator.and_, [r.polygon for r in regions])
+            merged_polygon = reduce(operator.and_, [r.polygon for r in regions])
         else:
             raise ValueError(
                 "Unsupported `merge_method`. Supported methods are `union` and "
                 "`interscection`."
             )
 
-        super().__init__(embedding=embedding, polygon=new_polygon)
-        self.base_regions = regions
+        return cls(embedding=embedding, polygon=merged_polygon)

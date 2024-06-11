@@ -6,7 +6,7 @@ from scipy import stats as stats
 from vera import metrics as metrics, graph as g
 from vera.explain import _layout_scores
 from vera.region import Region
-from vera.variables import Variable
+from vera.utils import flatten
 from vera.region_annotations import RegionAnnotation, RegionAnnotationGroup
 
 DEFAULT_RANKING_FUNCS = [
@@ -60,45 +60,43 @@ def group_similar_variables(
 
 
 def enrich_var_group_with_background(
-    var_group: RegionAnnotationGroup,
-    background_vars: list[RegionAnnotation],
+    ra_group: RegionAnnotationGroup,
+    background_ras: list[RegionAnnotation],
     threshold: float = 0.9,
 ):
     # Determine which base vars are present in the var group
-    contained_base_vars = {v.base_variable for v in var_group.variables}
+    contained_base_vars = {ra.variable.base_variable for ra in ra_group.region_annotations}
 
     to_add = []
-    for background_v in background_vars:
+    for background_ra in background_ras:
         # If the background variable belongs to the same base variable
         # as already present in the data, skip that
-        if background_v.base_variable in contained_base_vars:
+        if background_ra.variable.base_variable in contained_base_vars:
             continue
 
         # Determine if the background var encompasses the current variable
-        shared_samples = var_group.contained_samples & background_v.contained_samples
-        pct_shared = len(shared_samples) / len(var_group.contained_samples)
+        shared_samples = ra_group.contained_samples & background_ra.contained_samples
+        pct_shared = len(shared_samples) / len(ra_group.contained_samples)
 
         # If the region sufficiently overlaps, prepare the overlap for merge
         if pct_shared > threshold:
-            new_polygon = background_v.region.polygon.intersection(
-                var_group.region.polygon
+            new_polygon = background_ra.region.polygon.intersection(
+                ra_group.region.polygon
             )
             cloned_bg_var = RegionAnnotation(
-                background_v.base_variable,
-                background_v.rule,
-                background_v.values,
-                Region(background_v.region.embedding, new_polygon),
+                background_ra.variable,
+                Region(background_ra.region.embedding, new_polygon),
             )
             to_add.append(cloned_bg_var)
 
     # If we found any background variables to add to the var group, create a new
     # var group with all available explanatory vars
     if len(to_add) > 0:
-        var_group = RegionAnnotationGroup(
-            var_group.variables + to_add, name=var_group.name
+        ra_group = RegionAnnotationGroup(
+            ra_group.region_annotations + to_add, name=ra_group.name
         )
 
-    return var_group
+    return ra_group
 
 
 def enrich_panel_with_background(
@@ -171,7 +169,7 @@ def generate_descriptive_layout(
 
 
 def descriptive(
-    variables: list[Variable],
+    region_annotations: list[list[RegionAnnotation]],
     max_panels: int | None = 4,
     merge_metric: Callable = metrics.min_shared_sample_pct,
     metric_is_distance: bool = False,
@@ -185,22 +183,20 @@ def descriptive(
     return_clusters: bool = False,
     ranking_funcs=DEFAULT_RANKING_FUNCS,
 ):
-    explanatory_variables = [ex for v in variables for ex in v.region_annotations]
+    region_annotations = flatten(region_annotations)
 
     # Split explanatory features into their polygons
-    explanatory_variables_split = []
-    for expl_var in explanatory_variables:
-        explanatory_variables_split.extend(expl_var.split_region())
+    ra_split = [ra_part for ra in region_annotations for ra_part in ra.split()]
 
     # Remove any split parts that do not pass the filtering criteria
-    explanatory_variables_split = filter_explanatory_features(
-        explanatory_variables_split,
+    ra_split = filter_region_annotations(
+        ra_split,
         min_samples=cluster_min_samples,
         min_purity=cluster_min_purity,
     )
 
     clusters = group_similar_variables(
-        explanatory_variables_split,
+        ra_split,
         metric=merge_metric,
         metric_is_distance=metric_is_distance,
         threshold=merge_threshold,
@@ -217,7 +213,7 @@ def descriptive(
     if enrich_with_background:
         layout = enrich_layout_with_background(
             layout,
-            explanatory_variables,
+            region_annotations,
             threshold=background_enrichment_threshold,
         )
 
@@ -227,7 +223,7 @@ def descriptive(
         return layout
 
 
-def filter_explanatory_features(
+def filter_region_annotations(
     region_annotations: list[RegionAnnotation],
     min_samples: int = 5,
     min_purity: float = 0.5,

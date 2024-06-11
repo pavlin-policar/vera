@@ -350,7 +350,7 @@ def _format_explanatory_variable(variable: RegionAnnotation, max_width=40):
 
 
 def _format_explanatory_variable_group(var_group: RegionAnnotationGroup, max_width=40):
-    var_strings = [str(v) for v in var_group.contained_variables]
+    var_strings = [str(v) for v in var_group.variable.variables]
     if max_width is not None:
         var_strings = [wrap(s, width=max_width) for s in var_strings]
     else:
@@ -1061,12 +1061,10 @@ def layout_variable_colors(layout, cmap="tab10"):
     )
 
     def get_key(ra):
-        if isinstance(ra, RegionAnnotation):
-            return frozenset(v.rule for v in ra.variables)
-        elif isinstance(ra, CompositeRegionAnnotation):
-            return frozenset(v.rule for v in ra.contained_region_annotations)
+        if isinstance(ra, RegionAnnotationGroup):
+            return frozenset(v.rule for v in ra.variable.variables)
         elif isinstance(ra, RegionAnnotation):
-            return ra.rule
+            return ra.variable.rule
 
     # We use the variable rule as the key
     var_keys = {
@@ -1085,7 +1083,7 @@ def layout_variable_colors(layout, cmap="tab10"):
 
 
 def plot_discretization(
-    variable: list[RegionAnnotation],
+    region_annotations: list[RegionAnnotation],
     cmap: str = "viridis",
     hist_scatter_kwargs: dict = {},
     scatter_kwargs: dict = {},
@@ -1098,9 +1096,9 @@ def plot_discretization(
         edges = [v.rule.lower for v in explanatory_variables]
         edges += [explanatory_variables[-1].rule.upper]
         if np.isinf(edges[0]):
-            edges[0] = variable.values.min()
+            edges[0] = region_annotations.values.min()
         if np.isinf(edges[-1]):
-            edges[-1] = variable.values.max()
+            edges[-1] = region_annotations.values.max()
 
         return edges
 
@@ -1115,21 +1113,21 @@ def plot_discretization(
         variable_group_values = np.argmax(variable_values, axis=0)
         return variable_group_values
 
-    unmerged_explanatory_variables = [
-        expl_var
-        for expl_vars in variable.region_annotations
-        for expl_var in expl_vars.contained_region_annotations
+    unmerged_region_annotations = [
+        base_ra
+        for ra in region_annotations
+        for base_ra in ra.contained_region_annotations
     ]
 
-    if variable.is_continuous:
+    if region_annotations.is_continuous:
         _get_bin_edges_func = _get_bin_edges_continuous
-    elif variable.is_discrete:
+    elif region_annotations.is_discrete:
         _get_bin_edges_func = _get_bin_edges_discrete
 
-    unmerged_feature_pt_bins = _get_sample_bin_indices(unmerged_explanatory_variables)
-    unmerged_feature_bin_edges = _get_bin_edges_func(unmerged_explanatory_variables)
-    merged_feature_pt_bins = _get_sample_bin_indices(variable.region_annotations)
-    merged_feature_bin_edges = _get_bin_edges_func(variable.region_annotations)
+    unmerged_feature_pt_bins = _get_sample_bin_indices(unmerged_region_annotations)
+    unmerged_feature_bin_edges = _get_bin_edges_func(unmerged_region_annotations)
+    merged_feature_pt_bins = _get_sample_bin_indices(region_annotations)
+    merged_feature_bin_edges = _get_bin_edges_func(region_annotations)
 
     def plot_distribution_bins(x, bin_edges, x_bins, bins, ax, cmap=None, hist_scatter_kwargs={}):
         d, bins, *_ = ax.hist(
@@ -1157,7 +1155,7 @@ def plot_discretization(
 
         return ax
 
-    v = variable  # The variable in question
+    v = region_annotations  # The variable in question
     embedding = v.region_annotations[0].region.embedding.X
 
     variable_values = v.values
@@ -1175,9 +1173,9 @@ def plot_discretization(
     # Unmerged feature bins
     ax0 = fig.add_subplot(gs[0, 0])
 
-    if variable.is_continuous:
+    if region_annotations.is_continuous:
         bins = 20
-    elif variable.is_discrete:
+    elif region_annotations.is_discrete:
         bins = unmerged_feature_bin_edges
 
     plot_distribution_bins(
@@ -1199,9 +1197,9 @@ def plot_discretization(
     # Merged feature bins
     ax = fig.add_subplot(gs[0, 1])
 
-    if variable.is_continuous:
+    if region_annotations.is_continuous:
         bins = 20
-    elif variable.is_discrete:
+    elif region_annotations.is_discrete:
         bins = merged_feature_bin_edges
 
     plot_distribution_bins(
@@ -1222,7 +1220,7 @@ def plot_discretization(
 
     fig.draw_without_rendering()  # to calculate the Axes positions in the layout
     pad = 0.02  # in fractions of the figure height
-    fig.suptitle(variable.name, fontsize=12, ha="center", y=ax0.get_position().y1 + pad, verticalalignment="bottom")
+    fig.suptitle(region_annotations.name, fontsize=12, ha="center", y=ax0.get_position().y1 + pad, verticalalignment="bottom")
 
     if return_fig:
         return fig

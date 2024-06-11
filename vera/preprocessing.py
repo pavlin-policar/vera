@@ -55,11 +55,19 @@ def _pd_dtype_to_variable(col_name: Union[str, Variable], col_type, col_vals) ->
     return variable
 
 
-def ingest(df: pd.DataFrame) -> list[Variable]:
+def ingest(data: pd.Series | pd.DataFrame) -> list[Variable]:
     """Convert a pandas DataFrame to a list of VERA variables."""
-    return list(
-        _pd_dtype_to_variable(*p) for p in zip(df.columns, df.dtypes, df.items())
-    )
+    if isinstance(data, pd.Series):
+        return _pd_dtype_to_variable(data.name, data.dtype, (0, data))
+    elif isinstance(data, pd.DataFrame):
+        return list(
+            _pd_dtype_to_variable(*p) for p in zip(data.columns, data.dtypes, data.items())
+        )
+    else:
+        raise TypeError(
+            f"Cannot ingest object of type `{data.__class__.__name__}`. Only "
+            f"pd.Series and pd.DataFrame are supported!"
+        )
 
 
 def ingested_to_pandas(variables: list[Variable]) -> pd.DataFrame:
@@ -67,7 +75,7 @@ def ingested_to_pandas(variables: list[Variable]) -> pd.DataFrame:
 
     for v in variables:
         if isinstance(v, IndicatorVariable):
-            df_new[v.name] = pd.Categorical(v.values)
+            df_new[v.name] = pd.Series(v.values)
         elif isinstance(v, DiscreteVariable):
             vals = np.full_like(v.values, fill_value=np.nan, dtype=object)
             mask = ~np.isnan(v.values)
@@ -135,77 +143,84 @@ def __discretize_nonconst(variable: ContinuousVariable, n_bins: int) -> Indicato
     return derived_vars
 
 
-def _discretize(variables: list[Variable] | pd.DataFrame, n_bins: int = 5) -> list[Variable]:
-    """Discretize all continuous variables in the data frame.
+def discretize(variable: ContinuousVariable, n_bins: int = 5) -> list[IndicatorVariable]:
+    """Discretize a continuous variables in the data frame."""
+    if not isinstance(variable, ContinuousVariable):
+        raise TypeError("Can only discretize continuous variables!")
 
-    TODO: This function does imputation, but this really shouldn't be done here
-    It should be up to the user to ensure there are no NaNs in the data, or up
-    to us to ignore them.
-    """
-    if not isinstance(variables, list):
-        variables = ingest(variables)
+    if len(np.unique(variable.values)) == 1:
+        disc_vars = __discretize_const(variable)
+    else:
+        disc_vars = __discretize_nonconst(variable, n_bins)
 
-    new_vars = []
-    for v in variables:
-        # If the variable is not continuous, there is nothing to do
-        if not v.is_continuous:
-            new_vars.append(v)
-
-        else:
-            if len(np.unique(v.values)) == 1:
-                disc_vars = __discretize_const(v)
-            else:
-                disc_vars = __discretize_nonconst(v, n_bins)
-
-            new_vars.extend(disc_vars)
-
-    return new_vars
+    return disc_vars
 
 
-def _one_hot(variables: list[Variable] | pd.DataFrame) -> list[Variable]:
+def one_hot(variable: DiscreteVariable) -> list[IndicatorVariable]:
     """Create one-hot encodings for all discrete variables in the data frame."""
-    if not isinstance(variables, list):
-        variables = ingest(variables)
+    if not isinstance(variable, DiscreteVariable):
+        raise TypeError("Can only one-hot-encode discrete variables!")
 
-    new_vars = []
-    for v in variables:
-        # If the variable is not discrete, there is nothing to do
-        if not v.is_discrete:
-            new_vars.append(v)
+    one_hot_vars = []
 
-        else:
-            xi_onehot = pd.get_dummies(v.values).values.astype(np.float32)
-            for idx, category in enumerate(v.categories):
-                rule = EqualityRule(category, value_name=v.name)
-                values = xi_onehot[:, idx]
-                new_var = IndicatorVariable(v, rule, values)
-                new_vars.append(new_var)
+    xi_onehot = pd.get_dummies(variable.values).values.astype(np.float32)
+    for idx, category in enumerate(variable.categories):
+        rule = EqualityRule(category, value_name=variable.name)
+        values = xi_onehot[:, idx]
+        new_var = IndicatorVariable(variable, rule, values)
+        one_hot_vars.append(new_var)
 
-    return new_vars
+    return one_hot_vars
 
 
 def expand_df(
-    df: pd.DataFrame, n_discretization_bins: int = 5, filter_constant: bool = True
-) -> list[IndicatorVariable]:
+    df: pd.DataFrame,
+    n_discretization_bins: int = 5,
+    filter_constant_features: bool = True,
+) -> list[list[IndicatorVariable]]:
     # Filter out features with identical values
-    if filter_constant:
+    if filter_constant_features:
         df = df.loc[:, df.nunique(axis=0) > 1]
 
-    variables = _one_hot(_discretize(ingest(df), n_bins=n_discretization_bins))
+    variables = ingest(df)
 
-    # Filter out columns with zero occurences
-    variables = [v for v in variables if v.values.sum() > 0]
+    result = []
+    for variable in variables:
+        if variable.is_continuous:
+            expanded_vars = discretize(variable, n_bins=n_discretization_bins)
+        elif variable.is_discrete:
+            expanded_vars = one_hot(variable)
+        elif variable.is_indicator:
+            expanded_vars = [variable]
 
-    return variables
+        result.append(expanded_vars)
+
+    # Filter out columns with zero occurences. This can happen for categorical
+    # variables with categories that never actually occur in the data
+    result = [[v for v in var_group if v.values.sum() > 0] for var_group in result]
+    # If the filtering removed all the variables from a particular variable,
+    # remove that group. In practice, this should never happen.
+    result = [var_group for var_group in result if len(var_group) > 0]
+
+    return result
 
 
-def generate_region_annotations(
-    variables: list[Variable],
+def extract_region_annotations(
+    variables: list[list[IndicatorVariable]],
     embedding: Embedding | np.ndarray,
     scale_factor: float = 1,
     kernel: str = "gaussian",
     contour_level: float = 0.25,
 ) -> list[RegionAnnotation]:
+
+    def _generate_single(v):
+        density = embedding.estimate_density(v.values, kernel=kernel)
+        region = Region.from_density(
+            embedding=embedding, density=density, level=contour_level
+        )
+        ra = RegionAnnotation(v, region)
+        return ra
+
     # Create embedding instance which will be shared across all explanatory
     # variables. The shared instance is necessary to avoid slow recomputation of
     # adjacency matrices
@@ -214,13 +229,14 @@ def generate_region_annotations(
 
     # Create explanatory variables from each of the derived features
     region_annotations = []
-    for v in tqdm(variables):
-        density = embedding.estimate_density(v.values, kernel=kernel)
-        region = Region.from_density(
-            embedding=embedding, density=density, level=contour_level
-        )
-        ra = RegionAnnotation(v, region)
-        region_annotations.append(ra)
+    num_regions_to_estimate = sum(map(len, variables))
+    with tqdm(total=num_regions_to_estimate) as pbar:
+        for var_group in variables:
+            ra_group = []
+            for v in var_group:
+                ra_group.append(_generate_single(v))
+                pbar.update(1)
+            region_annotations.append(ra_group)
 
     return region_annotations
 
@@ -256,7 +272,7 @@ def merge_overfragmented(
             var_groups[ra.variable.base_variable].append(ra)
 
         merged_ras = []
-        for k, var_group in tqdm(var_groups.items()):
+        for k, var_group in var_groups.items():
             dists = metrics.pdist(var_group, _dist)
             graph = g.similarities_to_graph(dists, threshold=0.5)
             node_labels = dict(enumerate(var_group))

@@ -27,7 +27,7 @@ class TestMergeFeatures(unittest.TestCase):
         scale = kth_neighbor_distance(self.embedding, k_neighbors)
 
         features = self.iris[["petal length (cm)"]]
-        features = vera.preprocessing._discretize(features, n_bins=10)
+        features = vera.preprocessing.discretize(features, n_bins=10)
 
         merged_features = feature_merge(features, self.embedding, scale)
 

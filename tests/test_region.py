@@ -16,26 +16,30 @@ class TestIntersectWithOther(unittest.TestCase):
         features["inner"] = np.linalg.norm(x, axis=1) < 0.5
 
         # The function returns the base variables, of which there should only be one
-        feature_list = vera.an.generate_explanatory_features(
-            features, embedding=x, scale_factor=0.5,
+        region_annotations = vera.an.generate_region_annotations(
+            features, embedding=x, scale_factor=0.5, sample_size=None,
         )
         self.assertEqual(
-            len(feature_list), 1,
+            1,
+            len(region_annotations),
             "`an.generate_explanatory_features` returned more than one variable"
         )
         self.assertEqual(
-            len(feature_list[0].region_annotations), 2,
+            2,
+            len(region_annotations[0]),
             "The number of explanatory features was not 2!"
         )
-        outer, inner = feature_list[0].region_annotations
+        outer, inner = region_annotations[0]
 
         outer_region, inner_region = outer.region, inner.region
         self.assertEqual(
-            len(inner_region.polygon.geoms), 1,
+            1,
+            len(inner_region.polygon.geoms),
             "Inner region should be comprised of a single polygon!"
         )
         self.assertEqual(
-            len(outer_region.polygon.geoms), 1,
+            1,
+            len(outer_region.polygon.geoms),
             "Outer region should be comprised of a single polygon!"
         )
         self.assertEqual(len(inner_region.polygon.geoms[0].interiors), 0)
@@ -55,27 +59,31 @@ class TestIntersectWithOther(unittest.TestCase):
         features["holes"] = features["holes"]
 
         # The function returns the base variables, of which there should only be one
-        feature_list = vera.an.generate_explanatory_features(
-            features, embedding=x, scale_factor=0.5,
+        region_annotations = vera.an.generate_region_annotations(
+            features, embedding=x, scale_factor=0.5, sample_size=None,
         )
         self.assertEqual(
-            len(feature_list), 1,
+            1,
+            len(region_annotations),
             "`an.generate_explanatory_features` returned more than one variable"
         )
         self.assertEqual(
-            len(feature_list[0].region_annotations), 2,
+            2,
+            len(region_annotations[0]),
             "The number of explanatory features was not 2!"
         )
-        outer, inner = feature_list[0].region_annotations
+        outer, inner = region_annotations[0]
 
         outer_region, inner_region = outer.region, inner.region
         self.assertEqual(
-            len(inner_region.polygon.geoms), 4,
+            4,
+            len(inner_region.polygon.geoms),
             "Inner region should be comprised of four polygons!"
         )
         self.assertEqual(
-            len(outer_region.polygon.geoms), 1,
+            1,
+            len(outer_region.polygon.geoms),
             "Outer region should be comprised of a single polygon!"
         )
-        self.assertEqual(len(inner_region.polygon.geoms[0].interiors), 0)
-        self.assertEqual(len(outer_region.polygon.geoms[0].interiors), 4)
+        self.assertEqual(0, len(inner_region.polygon.geoms[0].interiors))
+        self.assertEqual(4, len(outer_region.polygon.geoms[0].interiors))

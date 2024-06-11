@@ -3,12 +3,13 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from sklearn.utils import check_random_state
+from tqdm import tqdm
 
 import vera.preprocessing as pp
-from vera.collections import RACollection
+from vera.region_annotations import RegionAnnotation
 
 
-def generate_explanatory_features(
+def generate_region_annotations(
     features: pd.DataFrame,
     embedding: np.ndarray,
     sample_size: int = 5000,
@@ -21,10 +22,10 @@ def generate_explanatory_features(
     merge_min_purity_gain: float = 0.5,
     filter_uninformative: bool = True,
     random_state: Any = None,
-) -> RACollection:
+) -> list[list[RegionAnnotation]]:
     # Sample the data if necessary. Running on large data sets can be very slow
     random_state = check_random_state(random_state)
-    if sample_size is not None:
+    if sample_size is not None and features.shape[0] > sample_size:
         num_samples = min(sample_size, features.shape[0])
         sample_idx = random_state.choice(
             features.shape[0], size=num_samples, replace=False
@@ -36,11 +37,11 @@ def generate_explanatory_features(
     variables = pp.expand_df(
         features,
         n_discretization_bins=n_discretization_bins,
-        filter_constant=filter_constant,
+        filter_constant_features=filter_constant,
     )
 
     # Generate explanatory region annotations from each of the derived features
-    region_annotations = pp.generate_region_annotations(
+    region_annotations = pp.extract_region_annotations(
         variables,
         embedding,
         scale_factor=scale_factor,
@@ -48,24 +49,24 @@ def generate_explanatory_features(
         contour_level=contour_level,
     )
 
-    # Perform iterative merging
-    merged_region_annotations = pp.merge_overfragmented(
-        region_annotations,
-        min_sample_overlap=merge_min_sample_overlap,
-        min_purity_gain=merge_min_purity_gain,
-    )
-
-    ra_collection = RACollection(merged_region_annotations)
-    # Filter region annotations if the base variable is described by a single
-    # region
-    if filter_uninformative:
-        to_keep = {k for k, v in ra_collection.variable_dict.items() if len(v) > 1}
-        ra_collection = RACollection(
-            ra for ra in ra_collection.region_annotations
-            if ra.variable.base_variable in to_keep
+    # Perform iterative merging on every single region annotation group
+    region_annotations = [
+        pp.merge_overfragmented(
+            ra_group,
+            min_sample_overlap=merge_min_sample_overlap,
+            min_purity_gain=merge_min_purity_gain,
         )
+        for ra_group in tqdm(region_annotations)
+    ]
 
-    return ra_collection
+    # Filter annotation groups if the variable is described by a single region
+    if filter_uninformative:
+        region_annotations = [
+            ra_group for ra_group in region_annotations if len(ra_group) > 1
+        ]
+
+    return region_annotations
+    # return RACollection(map(RACollectionEntry, region_annotations))
 
 
 # def generate_indicator_explanatory_features(

@@ -24,7 +24,7 @@ class TestAnnotator(unittest.TestCase):
     def test_iris(self):
         x, embedding = self.iris.features, self.iris.embedding
         x, embedding = x[:5000], embedding[:5000]
-        features = annotate.an.generate_explanatory_features(x, embedding)
+        features = annotate.an.generate_region_annotations(x, embedding)
 
         merged_features = annotate.pp.merge_overfragmented(features, min_sample_overlap=0.5)
         pass
@@ -33,7 +33,7 @@ class TestAnnotator(unittest.TestCase):
         embedding, x = self.iris.embedding, self.iris.features
 
         # Desired API
-        features = vera.an.generate_explanatory_features()
+        features = vera.an.generate_region_annotations()
         features = vera.an.filter_explanatory_features(features)
 
         feature_groups = vera.an.group_similar_features(features)
@@ -52,7 +52,7 @@ class TestAnnotator(unittest.TestCase):
 
         # END
 
-        features = vera.pp.generate_region_annotations(x, embedding)
+        features = vera.pp.extract_region_annotations(x, embedding)
 
         layouts = vasari.explain(features, embedding)
         layouts = vera.explain.contrastive.contrastive(layouts)
@@ -64,7 +64,7 @@ class TestAnnotator(unittest.TestCase):
         vasari.plot.layouts(layouts, embedding)
 
         # Current implementation
-        features = vera.preprocessing.generate_region_annotations(x)
+        features = vera.preprocessing.extract_region_annotations(x)
 
         k_neighbors = int(np.floor(np.sqrt(embedding.shape[0])))
         scale = vera.embedding.kth_neighbor_distance(embedding, k_neighbors)

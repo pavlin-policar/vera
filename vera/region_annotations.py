@@ -4,9 +4,9 @@ from functools import reduce, cached_property
 
 import numpy as np
 
-from vera.region import Region, CompositeRegion
+from vera.region import Region
 from vera.rules import IncompatibleRuleError
-from vera.variables import IndicatorVariable, MergeError
+from vera.variables import IndicatorVariable, MergeError, VariableGroup
 
 
 class RegionAnnotation:
@@ -48,9 +48,9 @@ class RegionAnnotation:
         attrs_str = ", ".join(f"{k}={v}" for k, v in attrs)
         return f"{self.__class__.__name__}({attrs_str})"
 
-    def split_region(self) -> list["RegionAnnotation"]:
+    def split(self) -> list["RegionAnnotation"]:
         """If a variable comprises multiple regions, split each region into its
-        own explanatory variable."""
+        own object."""
         return [
             RegionAnnotation(self.variable, region)
             for region in self.region.split_into_parts()
@@ -92,6 +92,14 @@ class RegionAnnotation:
 
 
 class CompositeRegionAnnotation(RegionAnnotation):
+    """Composite region annotations require all sub-region annotations to
+    originate from the same base variable."""
+    def __new__(cls, region_annotations: list[RegionAnnotation]):
+        # If the list of region annotations contains a single entry, use that
+        if len(region_annotations) == 1:
+            return region_annotations[0]
+        return super().__new__(cls)
+
     def __init__(self, region_annotations: list[RegionAnnotation]):
         self.base_region_annotations = region_annotations
 
@@ -115,20 +123,14 @@ class CompositeRegionAnnotation(RegionAnnotation):
                 f"variables given were incompatible:\n{e.message}\n"
             )
 
+        # Merge the values of the underlying samples, use OR/ANY relation
         values = np.vstack([ra.variable.values for ra in region_annotations])
         merged_values = np.max(values, axis=0)
-
         merged_variable = IndicatorVariable(base_variable, new_rule, merged_values)
 
-        embedding = ra0.region.embedding
-        if not all(np.allclose(v.region.embedding.X, embedding.X) for v in region_annotations[1:]):
-            raise RuntimeError(
-                "Cannot merge Region Annotations which do not share the "
-                "same embedding!"
-            )
-        merged_region = CompositeRegion([ra.region for ra in region_annotations])
+        merged_region = Region.merge_regions([ra.region for ra in region_annotations])
 
-        super().__init__(merged_variable, merged_region)
+        super().__init__(variable=merged_variable, region=merged_region)
 
     @property
     def contained_region_annotations(self):
@@ -153,55 +155,57 @@ class RegionAnnotationGroup:
         # join them up together into a composite variable.
         # TODO: This will fail if we try to join up two variables with
         #  non-compatible rules
-        # TODO: This probably doesn't belong here in the constructor
-        variables_ = []
+        # TODO: This should also subsequently remove the CRA if the CRA now
+        #  contains all sub-RAs for that particular variable
+        region_annotations_ = []
 
         # itertools.groupby expects consecutive keys, but we accept them in any order
-        region_annotations = sorted(region_annotations, key=lambda ra: ra.base_variable.name)
-        for key, var_group in itertools.groupby(region_annotations, lambda ra: ra.base_variable):
-            var_group = sorted(list(var_group))
-            if len(var_group) > 1:
+        region_annotations = sorted(region_annotations)
+        for key, ra_group in itertools.groupby(region_annotations, lambda ra: ra.variable.base_variable):
+            ra_group = sorted(list(ra_group))
+            if len(ra_group) > 1:
                 try:
-                    var_group = [CompositeRegionAnnotation(var_group)]
+                    ra_group = [CompositeRegionAnnotation(ra_group)]
                 except MergeError:
                     raise
                     pass  # If merging failed, keep the variables unmerged
-            variables_ += var_group
-        self.variables = variables_
+            region_annotations_ += ra_group
 
-        v0 = self.variables[0]
+        self.region_annotations: list[RegionAnnotation] = region_annotations_
 
-        feature_values = np.vstack([v.values for v in self.variables])
-        # Take min: if plotted together, we expect each point to fulfill all the
-        # rules in the feature group
-        merged_values = np.min(feature_values, axis=0)
-        merged_region = CompositeRegion([v.region for v in self.variables])
+        contained_variables = [ra.variable for ra in self.region_annotations]
+        # Take MIN/AND: if plotted together, we expect each point to fulfill all
+        # the rules in the feature group
+        values = np.vstack([ra.variable.values for ra in self.region_annotations])
+        merged_values = np.min(values, axis=0)
+        self.variable = VariableGroup(variables=contained_variables, values=merged_values)
 
-        embedding = v0.embedding
-        if not all(np.allclose(v.embedding.X, embedding.X) for v in self.variables[1:]):
-            raise MergeError(
-                "Cannot merge explanatory variables which do not share the "
-                "same embedding!"
-            )
-
-        self.values = merged_values
-        self.region = merged_region
+        self.region = Region.merge_regions([ra.region for ra in self.region_annotations])
 
     def __repr__(self):
         attrs = [
             ("name", repr(self.name)),
-            ("variables", repr(self.variables)),
-            # ("values", "[...]"),
-            # ("region", repr(self.region)),
+            ("variable", repr(self.variable)),
+            ("region", repr(self.region)),
         ]
         attrs_str = ", ".join(f"{k}={v}" for k, v in attrs)
         return f"{self.__class__.__name__}({attrs_str})"
 
     @property
     def contained_region_annotations(self):
-        return sorted(self.variables, key=lambda v: v.base_variable.name)
+        return sorted(self.region_annotations)
 
     @cached_property
     def contained_samples(self):
         """Checking the region for contained samples is slow."""
-        return reduce(operator.or_, (v.contained_samples for v in self.variables))
+        return reduce(operator.or_, (ra.contained_samples for ra in self.region_annotations))
+
+    @property
+    def all_members(self):
+        """Return the indices of all data points that fulfill the rule."""
+        return set(np.argwhere(self.variable.values).ravel())
+
+    @property
+    def contained_members(self):
+        """Return the indices of all data points that fulfill the rule inside the region."""
+        return self.contained_samples & self.all_members

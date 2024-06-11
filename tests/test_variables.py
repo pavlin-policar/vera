@@ -19,7 +19,7 @@ class TestExplanatoryVariableSplit(unittest.TestCase):
         # Create constant feature
         features = pd.DataFrame(0, index=features.index, columns=["constant"])
 
-        feature_list = vera.an.generate_explanatory_features(
+        feature_list = vera.an.generate_region_annotations(
             features, embedding=x, scale_factor=0.5, filter_constant=False,
         )
         assert len(feature_list) == 1, "We should only have one feature"
@@ -29,7 +29,7 @@ class TestExplanatoryVariableSplit(unittest.TestCase):
             "The constant feature should only have one explanatory variable"
 
         expl_v = v.region_annotations[0]
-        split_parts = expl_v.split_region()
+        split_parts = expl_v.split()
         self.assertEqual(
             len(split_parts), 2, "Region was split into incorrect number of parts."
         )
@@ -43,7 +43,7 @@ class TestExplanatoryVariableSplit(unittest.TestCase):
         # Shuffle the clusters so that both cluster ids appear in both clusters
         features = features.sample(frac=1)
 
-        feature_list = vera.an.generate_explanatory_features(
+        feature_list = vera.an.generate_region_annotations(
             features, embedding=x, scale_factor=1, filter_constant=False,
         )
         assert len(feature_list) == 1, "We should only have one feature"
@@ -54,7 +54,7 @@ class TestExplanatoryVariableSplit(unittest.TestCase):
 
         assert isinstance(expl_v, vera.explanation.CompositeRegionAnnotation)
         expl_v = v.region_annotations[0]
-        split_parts = expl_v.split_region()
+        split_parts = expl_v.split()
         self.assertEqual(
             len(split_parts), 2, "Region was split into incorrect number of parts."
         )
@@ -66,7 +66,7 @@ class TestExplanatoryVariableSplit(unittest.TestCase):
         # Create constant feature
         features = pd.DataFrame(0, index=features.index, columns=["constant"])
 
-        feature_list = vera.an.generate_explanatory_features(
+        feature_list = vera.an.generate_region_annotations(
             features, embedding=x, scale_factor=0.5, filter_constant=False,
         )
         assert len(feature_list) == 1, "We should only have one feature"
@@ -76,7 +76,7 @@ class TestExplanatoryVariableSplit(unittest.TestCase):
             "The constant feature should only have one explanatory variable"
 
         expl_v = v.region_annotations[0]
-        split_parts = expl_v.split_region()
+        split_parts = expl_v.split()
         assert len(split_parts) == 2
         part1, part2 = split_parts
 
@@ -90,7 +90,7 @@ class TestExplanatoryVariableSplit(unittest.TestCase):
         # Create constant feature
         features = pd.DataFrame(0, index=features.index, columns=["constant"])
 
-        feature_list = vera.an.generate_explanatory_features(
+        feature_list = vera.an.generate_region_annotations(
             features, embedding=x, scale_factor=0.5, filter_constant=False,
         )
         assert len(feature_list) == 1, "We should only have one feature"
@@ -100,7 +100,7 @@ class TestExplanatoryVariableSplit(unittest.TestCase):
             "The constant feature should only have one explanatory variable"
 
         expl_v = v.region_annotations[0]
-        split_parts = expl_v.split_region()
+        split_parts = expl_v.split()
         assert len(split_parts) == 2
         part1, part2 = split_parts
 
@@ -121,7 +121,7 @@ class TestExplanatoryVariable(unittest.TestCase):
         x = np.random.normal(0, 1, size=50)
         z = np.random.normal(0, 1, size=(50, 2))
         df = pd.DataFrame(x, columns=["x"])
-        variables = vera.an.generate_explanatory_features(df, z, scale_factor=0.5)
+        variables = vera.an.generate_region_annotations(df, z, scale_factor=0.5)
         expl = variables[0].region_annotations
 
         assert len(expl) >= 3, "Too few discretized bins to perform test"
@@ -142,7 +142,7 @@ class TestExplanatoryVariable(unittest.TestCase):
         x = np.random.normal(0, 1, size=50)
         z = np.random.normal(0, 1, size=(50, 2))
         df = pd.DataFrame(x, columns=["x"])
-        df_discretized = pp.generate_region_annotations(df, z)
+        df_discretized = pp.extract_region_annotations(df, z)
 
         variables = df_discretized.columns
         assert len(variables) >= 3, "Too few discretized bins to perform test"
@@ -173,7 +173,7 @@ class TestExplanatoryVariable(unittest.TestCase):
         z = np.random.normal(0, 1, size=(15, 2))
 
         df = pd.DataFrame(pd.Categorical(x), columns=["x"])
-        df_encoded = pp.generate_region_annotations(df, z)
+        df_encoded = pp.extract_region_annotations(df, z)
 
         variables = df_encoded.columns
         assert len(variables) == 3, "One hot encoding should produce exactly 3 variables"
@@ -194,7 +194,7 @@ class TestExplanatoryVariable(unittest.TestCase):
         z = np.random.normal(0, 1, size=(15, 2))
 
         df = pd.DataFrame(pd.Categorical(x), columns=["x"])
-        df_encoded = pp.generate_region_annotations(df, z)
+        df_encoded = pp.extract_region_annotations(df, z)
 
         variables = df_encoded.columns
         assert len(variables) == 3, "One hot encoding should produce exactly 3 variables"
