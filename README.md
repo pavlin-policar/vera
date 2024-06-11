@@ -47,6 +47,12 @@ vera.pl.plot_annotations(descriptive_explanations)
 If you make use of `vera` for your work we would appreciate it if you would cite the paper
 
 ```
-\article{Poli{\v c}ar2023
+\article{Policar2024
+  title={VERA: Generating Visual Explanations of Two-Dimensional Embeddings via Region Annotation}, 
+  author={Pavlin G. Poličar and Blaž Zupan},
+  year={2024},
+  eprint={2406.04808},
+  archivePrefix={arXiv},
+  primaryClass={cs.LG}
 }
 ```
