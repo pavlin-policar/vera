@@ -5,15 +5,15 @@ import numpy as np
 import scipy.stats as stats
 
 from vera import metrics
-from vera.region_annotations import RegionAnnotation
+from vera.region_annotation import RegionAnnotation
 
 
-def mean_variable_occurence(panel):
+def mean_variable_occurence(panel: list[RegionAnnotation]):
     """Count the number of times each base variable appears in a layout."""
     base_variable_count = defaultdict(int)
-    for variable_group in panel:
-        for ra in variable_group.region_annotations:
-            base_variable_count[ra.variable.base_variable] += 1
+    for ra in panel:
+        for v in ra.descriptor.contained_variables:
+            base_variable_count[v] += 1
 
     return np.mean(list(base_variable_count.values()))
 
@@ -23,9 +23,9 @@ def variable_occurs_in_all_regions(panel: list[RegionAnnotation], all_region_thr
     num_regions = len(panel)
 
     base_variable_count = defaultdict(int)
-    for variable_group in panel:
-        for ra in variable_group.region_annotations:
-            base_variable_count[ra.variable.base_variable] += 1
+    for ra in panel:
+        for v in ra.descriptor.contained_variables:
+            base_variable_count[v] += 1
     base_variable_freq = {k: v / num_regions for k, v in base_variable_count.items()}
     occurence = np.array(list(base_variable_freq.values()))
 

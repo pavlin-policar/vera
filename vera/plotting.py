@@ -24,11 +24,7 @@ from matplotlib.path import Path
 import vera.metrics as metrics
 from vera.label_placement import initial_text_location_placement, get_2d_coordinates, fix_crossings
 from vera.region import Density, Region
-from vera.region_annotations import (
-    RegionAnnotation,
-    CompositeRegionAnnotation,
-    RegionAnnotationGroup,
-)
+from vera.region_annotation import RegionAnnotation
 
 
 def plot_feature(
@@ -346,11 +342,11 @@ def plot_densities(
 
 
 def _format_explanatory_variable(variable: RegionAnnotation, max_width=40):
-    return "\n".join(wrap(variable.name, width=max_width))
+    return "\n".join(wrap(str(variable.descriptor), width=max_width))
 
 
-def _format_explanatory_variable_group(var_group: RegionAnnotationGroup, max_width=40):
-    var_strings = [str(v) for v in var_group.variable.variables]
+def _format_explanatory_variable_group(var_group: "RegionAnnotationGroup", max_width=40):
+    var_strings = [str(v) for v in var_group.descriptor.variables]
     if max_width is not None:
         var_strings = [wrap(s, width=max_width) for s in var_strings]
     else:
@@ -488,14 +484,14 @@ def plot_region(
         scatter_kwargs_.update(scatter_kwargs)
         if highlight_members:
             other_color = scatter_kwargs_["c"]
-            c = np.array([other_color, member_color])[region_annotation.variable.values.astype(int)]
+            c = np.array([other_color, member_color])[region_annotation.descriptor.values.astype(int)]
             scatter_kwargs_["c"] = c
             scatter_kwargs_["alpha"] = 1
 
         ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_, rasterized=True)
 
     # Set title
-    ax.set_title(region_annotation.variable.name)
+    ax.set_title(region_annotation.descriptor.name)
 
     # Hide ticks and axis
     ax.set_xticks([]), ax.set_yticks([])
@@ -1062,9 +1058,9 @@ def layout_variable_colors(layout, cmap="tab10"):
 
     def get_key(ra):
         if isinstance(ra, RegionAnnotationGroup):
-            return frozenset(v.rule for v in ra.variable.variables)
+            return frozenset(v.rule for v in ra.descriptor.variables)
         elif isinstance(ra, RegionAnnotation):
-            return ra.variable.rule
+            return ra.descriptor.rule
 
     # We use the variable rule as the key
     var_keys = {

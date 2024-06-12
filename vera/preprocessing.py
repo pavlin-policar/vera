@@ -10,14 +10,15 @@ import vera.graph as g
 import vera.metrics as metrics
 from vera.embedding import Embedding
 from vera.region import Region
-from vera.rules import IntervalRule, EqualityRule
+from vera.rules import IntervalRule, EqualityRule, IncompatibleRuleError
 from vera.variables import (
     Variable,
     DiscreteVariable,
     ContinuousVariable,
     IndicatorVariable,
+    MergeError, RegionDescriptor,
 )
-from vera.region_annotations import RegionAnnotation, CompositeRegionAnnotation
+from vera.region_annotation import RegionAnnotation
 
 
 def _pd_dtype_to_variable(col_name: Union[str, Variable], col_type, col_vals) -> Variable:
@@ -218,8 +219,7 @@ def extract_region_annotations(
         region = Region.from_density(
             embedding=embedding, density=density, level=contour_level
         )
-        ra = RegionAnnotation(v, region)
-        return ra
+        return RegionAnnotation(region, v)
 
     # Create embedding instance which will be shared across all explanatory
     # variables. The shared instance is necessary to avoid slow recomputation of
@@ -250,7 +250,24 @@ def merge_overfragmented(
     if len(region_annotations) == 1:
         return region_annotations
 
-    def _dist(ra1, ra2):
+    def _merge_region_annotations(region_annotations):
+        # If there is a single region annotation, just return that
+        if len(region_annotations) == 1:
+            return region_annotations[0]
+
+        merged_region = Region.merge_regions(
+            [ra.region for ra in region_annotations]
+        )
+        merged_descriptor = RegionDescriptor.merge_descriptors(
+            [ra.descriptor for ra in region_annotations]
+        )
+        return RegionAnnotation(
+            region=merged_region,
+            descriptor=merged_descriptor,
+            source_region_annotations=region_annotations,
+        )
+
+    def _dist(ra1: RegionAnnotation, ra2: RegionAnnotation):
         if not ra1.can_merge_with(ra2):
             return 0
 
@@ -258,7 +275,7 @@ def merge_overfragmented(
         if shared_sample_pct < min_sample_overlap:
             return 0
 
-        new_ra = ra1.merge_with(ra2)
+        new_ra = _merge_region_annotations([ra1, ra2])
         ra1_purity_gain = metrics.purity(new_ra) / metrics.purity(ra1) - 1
         ra2_purity_gain = metrics.purity(new_ra) / metrics.purity(ra2) - 1
         purity_gain = np.max([ra1_purity_gain, ra2_purity_gain])
@@ -266,13 +283,15 @@ def merge_overfragmented(
         return int(purity_gain >= min_purity_gain)
 
     def _merge_round(region_annotations):
-        # Group region annotatins based on base variables
-        var_groups = defaultdict(list)
+        # Group region annotatins based on base variables. At this point, all
+        # region descriptors should be instances of indicator variables, and no
+        # variable groups should be present
+        ra_groups = defaultdict(list)
         for ra in region_annotations:
-            var_groups[ra.variable.base_variable].append(ra)
+            ra_groups[ra.descriptor.base_variable].append(ra)
 
         merged_ras = []
-        for k, var_group in var_groups.items():
+        for k, var_group in ra_groups.items():
             dists = metrics.pdist(var_group, _dist)
             graph = g.similarities_to_graph(dists, threshold=0.5)
             node_labels = dict(enumerate(var_group))
@@ -280,13 +299,11 @@ def merge_overfragmented(
             merge_groups = g.connected_components(graph)
 
             for c in merge_groups:
-                new_ra = CompositeRegionAnnotation(list(c))
+                new_ra = _merge_region_annotations(list(c))
                 merged_ras.append(new_ra)
 
         return merged_ras
 
-    # TODO: This can be sped up by only recomputing variable groups that have
-    # changed in the last round. We now recompute all variable groups every time
     prev_len = len(region_annotations)
     while len(region_annotations := _merge_round(region_annotations)) < prev_len:
         prev_len = len(region_annotations)

@@ -6,7 +6,7 @@ from sklearn.utils import check_random_state
 from tqdm import tqdm
 
 import vera.preprocessing as pp
-from vera.region_annotations import RegionAnnotation
+from vera.region_annotation import RegionAnnotation
 
 
 def generate_region_annotations(

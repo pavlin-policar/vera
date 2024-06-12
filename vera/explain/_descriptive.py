@@ -7,7 +7,8 @@ from vera import metrics as metrics, graph as g
 from vera.explain import _layout_scores
 from vera.region import Region
 from vera.utils import flatten
-from vera.region_annotations import RegionAnnotation, RegionAnnotationGroup
+from vera.region_annotation import RegionAnnotation
+from vera.variables import RegionDescriptor
 
 DEFAULT_RANKING_FUNCS = [
     (_layout_scores.variable_occurs_in_all_regions, 30),
@@ -18,7 +19,7 @@ DEFAULT_RANKING_FUNCS = [
 ]
 
 
-def group_similar_variables(
+def descriptive_merge(
     region_annotations: list[RegionAnnotation],
     metric: Callable = metrics.min_shared_sample_pct,
     metric_is_distance: bool = False,
@@ -29,89 +30,94 @@ def group_similar_variables(
     g_func = [g.similarities_to_graph, g.distances_to_graph][metric_is_distance]
     graph = g_func(distances, threshold=threshold)
 
+    # The distance conversion constructs a graph with integer indices as nodes,
+    # so we convert the nodes to our region annotations here. The result is a
+    # graph on region annotations
     node_labels = dict(enumerate(region_annotations))
     graph = g.label_nodes(graph, node_labels)
 
-    # Once we construct the graph, find the max-cliques. These will serve as our
-    # merged "clusters"
     if method == "max-cliques":
-        cliques = g.max_cliques(graph)
-        cliques = list(map(g.nodes, cliques))
-        clusts = {f"Cluster {cid}": vs for cid, vs in enumerate(cliques, start=1)}
+        subgraphs = g.max_cliques(graph)
     elif method == "connected-components":
-        connected_components = g.connected_components(graph)
-        connected_components = list(map(g.nodes, connected_components))
-        clusts = {
-            f"Cluster {cid}": list(c)
-            for cid, c in enumerate(connected_components, start=1)
-        }
+        subgraphs = g.connected_components(graph)
     else:
         raise ValueError(
             f"Unrecognized method `{method}`. Can be one of `max-cliques`, "
             f"`connected-components`"
         )
 
-    variable_groups = [
-        RegionAnnotationGroup(region_annotations=clust_vars, name=cid)
-        for cid, clust_vars in clusts.items()
-    ]
+    # The above two methods produce subgraphs of the original graphs as output,
+    # so we next conver this to lists of graph nodes (region annotations).
+    ra_groups = list(map(g.nodes, subgraphs))
 
-    return variable_groups
+    cluster_region_annotations = []
+    for cluster_id, ra_group in enumerate(ra_groups, start=1):
+        merged_descriptor = RegionDescriptor.merge_descriptors(
+            [ra.descriptor for ra in ra_group]
+        )
+        merged_region = Region.merge_regions([ra.region for ra in ra_group])
+        new_ra = RegionAnnotation(region=merged_region, descriptor=merged_descriptor)
+
+        cluster_region_annotations.append(new_ra)
+
+    return cluster_region_annotations
 
 
-def enrich_var_group_with_background(
-    ra_group: RegionAnnotationGroup,
+def enrich_with_background(
+    region_annotation: RegionAnnotation,
     background_ras: list[RegionAnnotation],
     threshold: float = 0.9,
 ):
     # Determine which base vars are present in the var group
-    contained_base_vars = {ra.variable.base_variable for ra in ra_group.region_annotations}
+    contained_base_vars = {v for v in region_annotation.descriptor.contained_variables}
 
     to_add = []
     for background_ra in background_ras:
         # If the background variable belongs to the same base variable
-        # as already present in the data, skip that
-        if background_ra.variable.base_variable in contained_base_vars:
+        # as already present in the data, skip it, since the RA in this region
+        # annotation is more specific to the present region than it would be if
+        # we merged the present RA with the background RA
+        if background_ra.descriptor.base_variable in contained_base_vars:
             continue
 
         # Determine if the background var encompasses the current variable
-        shared_samples = ra_group.contained_samples & background_ra.contained_samples
-        pct_shared = len(shared_samples) / len(ra_group.contained_samples)
+        shared_samples = region_annotation.contained_samples & background_ra.contained_samples
+        pct_shared = len(shared_samples) / len(region_annotation.contained_samples)
 
         # If the region sufficiently overlaps, prepare the overlap for merge
         if pct_shared > threshold:
             new_polygon = background_ra.region.polygon.intersection(
-                ra_group.region.polygon
+                region_annotation.region.polygon
             )
             cloned_bg_var = RegionAnnotation(
-                background_ra.variable,
                 Region(background_ra.region.embedding, new_polygon),
+                background_ra.descriptor,
             )
             to_add.append(cloned_bg_var)
 
     # If we found any background variables to add to the var group, create a new
     # var group with all available explanatory vars
     if len(to_add) > 0:
-        ra_group = RegionAnnotationGroup(
-            ra_group.region_annotations + to_add, name=ra_group.name
+        region_annotation = RegionAnnotationGroup(
+            region_annotation.region_annotations + to_add, name=region_annotation.name
         )
 
-    return ra_group
+    return region_annotation
 
 
 def enrich_panel_with_background(
-    panel: list[RegionAnnotationGroup],
+    panel: list[RegionAnnotation],
     background_vars: list[RegionAnnotation],
     threshold: float = 0.9,
 ):
     return [
-        enrich_var_group_with_background(var_group, background_vars, threshold)
+        enrich_with_background(var_group, background_vars, threshold)
         for var_group in panel
     ]
 
 
 def enrich_layout_with_background(
-    layout: list[list[RegionAnnotationGroup]],
+    layout: list[list[RegionAnnotation]],
     background_vars: list[RegionAnnotation],
     threshold: float = 0.9,
 ):
@@ -122,13 +128,13 @@ def enrich_layout_with_background(
 
 
 def generate_descriptive_layout(
-    clusters,
+    region_annotations: list[RegionAnnotation],
     max_panels: int | None = None,
     max_overlap: float = 0.0,
     ranking_funcs=DEFAULT_RANKING_FUNCS,
 ):
     # Create a working copy of our clusters
-    clusters = list(clusters)
+    region_annotations = list(region_annotations)
 
     if max_panels is None:
         max_panels = np.inf
@@ -138,16 +144,16 @@ def generate_descriptive_layout(
     # We keep generating new panels until we reach the panel limit or run out of
     # explanatory variables to put into the panels
     layout = []
-    while len(layout) < max_panels and len(clusters) > 0:
+    while len(layout) < max_panels and len(region_annotations) > 0:
         # Generate all non-overlapping layouts
-        overlap = metrics.pdist(clusters, metrics.max_shared_sample_pct)
+        overlap = metrics.pdist(region_annotations, metrics.max_shared_sample_pct)
         graph = g.similarities_to_graph(overlap, threshold=max_overlap)
-        node_labels = dict(enumerate(clusters))
+        node_labels = dict(enumerate(region_annotations))
         graph = g.label_nodes(graph, node_labels)
 
         layouts = g.independent_sets(graph)
 
-        # Sort the panels according to our metrics
+        # Sort the panels according to their metric scores
         panel_scores = np.array([
             [score_fn(layout) for score_fn in score_fns]
             for layout in layouts
@@ -163,7 +169,7 @@ def generate_descriptive_layout(
 
         # Remove variables in the current panel from the remaining variables
         for var in selected_layout:
-            clusters.remove(var)
+            region_annotations.remove(var)
 
     return layout
 
@@ -180,7 +186,6 @@ def descriptive(
     max_overlap: float = 0.0,
     enrich_with_background: bool = True,
     background_enrichment_threshold: float = 0.9,
-    return_clusters: bool = False,
     ranking_funcs=DEFAULT_RANKING_FUNCS,
 ):
     region_annotations = flatten(region_annotations)
@@ -195,7 +200,7 @@ def descriptive(
         min_purity=cluster_min_purity,
     )
 
-    clusters = group_similar_variables(
+    merged_region_annotations = descriptive_merge(
         ra_split,
         metric=merge_metric,
         metric_is_distance=metric_is_distance,
@@ -204,7 +209,7 @@ def descriptive(
     )
 
     layout = generate_descriptive_layout(
-        clusters,
+        merged_region_annotations,
         max_panels=max_panels,
         max_overlap=max_overlap,
         ranking_funcs=ranking_funcs,
@@ -217,10 +222,7 @@ def descriptive(
             threshold=background_enrichment_threshold,
         )
 
-    if return_clusters:
-        return layout, clusters
-    else:
-        return layout
+    return layout
 
 
 def filter_region_annotations(

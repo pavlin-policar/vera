@@ -1,3 +1,6 @@
+import abc
+from collections import defaultdict
+
 import numpy as np
 
 from vera.rules import Rule
@@ -7,7 +10,49 @@ class MergeError(Exception):
     pass
 
 
-class Variable:
+class RegionDescriptor(metaclass=abc.ABCMeta):
+    """Abstract interface that provides a textual description of regions."""
+    def __init__(self, values: np.ndarray):
+        self.values = values
+
+    @abc.abstractmethod
+    def merge_with(self, other: "RegionDescriptor") -> "RegionDescriptor":
+        pass
+
+    @property
+    @abc.abstractmethod
+    def contained_variables(self) -> list["Variable"]:
+        pass
+
+    @staticmethod
+    def merge_descriptors(descriptors: list["RegionDescriptor"]) -> "RegionDescriptor":
+        if any(not isinstance(d, RegionDescriptor) for d in descriptors):
+            descriptor_str = ", ".join(
+                [f"{d} ({d.__class__.__name__})" for d in descriptors]
+            )
+            raise TypeError(
+                f"Can only merge `RegionDescriptor` instances!\nGot [{descriptor_str}]"
+            )
+
+        all_indicators = []
+        for descriptor in descriptors:
+            if isinstance(descriptor, IndicatorVariable):
+                all_indicators.append(descriptor)
+            elif isinstance(descriptor, IndicatorVariableGroup):
+                all_indicators.extend(descriptor.variables)
+            else:
+                raise RuntimeError("This should never be reached.")
+
+        merged_indicators = merge_indicator_variables(all_indicators)
+
+        # If the merging resulted in a single indicator, just return that
+        if len(merged_indicators) == 1:
+            return merged_indicators[0]
+
+        return IndicatorVariableGroup(merged_indicators)
+
+
+class Variable(metaclass=abc.ABCMeta):
     repr_attrs = ["name"]
     eq_attrs = ["name"]
 
@@ -32,15 +77,6 @@ class Variable:
     def is_derived(self):
         return self.base_variable is not None
 
-    def __str__(self):
-        return str(self.name)
-
-    def __repr__(self):
-        attrs_str = ", ".join(
-            f"{attr}={repr(getattr(self, attr))}" for attr in self.repr_attrs
-        )
-        return f"{self.__class__.__name__}({attrs_str})"
-
     def __eq__(self, other):
         if not isinstance(other, self.__class__):
             return False
@@ -56,12 +92,24 @@ class Variable:
     def __lt__(self, other: "Variable"):
         return self.name < other.name
 
+    def __repr__(self):
+        attrs_str = ", ".join(
+            f"{attr}={repr(getattr(self, attr))}" for attr in self.repr_attrs
+        )
+        return f"{self.__class__.__name__}({attrs_str})"
+
 
 class DiscreteVariable(Variable):
     repr_attrs = Variable.repr_attrs + ["categories", "ordered"]
     eq_attrs = Variable.eq_attrs + ["categories", "ordered"]
 
-    def __init__(self, name, values, categories: list, ordered: bool = False):
+    def __init__(
+        self,
+        name: str,
+        values: np.ndarray,
+        categories: list[str],
+        ordered: bool = False,
+    ):
         super().__init__(name, values)
         self.categories = tuple(categories)
         self.ordered = ordered
@@ -71,78 +119,139 @@ class ContinuousVariable(Variable):
     pass
 
 
-class IndicatorVariable(Variable):
-    repr_attrs = Variable.repr_attrs + ["base_variable", "rule"]
-    eq_attrs = Variable.eq_attrs + ["base_variable", "rule"]
-
+class IndicatorVariable(Variable, RegionDescriptor):
     def __init__(
         self,
         base_variable: Variable,
         rule: Rule,
         values: np.ndarray,
-        name: str = None,
     ):
-        self.base_variable = base_variable
+        super().__init__(name=None, values=values, base_variable=base_variable)
         self.rule = rule
-        self.values = values
-        if name is None:
-            self.name = str(rule)
 
-    def can_merge_with(self, other: "IndicatorVariable") -> bool:
-        if not isinstance(other, IndicatorVariable):
-            return False
-        # The variables must match on their base variable
-        if self.base_variable != other.base_variable:
-            return False
-
-        return self.rule.can_merge_with(other.rule)
-
-    def merge_with(self, other: "IndicatorVariable") -> "IndicatorVariable":
-        if not isinstance(other, IndicatorVariable):
-            raise MergeError(
-                f"Cannot merge `{self.__class__.__name__}` with  `{other}`!"
+    def merge_with(self, other: RegionDescriptor) -> "IndicatorVariable":
+        if not isinstance(other, RegionDescriptor):
+            raise TypeError(
+                f"Cannot merge `{self}` with `{other}`. Only instances of "
+                f"`RegionDescriptor` can be merged!"
             )
 
-        if not self.can_merge_with(other):
-            raise MergeError(f"Cannot merge derived variables `{self}` and {other}!")
+        if isinstance(other, IndicatorVariable):
+            if other.base_variable == self.base_variable:
+                if self.rule.can_merge_with(other.rule):
+                    # Merge compatible indicators into a more general indicator
+                    new_rule = self.rule.merge_with(other.rule)
+                    # The values indicate if the sample belongs to ANY group
+                    new_values = np.max(np.vstack([self.values, other.values]), axis=0)
+                    return IndicatorVariable(self.base_variable, new_rule, new_values)
+                else:
+                    # If the rules are not compatible, the descriptors can't be merged
+                    raise MergeError(f"Cannot merge `{self}` with `{other}`!")
+            else:
+                return IndicatorVariableGroup([self, other])
 
-        merged_rule = self.rule.merge_with(other.rule)
+        # If we're merging with a group, let the group handle the merge
+        elif isinstance(other, IndicatorVariableGroup):
+            return other.merge_with(self)
 
-        return self.__class__(base_variable=self.base_variable, rule=merged_rule)
+        else:
+            raise RuntimeError("This should never be reached.")
 
-    def __str__(self):
-        return self.name
+    @property
+    def contained_variables(self) -> list[Variable]:
+        return [self.base_variable]
 
-    # def __eq__(self, other):
-    #     if not isinstance(other, IndicatorVariable):
-    #         return False
-    #     return self.base_variable == other.base_variable and self.rule == other.rule
+    def __hash__(self):
+        return hash((self.__class__.__name__, self.base_variable, self.rule))
 
-    # def __hash__(self):
-    #     return hash((self.__class__.__name__, self.base_variable, self.rule))
+    def __eq__(self, other):
+        if not isinstance(other, IndicatorVariable):
+            return False
+        return self.base_variable == other.base_variable and self.rule == other.rule
 
     def __lt__(self, other):
         return (self.base_variable, self.rule) < (other.base_variable, other.rule)
 
+    def __repr__(self):
+        return str(self.rule)
 
-class VariableGroup:
-    def __init__(
-        self,
-        variables: list[Variable],
-        values: np.ndarray,
-        name: str = None,
-    ):
-        self.variables = variables
-        self.values = values
-        self.name = name
 
-    def __hash__(self):
-        return hash((self.__class__.__name__, self.name, self.variables))
+def merge_indicator_variables(variables: list[IndicatorVariable]) -> list[IndicatorVariable]:
+    """Inspect the list of indicator variables, and merge whatever possible."""
+    grouped = defaultdict(set)
+    for v in variables:
+        grouped[v.base_variable].add(v)
 
-    def __eq__(self, other):
+    merged_variables = []
+    for base_var, indicator_vars in grouped.items():
+        indicator_vars = list(indicator_vars)
+        # If the base var has only a single indicator, just append that
+        if len(indicator_vars) == 1:
+            merged_variables.append(indicator_vars[0])
+
+        # Otherwise, we will try to merge the indicators
+        else:
+            # Sort the variables so their rules should be compatible
+            indicator_vars = sorted(indicator_vars)
+
+            new_var = indicator_vars[0]
+            for other_var in indicator_vars[1:]:
+                try:
+                    new_var = new_var.merge_with(other_var)
+                except MergeError:
+                    # If the merging failed, append the current merged
+                    # variable, which contains all the variables up to this
+                    # point, to the result set, and use the current variable
+                    # as a new basis point
+                    merged_variables.append(new_var)
+                    new_var = other_var
+            merged_variables.append(new_var)
+
+    return merged_variables
+
+
+class IndicatorVariableGroup(RegionDescriptor):
+    """A group of potentially unrelated indicator variables.
+
+    The values of an indicator variable group indicate which samples belong to
+    ALL the contained indicator variables.
+
+    """
+    def __init__(self, variables: list[IndicatorVariable]):
+        self.variables = sorted(merge_indicator_variables(variables))
+        # The merged values indicate which samples belong to ALL contained variables
+        merged_values = np.min(np.vstack([v.values for v in self.variables]), axis=0)
+
+        super().__init__(values=merged_values)
+
+    def merge_with(self, other: RegionDescriptor) -> "IndicatorVariableGroup":
+        if not isinstance(other, RegionDescriptor):
+            raise TypeError(
+                f"Cannot merge `{self}` with `{other}`. Only instances of "
+                f"`RegionDescriptor` can be merged!"
+            )
+
+        if isinstance(other, IndicatorVariable):
+            other_variables = [other]
+        elif isinstance(other, IndicatorVariableGroup):
+            other_variables = other.variables
+        elif not isinstance(other, IndicatorVariableGroup):
+            raise RuntimeError("This should never be reached.")
+
+        merged_variables = merge_indicator_variables(self.variables + other_variables)
+        return IndicatorVariableGroup(merged_variables)
+
+    @property
+    def contained_variables(self) -> list[Variable]:
+        return [v.base_variable for v in self.variables]
+
+    def __hash__(self) -> int:
+        return hash((self.__class__.__name__, frozenset(self.variables)))
+
+    def __eq__(self, other) -> bool:
         if not isinstance(other, self.__class__):
             return False
-        return self.name == other.name and self.variables == other.variables
+        return frozenset(self.variables) == frozenset(other.variables)
 
-    def __repr__(self):
-        return ",".join([str(v) for v in self.variables])
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}([{', '.join([str(v) for v in self.variables])}])"

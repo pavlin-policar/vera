@@ -3,7 +3,10 @@ import unittest
 import numpy as np
 import pandas as pd
 
+import vera.plotting
 import vera.preprocessing as pp
+from tests.utils import generate_clusters
+from vera.annotate import generate_region_annotations
 from vera.variables import (
     Variable,
     ContinuousVariable,
@@ -263,3 +266,212 @@ class TestOneHotEncoding(unittest.TestCase):
         self.assertTrue(all(isinstance(v, IndicatorVariable) for v in result))
         self.assertTrue(all(isinstance(v.base_variable, DiscreteVariable) for v in result))
         self.assertTrue(all(v.base_variable is self.disc2 for v in result))
+
+
+class TestMergeOverfragmented(unittest.TestCase):
+    def test_merge_1(self):
+        """Two completely non-overlapping clusters."""
+        np.random.seed(0)
+        x, features = generate_clusters([1, -1], [0.25, 0.25], n_samples=50)
+
+        region_annotations = generate_region_annotations(
+            features, embedding=x, scale_factor=0.5,
+        )
+
+        self.assertEqual(
+            1,
+            len(region_annotations),
+            "Incorrect number of variables returned",
+        )
+        self.assertEqual(
+            2,
+            len(region_annotations[0]),
+            "Incorrect number of region annotations returned",
+        )
+
+    def test_merge_2(self):
+        """Four non-overlapping distributions."""
+        np.random.seed(0)
+        # Two separated Gaussians. These should not be merged
+        x, features = generate_clusters(
+            [[1, 1], [1, -1], [-1, -1], [-1, 1]], [0.25] * 4, n_samples=50
+        )
+
+        region_annotations = generate_region_annotations(
+            features, embedding=x, scale_factor=0.5,
+        )
+
+        # cluster_ras = ra_collection["cluster"]
+        # vera.plotting.plot_regions_with_subregions(
+        #     cluster.explanatory_variables, show=True, per_row=2, figwidth=8
+        # )
+
+        self.assertEqual(
+            1,
+            len(region_annotations),
+            "Incorrect number of variables returned",
+        )
+        self.assertEqual(
+            4,
+            len(region_annotations[0]),
+            "Incorrect number of region annotations returned",
+        )
+
+    def test_merge_3(self):
+        """Four distributions: three overlapping, one separate."""
+        np.random.seed(0)
+        # Two separated Gaussians. These should not be merged
+        x, features = generate_clusters([1, 1, 1, -1], [0.25] * 4, n_samples=50)
+
+        region_annotations = generate_region_annotations(
+            features, embedding=x, scale_factor=0.5,
+        )
+
+        # cluster_ras = ra_collection["cluster"]
+        # vera.plotting.plot_regions_with_subregions(
+        #     cluster.explanatory_variables, show=True, per_row=2, figwidth=8
+        # )
+
+        self.assertEqual(
+            1,
+            len(region_annotations),
+            "Incorrect number of variables returned",
+        )
+        self.assertEqual(
+            2,
+            len(region_annotations[0]),
+            "Incorrect number of region annotations returned",
+        )
+
+    def test_merge_4(self):
+        """Two semi-overlapping distributions"""
+        np.random.seed(0)
+        # Two slightly-overlapping Gaussians. These should not be merged
+        x, features = generate_clusters([0.5, -0.5], [1] * 2, n_samples=100)
+
+        region_annotations = generate_region_annotations(
+            features, embedding=x, scale_factor=0.5,
+        )
+
+        # cluster_ras = ra_collection["cluster"]
+        # vera.plotting.plot_regions_with_subregions(
+        #     cluster.explanatory_variables, show=True, per_row=2, figwidth=8
+        # )
+
+        self.assertEqual(
+            1,
+            len(region_annotations),
+            "Incorrect number of variables returned",
+        )
+        self.assertEqual(
+            2,
+            len(region_annotations[0]),
+            "Incorrect number of region annotations returned",
+        )
+
+    def test_merge_5(self):
+        """Three semi-overlapping distributions"""
+        np.random.seed(0)
+        # Three separated, but partially-overlapping Gaussians. These should not
+        # be merged
+        x, features = generate_clusters([0.5, 0, -0.5], [0.25] * 3, n_samples=100)
+
+        region_annotations = generate_region_annotations(
+            features, embedding=x, scale_factor=0.5,
+        )
+
+        # cluster_ras = ra_collection["cluster"]
+        # vera.plotting.plot_regions_with_subregions(
+        #     cluster.explanatory_variables, show=True, per_row=2, figwidth=8
+        # )
+        # vera.plotting.plot_annotation(
+        #     cluster.explanatory_variables, show=True, figwidth=8
+        # )
+        self.assertEqual(
+            1,
+            len(region_annotations),
+            "Incorrect number of variables returned",
+        )
+        self.assertEqual(
+            3,
+            len(region_annotations[0]),
+            "Incorrect number of region annotations returned",
+        )
+
+    def test_merge_6(self):
+        """Four semi-overlapping distributions, where we have to resolve a
+        max-clique conflict."""
+        np.random.seed(0)
+        # Construct three partially-overlapping Gaussians. These should not be merged
+        x, features = generate_clusters(
+            [1, 0, -1], [1.3] * 3, n_samples=100
+        )
+
+        region_annotations = generate_region_annotations(
+            features, embedding=x, scale_factor=0.5,
+        )
+
+        # cluster_ras = ra_collection["cluster"]
+        # vera.plotting.plot_regions_with_subregions(cluster_ras, show=True, per_row=2, figwidth=8)
+        # vera.plotting.plot_annotation(cluster_ras, show=True, figwidth=8)
+
+        self.assertEqual(
+            1,
+            len(region_annotations),
+            "Incorrect number of variables returned",
+        )
+        self.assertEqual(
+            3,
+            len(region_annotations[0]),
+            "Incorrect number of region annotations returned",
+        )
+
+    def test_merge_7(self):
+        """Generate two clusters with a numeric `cluster` attribute that takes
+        on values 0 and 2 in C1 and values 1 in C2. Since `cluster` is a numeric
+        attribute, it will be discretized into interval rules, and we will try
+        to merge the bins corresponding to values 0 and 2. This will, of course,
+        fail, and we should be left with 3 region annotations, corresponding to
+        each bin."""
+        np.random.seed(0)
+        x, features = generate_clusters([1, -1, 1], [0.1] * 3, n_samples=100)
+
+        # Make the cluster attribute numeric, and therefore ordered
+        features["cluster"] = features["cluster"].cat.codes.astype(float)
+        region_annotations = generate_region_annotations(
+            features, embedding=x, scale_factor=0.5,
+        )
+
+        self.assertEqual(
+            1,
+            len(region_annotations),
+            "Incorrect number of variables returned",
+        )
+        self.assertEqual(
+            3,
+            len(region_annotations[0]),
+            "Incorrect number of region annotations returned",
+        )
+
+    def test_merge_8(self):
+        """This test does the same as the above test (but with values 0, 1, 3, 4
+        in C1), but also checks that the bins [0, 1] and [3, 4]."""
+        np.random.seed(0)
+        x, features = generate_clusters([1, 1, -1, 1, 1], [0.1] * 5, n_samples=100)
+
+        # Make the cluster attribute numeric, and therefore ordered
+        features["cluster"] = features["cluster"].cat.codes.astype(float)
+        region_annotations = generate_region_annotations(
+            features, embedding=x, scale_factor=0.5, n_discretization_bins=5,
+        )
+
+        self.assertEqual(
+            1,
+            len(region_annotations),
+            "Incorrect number of variables returned",
+        )
+        self.assertEqual(
+            3,
+            len(region_annotations[0]),
+            "Incorrect number of region annotations returned",
+        )

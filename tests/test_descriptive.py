@@ -26,4 +26,4 @@ class TestDescriptiveRanking(unittest.TestCase):
 
         self.assertEqual(2, len(layouts))
 
-        # vera.pl.plot_annotations(layouts, show=True, per_row=1, figwidth=6)
+        vera.pl.plot_annotations(layouts, show=True, per_row=1, figwidth=6)

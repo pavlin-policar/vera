@@ -99,8 +99,8 @@ class Region:
 
     @classmethod
     def merge_regions(cls, regions: list["Region"], merge_method: str = "union"):
-        # Ensure that all regions belong to the same embedding, otherwise they
-        # can't be merged
+        # Ensure that all regions belong to the same embedding, otherwise
+        # merging them makes little sense
         embedding = regions[0].embedding
         if not all(r.embedding == embedding for r in regions[1:]):
             raise RuntimeError(

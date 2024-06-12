@@ -7,8 +7,8 @@ from scipy import stats as stats
 from vera import metrics as metrics, graph as g
 from vera.explain import _layout_scores
 from vera.utils import group_by_base_var, flatten
-from vera.variables import VariableGroup
-from vera.region_annotations import RegionAnnotationGroup, RegionAnnotation
+from vera.variables import IndicatorVariableGroup
+from vera.region_annotation import RegionAnnotation
 
 DEFAULT_RANKING_FUNCS = [
     (_layout_scores.mean_overlap, 5),
@@ -77,7 +77,7 @@ def merge_contrastive(region_annotations: list[list[RegionAnnotation]], threshol
         merged_expl_vars = [
             RegionAnnotationGroup(cc_part) for cc_part in map(g.nodes, cc_parts)
         ]
-        merged_variables.append(VariableGroup(var_groups_to_merge, merged_expl_vars))
+        merged_variables.append(IndicatorVariableGroup(var_groups_to_merge, merged_expl_vars))
 
     return merged_variables
 
