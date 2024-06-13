@@ -56,50 +56,47 @@ def descriptive_merge(
             [ra.descriptor for ra in ra_group]
         )
         merged_region = Region.merge_regions([ra.region for ra in ra_group])
-        new_ra = RegionAnnotation(region=merged_region, descriptor=merged_descriptor)
+        merged_ra = RegionAnnotation(
+            region=merged_region, descriptor=merged_descriptor
+        )
 
-        cluster_region_annotations.append(new_ra)
+        cluster_region_annotations.append(merged_ra)
 
     return cluster_region_annotations
 
 
 def enrich_with_background(
     region_annotation: RegionAnnotation,
-    background_ras: list[RegionAnnotation],
+    background: list[RegionAnnotation],
     threshold: float = 0.9,
 ):
     # Determine which base vars are present in the var group
     contained_base_vars = {v for v in region_annotation.descriptor.contained_variables}
 
     to_add = []
-    for background_ra in background_ras:
-        # If the background variable belongs to the same base variable
-        # as already present in the data, skip it, since the RA in this region
-        # annotation is more specific to the present region than it would be if
-        # we merged the present RA with the background RA
+    for background_ra in background:
+        # If the region annotation belongs to the same base variable as already
+        # present in the data, skip it, since the RA in this region annotation
+        # is more specific to the present region than it would be if we merged
+        # the present RA with the background RA
         if background_ra.descriptor.base_variable in contained_base_vars:
             continue
 
-        # Determine if the background var encompasses the current variable
+        # Determine if the background var sufficiently encompasses the current variable
         shared_samples = region_annotation.contained_samples & background_ra.contained_samples
         pct_shared = len(shared_samples) / len(region_annotation.contained_samples)
 
-        # If the region sufficiently overlaps, prepare the overlap for merge
+        # If the region sufficiently overlaps, the descriptor should be added
         if pct_shared > threshold:
-            new_polygon = background_ra.region.polygon.intersection(
-                region_annotation.region.polygon
-            )
-            cloned_bg_var = RegionAnnotation(
-                Region(background_ra.region.embedding, new_polygon),
-                background_ra.descriptor,
-            )
-            to_add.append(cloned_bg_var)
+            to_add.append(background_ra.descriptor)
 
-    # If we found any background variables to add to the var group, create a new
-    # var group with all available explanatory vars
+    # If we found any background descriptors to add to the region annotation,
+    # create a new region annotation with all available descriptors
     if len(to_add) > 0:
-        region_annotation = RegionAnnotationGroup(
-            region_annotation.region_annotations + to_add, name=region_annotation.name
+        region_annotation = RegionAnnotation(
+            descriptor=RegionDescriptor.merge_descriptors([region_annotation.descriptor, *to_add]),
+            region=region_annotation.region,
+            source_region_annotations=region_annotation.source_region_annotations,
         )
 
     return region_annotation
@@ -107,22 +104,22 @@ def enrich_with_background(
 
 def enrich_panel_with_background(
     panel: list[RegionAnnotation],
-    background_vars: list[RegionAnnotation],
+    background: list[RegionAnnotation],
     threshold: float = 0.9,
 ):
     return [
-        enrich_with_background(var_group, background_vars, threshold)
+        enrich_with_background(var_group, background, threshold)
         for var_group in panel
     ]
 
 
 def enrich_layout_with_background(
     layout: list[list[RegionAnnotation]],
-    background_vars: list[RegionAnnotation],
+    background: list[RegionAnnotation],
     threshold: float = 0.9,
 ):
     return [
-        enrich_panel_with_background(panel, background_vars, threshold)
+        enrich_panel_with_background(panel, background, threshold)
         for panel in layout
     ]
 

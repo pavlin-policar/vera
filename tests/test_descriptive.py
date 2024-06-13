@@ -25,5 +25,3 @@ class TestDescriptiveRanking(unittest.TestCase):
         layouts = vera.explain.descriptive(region_annotations, max_panels=2)
 
         self.assertEqual(2, len(layouts))
-
-        vera.pl.plot_annotations(layouts, show=True, per_row=1, figwidth=6)
