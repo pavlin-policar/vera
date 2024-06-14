@@ -1,8 +1,6 @@
-import operator
 import string
 import warnings
 from collections.abc import Iterable
-from functools import reduce
 from itertools import cycle, chain
 from textwrap import wrap
 from typing import Any, Union

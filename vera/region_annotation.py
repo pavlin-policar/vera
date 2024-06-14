@@ -30,6 +30,9 @@ class RegionAnnotation:
 
     @classmethod
     def merge(cls, region_annotations: list["RegionAnnotation"]) -> "RegionAnnotation":
+        if len(region_annotations) == 1:
+            return region_annotations[0]
+
         merged_descriptor = RegionDescriptor.merge(
             [ra.descriptor for ra in region_annotations]
         )

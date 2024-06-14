@@ -258,23 +258,6 @@ def merge_overfragmented(
     if len(region_annotations) == 1:
         return region_annotations
 
-    def _merge_region_annotations(region_annotations):
-        # If there is a single region annotation, just return that
-        if len(region_annotations) == 1:
-            return region_annotations[0]
-
-        merged_region = Region.merge(
-            [ra.region for ra in region_annotations]
-        )
-        merged_descriptor = RegionDescriptor.merge(
-            [ra.descriptor for ra in region_annotations]
-        )
-        return RegionAnnotation(
-            region=merged_region,
-            descriptor=merged_descriptor,
-            source_region_annotations=region_annotations,
-        )
-
     def _dist(ra1: RegionAnnotation, ra2: RegionAnnotation):
         if not ra1.can_merge_with(ra2):
             return 0
@@ -283,7 +266,7 @@ def merge_overfragmented(
         if shared_sample_pct < min_sample_overlap:
             return 0
 
-        new_ra = _merge_region_annotations([ra1, ra2])
+        new_ra = RegionAnnotation.merge([ra1, ra2])
         ra1_purity_gain = metrics.purity(new_ra) / metrics.purity(ra1) - 1
         ra2_purity_gain = metrics.purity(new_ra) / metrics.purity(ra2) - 1
         purity_gain = np.max([ra1_purity_gain, ra2_purity_gain])
@@ -304,11 +287,11 @@ def merge_overfragmented(
             graph = g.similarities_to_graph(dists, threshold=0.5)
             node_labels = dict(enumerate(var_group))
             graph = g.label_nodes(graph, node_labels)
-            merge_groups = g.connected_components(graph)
+            connected_components = g.connected_components(graph)
+            merge_groups = list(map(g.nodes, connected_components))
 
             for c in merge_groups:
-                new_ra = _merge_region_annotations(list(c))
-                merged_ras.append(new_ra)
+                merged_ras.append(RegionAnnotation.merge(c))
 
         return merged_ras
 

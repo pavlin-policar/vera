@@ -50,17 +50,7 @@ def descriptive_merge(
     # so we next conver this to lists of graph nodes (region annotations).
     ra_groups = list(map(g.nodes, subgraphs))
 
-    cluster_region_annotations = []
-    for cluster_id, ra_group in enumerate(ra_groups, start=1):
-        merged_descriptor = RegionDescriptor.merge(
-            [ra.descriptor for ra in ra_group]
-        )
-        merged_region = Region.merge([ra.region for ra in ra_group])
-        merged_ra = RegionAnnotation(
-            region=merged_region, descriptor=merged_descriptor
-        )
-
-        cluster_region_annotations.append(merged_ra)
+    cluster_region_annotations = list(map(RegionAnnotation.merge, ra_groups))
 
     return cluster_region_annotations
 
