@@ -28,6 +28,19 @@ class RegionAnnotation:
 
         return True
 
+    @classmethod
+    def merge(cls, region_annotations: list["RegionAnnotation"]) -> "RegionAnnotation":
+        merged_descriptor = RegionDescriptor.merge(
+            [ra.descriptor for ra in region_annotations]
+        )
+        merged_region = Region.merge([ra.region for ra in region_annotations])
+
+        return RegionAnnotation(
+            region=merged_region,
+            descriptor=merged_descriptor,
+            source_region_annotations=region_annotations,
+        )
+
     def split(self) -> list["RegionAnnotation"]:
         """If a variable comprises multiple regions, split each region into its
         own object."""

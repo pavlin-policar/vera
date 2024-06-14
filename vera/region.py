@@ -98,7 +98,7 @@ class Region:
         return cls(embedding, polygon)
 
     @classmethod
-    def merge_regions(cls, regions: list["Region"], merge_method: str = "union"):
+    def merge(cls, regions: list["Region"], merge_method: str = "union"):
         # Ensure that all regions belong to the same embedding, otherwise
         # merging them makes little sense
         embedding = regions[0].embedding

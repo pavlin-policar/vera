@@ -74,19 +74,9 @@ def merge_contrastive(
     graph = g.edgelist_to_graph(all_ras_to_merge, edges)
     graph = g.to_undirected(graph)
     connected_components = g.connected_components(graph)
+    connected_components = list(map(g.nodes, connected_components))
 
-    merged_ras = []
-    for ras_to_merge in map(g.nodes, connected_components):
-        merged_descriptor = RegionDescriptor.merge_descriptors(
-            [ra.descriptor for ra in ras_to_merge]
-        )
-        merged_region = Region.merge_regions([ra.region for ra in ras_to_merge])
-        merged_ra = RegionAnnotation(
-            region=merged_region,
-            descriptor=merged_descriptor,
-            source_region_annotations=ras_to_merge,
-        )
-        merged_ras.append(merged_ra)
+    merged_ras = list(map(RegionAnnotation.merge, connected_components))
 
     # We now have a list of merged RAs. We still need to add the unmerged RAs
     unmerged_ras = set(all_region_annotations) - all_ras_to_merge

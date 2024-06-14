@@ -263,10 +263,10 @@ def merge_overfragmented(
         if len(region_annotations) == 1:
             return region_annotations[0]
 
-        merged_region = Region.merge_regions(
+        merged_region = Region.merge(
             [ra.region for ra in region_annotations]
         )
-        merged_descriptor = RegionDescriptor.merge_descriptors(
+        merged_descriptor = RegionDescriptor.merge(
             [ra.descriptor for ra in region_annotations]
         )
         return RegionAnnotation(

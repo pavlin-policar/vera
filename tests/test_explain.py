@@ -26,7 +26,6 @@ class ExplainTestBase(unittest.TestCase):
 class TestContrastiveRanking(ExplainTestBase):
     def test_1(self):
         layouts = vera.explain.contrastive(self.region_annotations, max_panels=2)
-        vera.pl.plot_annotations(layouts, show=True)
 
         self.assertEqual(2, len(layouts))
 

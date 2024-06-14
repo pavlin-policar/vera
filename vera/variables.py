@@ -25,7 +25,7 @@ class RegionDescriptor(metaclass=abc.ABCMeta):
         pass
 
     @staticmethod
-    def merge_descriptors(descriptors: list["RegionDescriptor"]) -> "RegionDescriptor":
+    def merge(descriptors: list["RegionDescriptor"]) -> "RegionDescriptor":
         if any(not isinstance(d, RegionDescriptor) for d in descriptors):
             descriptor_str = ", ".join(
                 [f"{d} ({d.__class__.__name__})" for d in descriptors]
