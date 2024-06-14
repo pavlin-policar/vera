@@ -1,4 +1,3 @@
-from collections import defaultdict
 from functools import reduce
 from itertools import combinations
 
@@ -7,9 +6,7 @@ from scipy import stats as stats
 
 from vera import metrics as metrics, graph as g
 from vera.explain import _layout_scores
-from vera.region import Region
-from vera.utils import group_by_base_var, flatten
-from vera.variables import RegionDescriptor
+from vera.utils import flatten, group_by_descriptor
 from vera.region_annotation import RegionAnnotation
 
 DEFAULT_RANKING_FUNCS = [
@@ -23,17 +20,9 @@ def merge_contrastive(
     region_annotations: list[list[RegionAnnotation]],
     threshold: float = 0.95
 ) -> list[list[RegionAnnotation]]:
-
-    def _merge_by_descriptor(ras) -> dict[tuple[RegionDescriptor], list[RegionAnnotation]]:
-        result = defaultdict(list)
-        for ra in ras:
-            result[ra.descriptor.contained_variables].append(ra)
-
-        return dict(result)
-
     # Group region annotations by the variables contained by the descriptors
     all_region_annotations: list[RegionAnnotation] = flatten(region_annotations)
-    region_annotations = _merge_by_descriptor(all_region_annotations)
+    region_annotations = group_by_descriptor(all_region_annotations, return_dict=True)
 
     # Generate pairs of region annotations to be merged
     edges = []
@@ -82,7 +71,7 @@ def merge_contrastive(
     unmerged_ras = set(all_region_annotations) - all_ras_to_merge
     new_ras = merged_ras + list(unmerged_ras)
 
-    grouped_new_ras = list(_merge_by_descriptor(new_ras).values())
+    grouped_new_ras = group_by_descriptor(new_ras)
 
     return grouped_new_ras
 
@@ -94,10 +83,6 @@ def contrastive(
     filter_layouts: bool = True,
     ranking_funcs=DEFAULT_RANKING_FUNCS,
 ):
-    # Although the region annotations may already be grouped by base variable,
-    # don't trust the user with this
-    region_annotations = group_by_base_var(flatten(region_annotations))
-
     # See if we can merge different variables with almost perfectly overlap
     region_annotations = merge_contrastive(region_annotations, threshold=merge_threshold)
 
