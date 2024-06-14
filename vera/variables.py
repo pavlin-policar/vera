@@ -21,7 +21,7 @@ class RegionDescriptor(metaclass=abc.ABCMeta):
 
     @property
     @abc.abstractmethod
-    def contained_variables(self) -> list["Variable"]:
+    def contained_variables(self) -> tuple["Variable"]:
         pass
 
     @staticmethod
@@ -158,8 +158,8 @@ class IndicatorVariable(Variable, RegionDescriptor):
             raise RuntimeError("This should never be reached.")
 
     @property
-    def contained_variables(self) -> list[Variable]:
-        return [self.base_variable]
+    def contained_variables(self) -> tuple[Variable]:
+        return (self.base_variable,)
 
     def __hash__(self):
         return hash((self.__class__.__name__, self.base_variable, self.rule))
@@ -242,8 +242,8 @@ class IndicatorVariableGroup(RegionDescriptor):
         return IndicatorVariableGroup(merged_variables)
 
     @property
-    def contained_variables(self) -> list[Variable]:
-        return [v.base_variable for v in self.variables]
+    def contained_variables(self) -> tuple[Variable]:
+        return tuple(v.base_variable for v in self.variables)
 
     def __hash__(self) -> int:
         return hash((self.__class__.__name__, frozenset(self.variables)))

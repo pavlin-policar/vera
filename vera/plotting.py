@@ -345,18 +345,18 @@ def _format_explanatory_variable(variable: RegionAnnotation, max_width=40):
     return "\n".join(wrap(str(variable.descriptor), width=max_width))
 
 
-def _format_explanatory_variable_group(var_group: "RegionAnnotationGroup", max_width=40):
-    var_strings = [str(v) for v in var_group.descriptor.variables]
-    if max_width is not None:
-        var_strings = [wrap(s, width=max_width) for s in var_strings]
-    else:
-        # Ensure consistent format with wrapped version
-        var_strings = [[vs] for vs in var_strings]
-
-    # Flatten string parts
-    lines = reduce(operator.add, var_strings)
-
-    return "\n".join(lines)
+# def _format_explanatory_variable_group(var_group: RegionAnnotationGroup, max_width=40):
+#     var_strings = [str(v) for v in var_group.descriptor.variables]
+#     if max_width is not None:
+#         var_strings = [wrap(s, width=max_width) for s in var_strings]
+#     else:
+#         # Ensure consistent format with wrapped version
+#         var_strings = [[vs] for vs in var_strings]
+#
+#     # Flatten string parts
+#     lines = reduce(operator.add, var_strings)
+#
+#     return "\n".join(lines)
 
 
 def _plot_region(
@@ -450,8 +450,6 @@ def plot_region(
         # Obtain the label string to draw over the region
         if isinstance(region_annotation, RegionAnnotation):
             label_str = _format_explanatory_variable(region_annotation)
-        elif isinstance(region_annotation, RegionAnnotationGroup):
-            label_str = _format_explanatory_variable_group(region_annotation)
         else:
             label_str = str(region_annotation)
 
@@ -719,8 +717,6 @@ def plot_annotation(
             # Obtain the label string to draw over the region
             if isinstance(region_annotation, RegionAnnotation):
                 label_str = _format_explanatory_variable(region_annotation)
-            elif isinstance(region_annotation, RegionAnnotationGroup):
-                label_str = _format_explanatory_variable_group(region_annotation)
             else:
                 label_str = str(region_annotation)
 
@@ -1046,36 +1042,32 @@ def plot_annotations(
         return fig, ax
 
 
-def layout_variable_colors(layout, cmap="tab10"):
-    layout_variables = list(chain.from_iterable(layout))
+def layout_variable_colors(
+    layout: list[list[RegionAnnotation]],
+    cmap="tab10",
+) -> dict[RegionAnnotation, str]:
+    all_region_annotations = set(chain.from_iterable(layout))
+
+    # We use the region descriptors rule as color key
+    region_annotation_keys = {ra: ra.descriptor for ra in all_region_annotations}
 
     # Glasbey crashes when requesting fewer colors than the cmap contains
     num_cmap_colors = len(get_cmap_colors(cmap))
-    num_colors_to_request = max(num_cmap_colors, len(layout_variables))
+    num_colors_to_request = max(num_cmap_colors, len(region_annotation_keys))
     cmap = glasbey.extend_palette(
         cmap, palette_size=num_colors_to_request, colorblind_safe=True
     )
 
-    def get_key(ra):
-        if isinstance(ra, RegionAnnotationGroup):
-            return frozenset(v.rule for v in ra.descriptor.variables)
-        elif isinstance(ra, RegionAnnotation):
-            return ra.descriptor.rule
-
-    # We use the variable rule as the key
-    var_keys = {
-        var_group: get_key(var_group) for var_group in layout_variables
+    descriptor_color_mapping = {
+        descriptor: mcolors.to_rgb(c)
+        for descriptor, c in zip(region_annotation_keys.values(), cmap)
     }
-    var_color_mapping = {
-        var_keys[var_group]: mcolors.to_rgb(c)
-        for var_group, c in zip(layout_variables, cmap)
-    }
-    var_group_colors = {
-        var_group: var_color_mapping[var_keys[var_group]]
-        for var_group in layout_variables
+    region_annotation_colors = {
+        ra: descriptor_color_mapping[region_annotation_keys[ra]]
+        for ra in all_region_annotations
     }
 
-    return var_group_colors
+    return region_annotation_colors
 
 
 def plot_discretization(

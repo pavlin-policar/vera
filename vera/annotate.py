@@ -66,7 +66,6 @@ def generate_region_annotations(
         ]
 
     return region_annotations
-    # return RACollection(map(RACollectionEntry, region_annotations))
 
 
 # def generate_indicator_explanatory_features(

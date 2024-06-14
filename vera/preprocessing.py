@@ -10,13 +10,13 @@ import vera.graph as g
 import vera.metrics as metrics
 from vera.embedding import Embedding
 from vera.region import Region
-from vera.rules import IntervalRule, EqualityRule, IncompatibleRuleError
+from vera.rules import IntervalRule, EqualityRule
 from vera.variables import (
     Variable,
     DiscreteVariable,
     ContinuousVariable,
     IndicatorVariable,
-    MergeError, RegionDescriptor,
+    RegionDescriptor,
 )
 from vera.region_annotation import RegionAnnotation
 
@@ -72,6 +72,7 @@ def ingest(data: pd.Series | pd.DataFrame) -> list[Variable]:
 
 
 def ingested_to_pandas(variables: list[Variable]) -> pd.DataFrame:
+    """Convert a list of VERA variables to a pandas dataframe."""
     df_new = pd.DataFrame()
 
     for v in variables:
@@ -81,7 +82,6 @@ def ingested_to_pandas(variables: list[Variable]) -> pd.DataFrame:
             vals = np.full_like(v.values, fill_value=np.nan, dtype=object)
             mask = ~np.isnan(v.values)
             vals[mask] = np.array(v.categories)[v.values[mask].astype(int)]
-            # vals = np.array(v.categories)[v.values.astype(int)]
             col = pd.Categorical(vals, ordered=v.ordered, categories=v.categories)
             df_new[v.name] = col
         elif isinstance(v, ContinuousVariable):
@@ -101,7 +101,7 @@ def __discretize_const(variable: ContinuousVariable) -> IndicatorVariable:
 
 
 def __discretize_nonconst(variable: ContinuousVariable, n_bins: int) -> IndicatorVariable:
-    # Discretize non-constant features
+    """Discretize non-constant continuous variables."""
     from sklearn.preprocessing import KBinsDiscretizer
     from sklearn.exceptions import ConvergenceWarning
 
@@ -145,7 +145,7 @@ def __discretize_nonconst(variable: ContinuousVariable, n_bins: int) -> Indicato
 
 
 def discretize(variable: ContinuousVariable, n_bins: int = 5) -> list[IndicatorVariable]:
-    """Discretize a continuous variables in the data frame."""
+    """Discretize a continuous variable."""
     if not isinstance(variable, ContinuousVariable):
         raise TypeError("Can only discretize continuous variables!")
 
@@ -158,7 +158,7 @@ def discretize(variable: ContinuousVariable, n_bins: int = 5) -> list[IndicatorV
 
 
 def one_hot(variable: DiscreteVariable) -> list[IndicatorVariable]:
-    """Create one-hot encodings for all discrete variables in the data frame."""
+    """One-hot endcode a discrete variable."""
     if not isinstance(variable, DiscreteVariable):
         raise TypeError("Can only one-hot-encode discrete variables!")
 
@@ -174,6 +174,30 @@ def one_hot(variable: DiscreteVariable) -> list[IndicatorVariable]:
     return one_hot_vars
 
 
+def expand(variables: list[Variable], n_discretization_bins: int = 5) -> list[list[IndicatorVariable]]:
+    """Expand a list of variables into indicator variables via discretization or
+    one-hot encoding."""
+    var_groups = []
+    for variable in variables:
+        if variable.is_continuous:
+            expanded_vars = discretize(variable, n_bins=n_discretization_bins)
+        elif variable.is_discrete:
+            expanded_vars = one_hot(variable)
+        elif variable.is_indicator:
+            expanded_vars = [variable]
+
+        var_groups.append(expanded_vars)
+
+    # Filter out columns with zero occurences. This can happen for categorical
+    # variables with categories that never actually occur in the data
+    var_groups = [[v for v in var_group if v.values.sum() > 0] for var_group in var_groups]
+    # If the filtering removed all the variables from a particular variable,
+    # remove that group. In practice, this should never happen.
+    var_groups = [var_group for var_group in var_groups if len(var_group) > 0]
+
+    return var_groups
+
+
 def expand_df(
     df: pd.DataFrame,
     n_discretization_bins: int = 5,
@@ -185,25 +209,9 @@ def expand_df(
 
     variables = ingest(df)
 
-    result = []
-    for variable in variables:
-        if variable.is_continuous:
-            expanded_vars = discretize(variable, n_bins=n_discretization_bins)
-        elif variable.is_discrete:
-            expanded_vars = one_hot(variable)
-        elif variable.is_indicator:
-            expanded_vars = [variable]
+    expanded = expand(variables, n_discretization_bins=n_discretization_bins)
 
-        result.append(expanded_vars)
-
-    # Filter out columns with zero occurences. This can happen for categorical
-    # variables with categories that never actually occur in the data
-    result = [[v for v in var_group if v.values.sum() > 0] for var_group in result]
-    # If the filtering removed all the variables from a particular variable,
-    # remove that group. In practice, this should never happen.
-    result = [var_group for var_group in result if len(var_group) > 0]
-
-    return result
+    return expanded
 
 
 def extract_region_annotations(
