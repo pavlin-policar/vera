@@ -432,11 +432,7 @@ def plot_region(
     )
 
     if draw_label:
-        # Obtain the label string to draw over the region
-        if isinstance(region_annotation, RegionAnnotation):
-            label_str = _format_descriptor(region_annotation.descriptor)
-        else:
-            label_str = str(region_annotation)
+        label_str = _format_descriptor(region_annotation.descriptor)
 
         # Draw the lable on the largest polygon in the region
         largest_polygon = max(region_annotation.region.polygon.geoms, key=lambda x: x.area)
@@ -699,11 +695,7 @@ def plot_annotation(
     if draw_labels:
         label_data = []
         for region_annotation in region_annotations:
-            # Obtain the label string to draw over the region
-            if isinstance(region_annotation, RegionAnnotation):
-                label_str = _format_descriptor(region_annotation.descriptor)
-            else:
-                label_str = str(region_annotation)
+            label_str = _format_descriptor(region_annotation.descriptor)
 
             # Draw the lable on the largest polygon in the region
             largest_polygon = max(region_annotation.region.polygon.geoms, key=lambda x: x.area)
