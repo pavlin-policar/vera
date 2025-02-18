@@ -2,7 +2,8 @@
 
 [![BSD 3-Clause License](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
 
-![](docs/source/images/main-example.png)
+> [!warning]
+> This library is under active development. While the core algorithm and code are mostly stable, the plotting utilities will certainly change. I still haven't found a satisfactory way to do label placement, so this will definitely change.
 
 VERA automatically generates visual explanations of two-dimensional embeddings. When dealing with high-dimensional data, a common first step is to generate a two-dimensional embedding using your dimensionality reduction algorithm of choice (t-SNE, UMAP, PCA) and visualize it in a scatter plot. However, once we have a visualization, the next step typically involves figuring out what each particular region or cluster in the embedding corresponds to. This is often tedious and requires us to tinker around in notebooks or interactive tools to figure out what's what.
 
@@ -11,6 +12,8 @@ The aim of VERA is to automate this process and automatically generate a series 
 - [Documentation]() (TODO)
 - [User Guide and Tutorial]() (TODO)
 - [Preprint](https://arxiv.org/abs/2406.04808)
+
+![](docs/source/images/main-example.png)
 
 A few caveats and limitations:
 - VERA generates explanations using a provided set of features, which should be interpretable to the user.
