@@ -172,8 +172,11 @@ class IndicatorVariable(Variable, RegionDescriptor):
     def __lt__(self, other):
         return (self.base_variable, self.rule) < (other.base_variable, other.rule)
 
-    def __repr__(self):
+    def __str__(self):
         return str(self.rule)
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({str(self.rule)})"
 
 
 def merge_indicator_variables(variables: list[IndicatorVariable]) -> list[IndicatorVariable]:
@@ -252,6 +255,9 @@ class IndicatorVariableGroup(RegionDescriptor):
         if not isinstance(other, self.__class__):
             return False
         return frozenset(self.variables) == frozenset(other.variables)
+
+    def __str__(self) -> str:
+        return "\n".join(str(d) for d in self.variables)
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}([{', '.join([str(v) for v in self.variables])}])"

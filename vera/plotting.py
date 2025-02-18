@@ -339,22 +339,9 @@ def plot_densities(
         return fig, ax
 
 
-def _format_explanatory_variable(variable: RegionAnnotation, max_width=40):
-    return "\n".join(wrap(str(variable.descriptor), width=max_width))
-
-
-# def _format_explanatory_variable_group(var_group: RegionAnnotationGroup, max_width=40):
-#     var_strings = [str(v) for v in var_group.descriptor.variables]
-#     if max_width is not None:
-#         var_strings = [wrap(s, width=max_width) for s in var_strings]
-#     else:
-#         # Ensure consistent format with wrapped version
-#         var_strings = [[vs] for vs in var_strings]
-#
-#     # Flatten string parts
-#     lines = reduce(operator.add, var_strings)
-#
-#     return "\n".join(lines)
+def _format_descriptor(descriptor: RegionDescriptor, max_width=40):
+    return str(descriptor)
+    # return "\n".join(wrap(str(descriptor.get_label_for_plotting()), width=max_width))
 
 
 def _plot_region(
@@ -447,7 +434,7 @@ def plot_region(
     if draw_label:
         # Obtain the label string to draw over the region
         if isinstance(region_annotation, RegionAnnotation):
-            label_str = _format_explanatory_variable(region_annotation)
+            label_str = _format_descriptor(region_annotation.descriptor)
         else:
             label_str = str(region_annotation)
 
@@ -714,7 +701,7 @@ def plot_annotation(
         for region_annotation in region_annotations:
             # Obtain the label string to draw over the region
             if isinstance(region_annotation, RegionAnnotation):
-                label_str = _format_explanatory_variable(region_annotation)
+                label_str = _format_descriptor(region_annotation.descriptor)
             else:
                 label_str = str(region_annotation)
 
