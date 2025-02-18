@@ -5,7 +5,6 @@ from scipy import stats as stats
 
 from vera import metrics as metrics, graph as g
 from vera.explain import _layout_scores
-from vera.region import Region
 from vera.utils import flatten
 from vera.region_annotation import RegionAnnotation
 from vera.variables import RegionDescriptor
