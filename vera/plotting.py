@@ -1,9 +1,12 @@
+import re
 import string
 import warnings
 from collections.abc import Iterable
 from itertools import cycle, chain
+from tempfile import NamedTemporaryFile
 from textwrap import wrap
 from typing import Any, Union
+from warnings import warn
 
 import glasbey
 import matplotlib.axes
@@ -16,13 +19,59 @@ import matplotlib.text
 import matplotlib.ticker as ticker
 import numpy as np
 import pandas as pd
+import requests
+import shapely
+from matplotlib import font_manager
 from matplotlib.patches import PathPatch
 from matplotlib.path import Path
 
 import vera.metrics as metrics
-from vera.label_placement import initial_text_location_placement, get_2d_coordinates, fix_crossings
+from vera.label_placement import (
+    initial_text_location_placement,
+    get_2d_coordinates,
+    fix_crossings,
+    fit_elements_onto_axis,
+    optimize_label_positions,
+    get_ax_bounding_box,
+    set_ax_bounding_box, set_bbox_square_aspect, add_bbox_padding, center_bbox_on_element,
+)
 from vera.region import Density, Region
 from vera.region_annotation import RegionAnnotation
+from vera.variables import RegionDescriptor
+
+
+class GoogleAPIUnreachable(Warning):
+    pass
+
+
+# From datamapplot (https://github.com/TutteInstitute/datamapplot)
+def _can_reach_google_fonts(timeout: float = 5.0) -> bool:
+    try:
+        response = requests.get(
+            "https://fonts.googleapis.com/css?family=Roboto", timeout=timeout
+        )
+        return response.ok
+    except requests.RequestException:
+        return False
+
+
+# From datamapplot (https://github.com/TutteInstitute/datamapplot)
+def get_google_font(fontname):
+    try:
+        api_fontname = fontname.replace(" ", "+")
+        api_response = requests.get(
+            f"https://fonts.googleapis.com/css?family={api_fontname}:black,bold,regular,light"
+        )
+        if api_response.ok:
+            font_urls = re.findall(r"(https?://[^\)]+)", str(api_response.content))
+            for font_url in font_urls:
+                font_data = requests.get(font_url)
+                f = NamedTemporaryFile(delete=False, suffix=".ttf")
+                f.write(font_data.content)
+                f.close()
+                font_manager.fontManager.addfont(f.name)
+    except:
+        warn(f"Failed in getting google-font {fontname}; using fallback ...")
 
 
 def plot_feature(
@@ -340,8 +389,9 @@ def plot_densities(
 
 
 def _format_descriptor(descriptor: RegionDescriptor, max_width=40):
-    return str(descriptor)
-    # return "\n".join(wrap(str(descriptor.get_label_for_plotting()), width=max_width))
+    s_lines = str(descriptor).split("\n")
+    s_lines = ["\n".join(wrap(l, width=max_width)) for l in s_lines]
+    return "\n".join(s_lines)
 
 
 def _plot_region(
@@ -642,11 +692,11 @@ def plot_annotation(
             ra: mcolors.to_rgb(c) for ra, c in zip(region_annotations, cmap)
         }
 
-    # Save region patches to be used for label placement. We don't need both 
+    # Save region patches to be used for label placement. We don't need both
     # fill and edge patches, so use either of the two. Here, we use fill patches
     region_patches = []
     for region_annotation in region_annotations:
-        fill_patches, edge_patches = _plot_region(
+        _plot_region(
             region_annotation,
             ax=ax,
             fill_color=ra_colors[region_annotation],
@@ -701,20 +751,26 @@ def plot_annotation(
             largest_polygon = max(region_annotation.region.polygon.geoms, key=lambda x: x.area)
             x, y = largest_polygon.centroid.coords[0]
 
-            label_data.append({"text": label_str, "pos": [x, y], "color": ra_colors[region_annotation]})
+            label_data.append({
+                "text": label_str,
+                "pos": [x, y],
+                "pos_region": largest_polygon,
+                "color": ra_colors[region_annotation]
+            })
 
-        label_positions = [lbl["pos"] for lbl in label_data]
-        label_text_positions = initial_text_location_placement(
-            embedding, label_positions, radius_factor=0.5
+        # Determine an initial placement for the labels
+        label_targets = np.array([lbl["pos"] for lbl in label_data])
+        label_positions = initial_text_location_placement(
+            embedding, label_targets, radius_factor=0,
         )
-        # label_text_positions[:] = 0
-        fix_crossings(label_text_positions, label_positions)
+        fix_crossings(label_positions, label_targets)
 
+        # Create label objects, which can later be optimized
         label_kwargs_ = dict(
             ha="center",
             ma="center",
             va="center",
-            fontsize=7,
+            fontsize=9,
             # fontstretch="condensed",
             # fontweight="light",
             fontfamily="Helvetica Neue",
@@ -723,19 +779,7 @@ def plot_annotation(
         label_kwargs_.update(label_kwargs)
 
         label_objs = []
-        for lbl_data, label_text_pos in zip(label_data, label_text_positions):
-            # label_objs.append(ax.annotate(
-            #     lbl_data["text"],
-            #     lbl_data["pos"],
-            #     xytext=label_text_pos,
-            #     color=lbl_data["color"],
-            #     **label_kwargs_,
-            #     arrowprops={
-            #         "arrowstyle": "-",
-            #         "linewidth": 1,
-            #         "color": lbl_data["color"],
-            #     },
-            # ))
+        for lbl_data, label_text_pos in zip(label_data, label_positions):
             label_objs.append(
                 ax.text(
                     *label_text_pos,
@@ -744,33 +788,36 @@ def plot_annotation(
                     **label_kwargs_,
                 )
             )
-    
-    # Calculate how small we want the final embedding to actually be, or, 
-    # equivalently, what are the maximum limits we want to allow
-    min_coords = np.min(embedding, axis=0)
-    max_coords = np.max(embedding, axis=0)
-    embedding_scale = np.max(max_coords - min_coords)
-    max_axis_limits = embedding_scale / min_embedding_size
 
-    # Rescale the axes so the text doesn't overflow the canvas
-    rescale_axes(label_objs, ax, padding=0, max_axis_limits=max_axis_limits, scatter_obj=scatter_obj)
+        # Rescale the axes so the text doesn't overflow the canvas
+        # fit_elements_onto_axis(
+        #     ax,
+        #     label_objs=label_objs,
+        #     scatter_obj=scatter_obj,
+        #     padding=(0.03, 0.03),
+        #     # padding=(0.1, 0.1),
+        #     min_scatter_size=min_embedding_size,
+        # )
 
-    # Where are the labels supposed to point to?
-    label_targets = np.array([data["pos"] for data in label_data])
+        # Where are the labels supposed to point to?
+        label_target_regions = np.array([data["pos_region"] for data in label_data])
 
-    # Optimize label positions so that there is minimal overlap and the labels 
-    # are as compact as possible
-    optimize_label_positions(label_objs, label_targets, region_patches, ax, scatter_obj=scatter_obj, max_axis_limits=max_axis_limits)
+        ax_bbox = get_ax_bounding_box(ax)
+        ax_bbox = center_bbox_on_element(ax_bbox, center_point=(0, 0))
+        ax_bbox = set_bbox_square_aspect(ax_bbox)
+        ax_bbox = add_bbox_padding(ax_bbox, padding=(0.2, 0.2))
+        set_ax_bounding_box(ax, ax_bbox)
 
-    import matplotlib.patches as mpatches
-    coords = get_2d_coordinates(label_objs, expand=(1, 1))
-    for x0, x1, y0, y1 in coords:
-        x0y0t = ax.transData.inverted().transform([x0, y0])
-        x1y1t = ax.transData.inverted().transform([x1, y1])
-        wt, ht = x1y1t - x0y0t
-        ax.add_patch(mpatches.Rectangle(x0y0t, wt, ht, fill=False))
+        # Optimize label positions so that there is minimal overlap and the labels
+        # are as compact as possible
+        optimize_label_positions(
+            label_objs, label_target_regions, region_patches, ax,
+        )
 
-    ax.set(xticks=[], yticks=[])
+        # Plot line from region to the label bounding box
+        ...
+
+    # ax.set(xticks=[], yticks=[])
     # ax.set(box_aspect=1, aspect=1)
 
     if show:
@@ -778,194 +825,6 @@ def plot_annotation(
 
     if return_ax:
         return label_objs, fig, ax
-
-
-def rescale_axes(
-    label_objs: list[matplotlib.text.Text],
-    ax: matplotlib.axes.Axes,
-    max_iter: int = 25,
-    padding: float = 0,
-    eps: float = 0.1,
-    scatter_obj: matplotlib.collections.LineCollection = None,
-    max_axis_limits: float = 0.25,
-):
-    """Ensure that the labels fit onto the plot canvas. Because the label 
-    fontsize is kept consistent, and rescaling the axes changes the size and 
-    positions of the labels, this is run multiple times until a maximum number
-    of iterations has been reached or until the label bounding boxes stop
-    changing."""
-
-    # TODO: Move this out of the function
-    import logging
-    logger = logging.getLogger("VERA")
-
-    # Determine scatter plot bounds if available
-    if scatter_obj is not None:
-        scatter_positions = scatter_obj.get_offsets()
-        sc_x_min, sc_y_min = np.min(scatter_positions, axis=0)
-        sc_x_max, sc_y_max = np.max(scatter_positions, axis=0)
-
-    coords = get_2d_coordinates(label_objs)
-    for i in range(max_iter):
-        # Get label bounding box limits
-        bb_x_min, bb_y_min = ax.transData.inverted().transform(
-            (coords[:, [0, 2]].copy().min(axis=0))
-        )
-        bb_x_max, bb_y_max = ax.transData.inverted().transform(
-            (coords[:, [1, 3]].copy().max(axis=0))
-        )
-
-        # Apply padding to label bounding boxes if necessary
-        if padding > 0:
-            width = bb_x_max - bb_x_min
-            height = bb_y_max - bb_y_min
-            bb_x_min -= padding * width
-            bb_x_max += padding * width
-            bb_y_min -= padding * height
-            bb_y_max += padding * height
-
-        if scatter_obj is not None:
-            x_new_min = min(bb_x_min, sc_x_min)
-            y_new_min = min(bb_y_min, sc_y_min)
-            x_new_max = max(bb_x_max, sc_x_max)
-            y_new_max = max(bb_y_max, sc_y_max)
-        else:
-            x_new_min = bb_x_min
-            y_new_min = bb_y_min
-            x_new_max = bb_x_max
-            y_new_max = bb_y_max
-
-        # Force aspect ratio to 1
-        # Determine which of the spans is larger
-        x_span = x_new_max - x_new_min
-        y_span = y_new_max - y_new_min
-        long_span = max(x_span, y_span)
-        # How much do we need to add to the shorter span to match the longer one
-        x_span_diff = long_span - x_span
-        y_span_diff = long_span - y_span
-
-        ax.set_xlim(x_new_min - x_span_diff / 2, x_new_max + x_span_diff / 2)
-        ax.set_ylim(y_new_min - y_span_diff / 2, y_new_max + y_span_diff / 2)
-
-        # Get new coordinates after rescaling
-        new_coords = get_2d_coordinates(label_objs)
-        if np.allclose(coords, new_coords, atol=eps):
-            logger.debug(f"Stopped after {i} iterations")
-            break
-        coords = new_coords
-
-
-def optimize_label_positions(
-    label_objs: list[matplotlib.text.Text],
-    label_targets,
-    region_objs: list[matplotlib.patches.PathPatch],
-    ax: matplotlib.axes.Axes,
-    scatter_obj: matplotlib.collections.LineCollection,
-    eps: float = 0.1,
-    max_axis_limits: float = None,
-):
-    import shapely
-
-    # TODO: Move this out of the function
-    import logging
-    logger = logging.getLogger("VERA")
-
-    for epoch in range(500):
-        updates = np.zeros(shape=(len(label_objs), 2), dtype=float)
-
-        # Get the bounding boxes of each label object as shapely objects
-        label_coords = get_2d_coordinates(label_objs, expand=(1, 1))
-        bounding_boxes = []
-        bounding_box_centroids = []
-        for x0, x1, y0, y1 in label_coords:
-            x0, y0 = ax.transData.inverted().transform([x0, y0])
-            x1, y1 = ax.transData.inverted().transform([x1, y1])
-            bounding_box = shapely.Polygon([(x0, y0), (x0, y1), (x1, y1), (x1, y0)])
-            bounding_boxes.append(bounding_box)
-            bounding_box_centroids.append([
-                bounding_box.centroid.xy[0][0],
-                bounding_box.centroid.xy[1][0],
-            ])
-        bounding_box_centroids = np.array(bounding_box_centroids)
-
-        # Compute gravity: center of mass to origin
-        # F_gravity = -bounding_box_centroids
-        F_gravity = np.zeros_like(updates)
-        # Compute gravity: because labels are horizontally long, instead of 
-        # using the center of mass, we will apply gravity to all four corner 
-        # points of the bounding box. This should *hopefully* encourage wide 
-        # bounding boxes to be more centrally positioned. Additionally, we will
-        # apply stronger gravity to the x-coordinate than to the y-coordinate
-        xy_gravity_weights = np.array([4, 1])
-        for i, bb_i in enumerate(bounding_boxes):
-            x_min, y_min, x_max, y_max = bb_i.bounds
-            boundary_points = np.array([
-                [x_min, y_min],
-                [x_max, y_min],
-                [x_max, y_max],
-                [x_min, y_max],
-            ])
-            # dists = np.linalg.norm(boundary_points, axis=1)
-            # i_max = np.argmax(dists)
-            F_gravity[i] -= xy_gravity_weights * np.sum(boundary_points, axis=0)
-
-        # Label-target attraction
-        F_attr = label_targets - bounding_box_centroids
-
-        # Label-label repulsion
-        F_label_rep = np.zeros_like(updates)
-        for i in range(len(label_objs)):
-            for j in range(i + 1, len(label_objs)):
-                # Compute direction of repulsion
-                repulsion_vector = bounding_box_centroids[i] - bounding_box_centroids[j]
-                repulsion_vector /= np.linalg.norm(repulsion_vector)
-
-                # Compute the distance between the nearest points on both 
-                # bounding boxes
-                dist = bounding_boxes[i].distance(bounding_boxes[j])
-                # After a certain point, we don't really care how far apart the 
-                # labels are
-                margin = 5
-                weight = 1 - min(margin, dist) / margin
-                #weight = 1 / max(dist, 1)
-                F_label_rep[i] += weight * repulsion_vector
-                F_label_rep[j] -= weight * repulsion_vector
-
-        # Label-region repulsion
-        F_region_rep = np.zeros_like(updates)
-        # path = region_objs[0].get_path()
-        # print(shapely.Polygon(path.vertices))
-        for i, bb_i in enumerate(bounding_boxes):
-            for j, region_j in enumerate(region_objs):
-                region_centroid = np.array(region_j.centroid.xy).ravel()
-
-                # Compute direction of repulsion
-                repulsion_vector = bounding_box_centroids[i] - region_centroid
-                repulsion_vector /= np.linalg.norm(repulsion_vector)
-
-                # Compute the distance between the nearest points on both 
-                # bounding boxes
-                dist = bb_i.distance(region_j)
-                # After a certain point, we don't really care how far apart the 
-                # labels are
-                margin = 5
-                weight = 1 - min(margin, dist) / margin
-                #weight = 1 / max(dist, 1)
-                F_region_rep[i] += weight * repulsion_vector
-
-        updates = 0.001 * F_gravity + 0.001 * F_attr + 1 * F_region_rep + 1 * F_label_rep
-
-        lr = 10
-        for label_obj, label_update in zip(label_objs, updates):
-            text_pos = np.array(label_obj.get_position())
-            label_obj.set_position(text_pos + lr * label_update)
-
-        rescale_axes(label_objs, ax, max_axis_limits=max_axis_limits, scatter_obj=scatter_obj)
-
-        logger.debug("update norm", np.linalg.norm(updates))
-        # Check if stopping criteria met
-        if np.linalg.norm(updates) < eps:
-            break
 
 
 def plot_annotations(

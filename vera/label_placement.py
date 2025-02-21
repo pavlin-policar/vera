@@ -1,13 +1,20 @@
 import io
 
+import matplotlib
 import numpy as np
+import shapely
+import shapely.ops
 from matplotlib import pyplot as plt
+from scipy.spatial import distance
 from sklearn.metrics import pairwise_distances
 
 try:
     from matplotlib.backend_bases import _get_renderer as matplot_get_renderer
 except ImportError:
     matplot_get_renderer = None
+
+# Define useful types
+BoundingBox = tuple[float, float, float, float]
 
 
 def ccw(a, b, c):
@@ -64,29 +71,37 @@ def get_renderer(fig):
 def get_bboxes(objs, r=None, expand=(1, 1), ax=None):
     ax = ax or plt.gca()
     r = r or get_renderer(ax.get_figure())
-    return [i.get_window_extent(r).expanded(*expand) for i in objs]
+    return [obj.get_window_extent(r).expanded(*expand) for obj in objs]
 
 
-# From adjustText (https://github.com/Phlya/adjustText)
+# Adapted from adjustText (https://github.com/Phlya/adjustText)
 def get_2d_coordinates(objs, expand=(1, 1)):
+    """Get the bounding box bottom-left and top-right coordinates in data units.
+
+    Returns
+    -------
+    np.ndarray[N, 4]
+        Bounding box coordinates in data space: x0, y0, x1, y1
+    """
     try:
         ax = objs[0].axes
     except:
         ax = objs.axes
     bboxes = get_bboxes(objs, get_renderer(ax.get_figure()), expand, ax)
-    xs = [
-        (ax.convert_xunits(bbox.xmin), ax.convert_yunits(bbox.xmax)) for bbox in bboxes
-    ]
-    ys = [
-        (ax.convert_xunits(bbox.ymin), ax.convert_yunits(bbox.ymax)) for bbox in bboxes
-    ]
-    coords = np.hstack([np.array(xs), np.array(ys)])
-    return coords
+    bl = np.array([(bbox.xmin, bbox.ymin) for bbox in bboxes])
+    tr = np.array([(bbox.xmax, bbox.ymax) for bbox in bboxes])
+
+    # Convert display coords to data coordinate space
+    display_to_data = ax.transData.inverted()
+    bl = display_to_data.transform(bl)
+    tr = display_to_data.transform(tr)
+
+    return np.hstack([bl, tr])
 
 
 # Adapted from datamapplot (https://github.com/TutteInstitute/datamapplot)
 def initial_text_location_placement(
-    embedding, label_locations, label_radius=None, radius_factor=0.25
+    embedding, label_locations, label_radius=None, radius_factor=0.25,
 ):
     """Find an initial placement for labels.
 
@@ -130,7 +145,8 @@ def initial_text_location_placement(
     # locations, and select the rotation which achieves the best matching
     best_rotation = 0
     min_score = np.inf
-    best_dists_to_labels = None
+    best_label_spoke_pairing = None
+
     for rotation in np.linspace(
         -np.pi / int(len(label_thetas) + 5), np.pi / int(len(label_thetas) + 5), 32
     ):
@@ -138,16 +154,44 @@ def initial_text_location_placement(
         test_spoke_label_locations = np.vstack([
             np.cos(spoke_thetas + rotation), np.sin(spoke_thetas + rotation),
         ]).T
+
+        # Determine an initial ordering on how to match labels to their spokes
+        # By default, we will match the closest ones first
         distances = pairwise_distances(
             label_locations, test_spoke_label_locations, metric="cosine"
-        )
+)
+        # Find and sort the labels by their minimum distance to the nearest spoke
+        best_dists_to_labels = np.min(distances, axis=1)
+        label_order = np.argsort(best_dists_to_labels)
+
+        spokes_taken = set()
+        label_spoke_pairing = {}
+        for label_idx in label_order:
+            # Compute the distance from the current label to the remaining available
+            # spoke locations
+            candidates = list(set(range(test_spoke_label_locations.shape[0])) - spokes_taken)
+            candidate_distances = pairwise_distances(
+                [label_locations[label_idx]],
+                test_spoke_label_locations[candidates],
+                metric="cosine",
+            )
+            closest_spoke = candidates[np.argmin(candidate_distances[0])]
+            label_spoke_pairing[label_idx] = closest_spoke
+            spokes_taken.add(closest_spoke)
+
+        # Having assigned each label its closest available spoke, calculate the
+        # average distance for each pair
+        cosine_dists = np.array([
+            distance.cosine(label_locations[k], test_spoke_label_locations[v])
+            for k, v in label_spoke_pairing.items()
+        ])
+        score = np.mean(cosine_dists)
+
         # The score is the sum of the distances to the nearest spoke
-        score = np.sum(np.min(distances, axis=1))
         if score < min_score:
             min_score = score
             best_rotation = rotation
-            # Store the distances to each labels' nearest spoke for later
-            best_dists_to_labels = np.min(distances, axis=1)
+            best_label_spoke_pairing = label_spoke_pairing
 
     # Convert the spoke locations to cartesian coordinates
     spoke_label_locations = np.vstack([
@@ -155,27 +199,456 @@ def initial_text_location_placement(
         label_radius * np.sin(spoke_thetas + best_rotation),
     ]).T
 
-    # Sort the labels by distance to their best matching ring spoke
-    label_order = np.argsort(best_dists_to_labels)
-    taken = set()
-    adjustment_dict_alt = {}
-    for label_idx in label_order:
-        # Compute the distance from the current label to the remaining available
-        # spoke locations
-        candidates = list(set(range(spoke_label_locations.shape[0])) - taken)
-        candidate_distances = pairwise_distances(
-            [label_locations[label_idx]],
-            spoke_label_locations[candidates],
-            metric="cosine",
-        )
-        selection = candidates[np.argmin(candidate_distances[0])]
-        adjustment_dict_alt[label_idx] = selection
-        taken.add(selection)
-
     label_locations = np.asarray([
-        spoke_label_locations[adjustment_dict_alt[i]]
-        for i in sorted(adjustment_dict_alt.keys())
+        spoke_label_locations[best_label_spoke_pairing[i]]
+        for i in sorted(best_label_spoke_pairing.keys())
     ])
 
     # Un-center label positions
     return label_locations + embedding_center_point
+
+
+def get_ax_bounding_box(ax: matplotlib.axes.Axes) -> BoundingBox:
+    ax_x_min, ax_x_max = ax.get_xlim()
+    ax_y_min, ax_y_max = ax.get_ylim()
+    return ax_x_min, ax_y_min, ax_x_max, ax_y_max
+
+
+def set_ax_bounding_box(ax: matplotlib.axes.Axes, bbox: BoundingBox) -> None:
+    x_min, y_min, x_max, y_max = bbox
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min, y_max)
+
+
+def set_bbox_square_aspect(bbox: BoundingBox) -> BoundingBox:
+    """Convert given bounding box coords to square aspect ratio, preserving the
+    longer side"""
+    x_min, y_min, x_max, y_max = bbox
+
+    x_span = x_max - x_min
+    y_span = y_max - y_min
+    longer_span = max(x_span, y_span)
+
+    # How much do we need to add to the shorter span to match the longer one
+    x_span_diff = longer_span - x_span
+    y_span_diff = longer_span - y_span
+
+    new_x_min = x_min - x_span_diff / 2
+    new_x_max = x_max + x_span_diff / 2
+    new_y_min = y_min - y_span_diff / 2
+    new_y_max = y_max + y_span_diff / 2
+
+    return new_x_min, new_y_min, new_x_max, new_y_max
+
+
+def add_bbox_padding(bbox: BoundingBox, padding=(1, 1)) -> BoundingBox:
+    x_min, y_min, x_max, y_max = bbox
+    x_padding, y_padding = padding
+
+    if x_padding > 0:
+        x_span = x_max - x_min
+        x_min -= x_padding * x_span
+        x_max += x_padding * x_span
+
+    if y_padding > 0:
+        y_span = y_max - y_min
+        y_min -= y_padding * y_span
+        y_max += y_padding * y_span
+
+    return x_min, y_min, x_max, y_max
+
+
+def center_bbox_on_element(
+    bbox: BoundingBox, center_bbox: BoundingBox = None, center_point=None
+) -> BoundingBox:
+    """Center the bounding box on a given element, ensuring the element is
+    completely contained within the bounding box, and extending the bounding box
+    as needed."""
+    bb_x_min, bb_y_min, bb_x_max, bb_y_max = bbox
+
+    if center_bbox is not None:
+        el_x_min, el_y_min, el_x_max, el_y_max = center_bbox
+
+    # If a center point is given, use that, otherwise use the center of the
+    # bounding box
+    if center_point is None:
+        if center_bbox is None:
+            raise ValueError(
+                "Either `center_point` or `center_bbox` must be specified!"
+            )
+        x_center = el_x_min + (el_x_max - el_x_min) / 2
+        y_center = el_y_min + (el_y_max - el_y_min) / 2
+    else:
+        x_center, y_center = center_point
+
+    # Ensure the bounding box fits the entire center element
+    if center_bbox is not None:
+        bb_x_min = min(el_x_min, bb_x_min)
+        bb_y_min = min(el_y_min, bb_y_min)
+        bb_x_max = max(el_x_max, bb_x_max)
+        bb_y_max = max(el_y_max, bb_y_max)
+
+    # Determine how much space we need in both x/y directions from the center
+    centered_x_dist = max(
+        abs(x_center - bb_x_min), abs(x_center - bb_x_max)
+    )
+    centered_y_dist = max(
+        abs(y_center - bb_y_min), abs(y_center - bb_y_max)
+    )
+
+    bb_x_min = x_center - centered_x_dist
+    bb_x_max = x_center + centered_x_dist
+    bb_y_min = y_center - centered_y_dist
+    bb_y_max = y_center + centered_y_dist
+
+    return bb_x_min, bb_y_min, bb_x_max, bb_y_max
+
+
+def enforce_scatterplot_size(
+    bbox: BoundingBox, scatter_bbox: BoundingBox, min_scatter_size: float
+) -> BoundingBox:
+    """For a given bounding box and a scatter plot bounding box, ensure that the
+    scatter plot takes up at least `min_scatter_size` proportion of the bounding
+    box."""
+    x_min, y_min, x_max, y_max = bbox
+    sc_x_min, sc_y_min, sc_x_max, sc_y_max = scatter_bbox
+
+    sc_x_span = sc_x_max - sc_x_min
+    sc_y_span = sc_y_max - sc_y_min
+    max_x_axis_span = sc_x_span / min_scatter_size
+    max_y_axis_span = sc_y_span / min_scatter_size
+
+    x_span = x_max - x_min
+    y_span = y_max - y_min
+
+    if (x_axis_diff := max_x_axis_span - x_span) < 0:
+        diff_each_side = abs(x_axis_diff) / 2
+        x_max -= diff_each_side
+        x_min += diff_each_side
+
+    if (y_axis_diff := max_y_axis_span - y_span) < 0:
+        diff_each_side = abs(y_axis_diff) / 2
+        y_max -= diff_each_side
+        y_min += diff_each_side
+
+    return x_min, y_min, x_max, y_max
+
+
+def fit_elements_onto_axis(
+    ax: matplotlib.axes.Axes,
+    label_objs: list[matplotlib.text.Text],
+    max_iter: int = 10,
+    padding: tuple[float, float] = (0, 0),
+    eps: float = 1,
+    scatter_obj: matplotlib.collections.LineCollection = None,
+    center_on_scatter: bool = True,
+    min_scatter_size: float = 0.25,
+):
+    """Ensure that the labels fit onto the plot canvas. Because the label
+    fontsize is kept constant and rescaling the axes changes the size and
+    positions of the labels, this has to be iterated until the label bounding
+    boxes stop changing."""
+    # TODO: Move this out of the function
+    import logging
+    logger = logging.getLogger("VERA")
+
+    # Determine scatter plot bounds if available
+    if scatter_obj is not None:
+        scatter_positions = scatter_obj.get_offsets()
+        sc_x_min, sc_y_min = np.min(scatter_positions, axis=0)
+        sc_x_max, sc_y_max = np.max(scatter_positions, axis=0)
+
+        if center_on_scatter:
+            sc_x_center, sc_y_center = np.mean(scatter_positions, axis=0)
+
+    coords = get_2d_coordinates(label_objs)
+
+    for i in range(max_iter):
+        bb_x_min, bb_y_min = np.min(coords[:, [0, 1]], axis=0)
+        bb_x_max, bb_y_max = np.max(coords[:, [2, 3]], axis=0)
+
+        # If we have a scatter plot element, ensure that the limits include that
+        if scatter_obj is not None:
+            bb_x_min = min(sc_x_min, bb_x_min)
+            bb_y_min = min(sc_y_min, bb_y_min)
+            bb_x_max = max(sc_x_max, bb_x_max)
+            bb_y_max = max(sc_y_max, bb_y_max)
+
+        # If the scatter plot is to be centered, extend bounds as needed
+        if scatter_obj is not None and center_on_scatter:
+            centered_x_dist = max(
+                abs(sc_x_center - bb_x_min), abs(sc_x_center - bb_x_max)
+            )
+            centered_y_dist = max(
+                abs(sc_y_center - bb_y_min), abs(sc_y_center - bb_y_max)
+            )
+            bb_x_min = sc_x_center - centered_x_dist
+            bb_x_max = sc_x_center + centered_x_dist
+            bb_y_min = sc_y_center - centered_y_dist
+            bb_y_max = sc_y_center + centered_y_dist
+
+        # Ensure the scatter element isn't too small
+        if scatter_obj and min_scatter_size > 0:
+            bb_x_min, bb_y_min, bb_x_max, bb_y_max = enforce_scatterplot_size(
+                (bb_x_min, bb_y_min, bb_x_max, bb_y_max),
+                (sc_x_min, sc_y_min, sc_x_max, sc_y_max),
+                min_scatter_size=min_scatter_size,
+            )
+
+        # Apply padding
+        bb_x_min, bb_y_min, bb_x_max, bb_y_max = add_bbox_padding(
+            (bb_x_min, bb_y_min, bb_x_max, bb_y_max), padding=padding
+        )
+
+        # Force square aspect ratio
+        bb_x_min, bb_y_min, bb_x_max, bb_y_max = set_bbox_square_aspect(
+            (bb_x_min, bb_y_min, bb_x_max, bb_y_max)
+        )
+
+        ax.set_xlim(bb_x_min, bb_x_max)
+        ax.set_ylim(bb_y_min, bb_y_max)
+
+        # Get new coordinates after rescaling
+        new_coords = get_2d_coordinates(label_objs)
+        if np.allclose(coords, new_coords, atol=eps):
+            logger.debug(f"Stopped after {i} iterations")
+            break
+        coords = new_coords
+
+
+def get_label_bounding_boxes(labels: list[matplotlib.text.Text]) -> list[shapely.Polygon]:
+    label_coords = get_2d_coordinates(labels, expand=(1, 1))
+    bounding_boxes = []
+    for x0, y0, x1, y1 in label_coords:
+        bounding_box = shapely.Polygon([(x0, y0), (x0, y1), (x1, y1), (x1, y0)])
+        bounding_boxes.append(bounding_box)
+
+    return bounding_boxes
+
+
+def convert_ax_to_data(ax, fraction: float, reduction="max") -> float:
+    """Convert a number in the axis units to data units."""
+    axis_to_data_transform = (ax.transAxes + ax.transData.inverted()).transform
+    p0, p1 = axis_to_data_transform([[0, 0], [fraction, fraction]])
+    diff = np.abs(p1 - p0)
+    match reduction:
+        case "max":
+            return np.max(diff)
+        case "min":
+            return np.max(diff)
+        case _:
+            raise ValueError(f"Unrecognized reduction `{reduction}`")
+
+
+def get_vector_between(
+    geom1: shapely.Polygon,
+    geom2: shapely.Polygon,
+    between: str = "auto",
+) -> tuple[np.ndarray, float]:
+    """Given two polygons, determine their direction of attraction/repulsion.
+
+    Parameters
+    ----------
+    geom1: shapely.Polygon
+    geom2: shapely.Polygon
+    between: str
+        Specifies how the vector and distance between polygons is calculated.
+        Can be onen of "boundaries", "centroids", and "auto".
+        The behavior for "auto" is as follows:
+        - For intersecting polygons, the direction is determined by the
+          differences in their centroids. The distance for interseting polygons
+          is always 0.
+        - For disjoint polygons, the direction is determined along the line
+          connecting the two closest points in both polygons. The distance is
+          determined by the length of this line.
+
+    Returns
+    -------
+    np.ndarray
+        The unit-scaled vector corresponding to the direction of
+        attraction/repulsion.
+    float
+        The distance between two polygons.
+
+    """
+    def _between_centroids(geom1, geom2):
+        g1_centroid = np.array(geom1.centroid.xy).ravel()
+        g2_centroid = np.array(geom2.centroid.xy).ravel()
+
+        vector = g1_centroid - g2_centroid
+        vector /= np.linalg.norm(vector) + 1e-8
+        dist = shapely.distance(geom1, geom2)
+
+        return vector, dist
+
+    def _between_boundaries(geom1, geom2):
+        # Get the coordinates of the two points that lie closest to one another
+        p_g1, p_g2 = shapely.ops.nearest_points(geom1.boundary, geom2.boundary)
+        p_g1, p_g2 = np.array(p_g1.coords[0]), np.array(p_g2.coords[0])
+
+        # Compute the vector of attraction
+        vector = p_g1 - p_g2
+        dist = np.linalg.norm(vector)
+        vector /= dist + 1e-8
+
+        return vector, dist
+
+    match between:
+        case "boundaries":
+            return _between_boundaries(geom1, geom2)
+        case "centroids":
+            return _between_centroids(geom1, geom2)
+        case "auto":
+            if geom1.intersects(geom2):
+                return _between_centroids(geom1, geom2)
+            else:
+                return _between_boundaries(geom1, geom2)
+
+
+def _optimize_label_positions_update_step(
+    labels: list[matplotlib.text.Text],
+    label_target_regions: list[shapely.Polygon],
+    all_regions: list[shapely.Polygon],
+    ax: matplotlib.axes.Axes,
+    label_region_margin: float,
+    label_label_margin: float,
+    bounds_margin: float,
+):
+    updates = np.zeros(shape=(len(labels), 2), dtype=float)
+
+    # Get the bounding boxes of each label object as shapely objects
+    label_bbs = get_label_bounding_boxes(labels)
+
+    # Ensure labels remain within the axes limits
+    F_bounds = np.zeros_like(updates)
+    ax_x_min, ax_x_max = ax.get_xlim()
+    ax_y_min, ax_y_max = ax.get_xlim()
+
+    # Add margin to bounds
+    ax_x_min += bounds_margin
+    ax_y_min += bounds_margin
+    ax_x_max -= bounds_margin
+    ax_y_max -= bounds_margin
+
+    # Margin repulsion
+    for i, label_i in enumerate(label_bbs):
+        bb_x_min, bb_y_min, bb_x_max, bb_y_max = label_i.bounds
+        x_min_diff = min(0, bb_x_min - ax_x_min)
+        x_max_diff = max(0, bb_x_max - ax_x_max)
+        y_min_diff = min(0, bb_y_min - ax_y_min)
+        y_max_diff = max(0, bb_y_max - ax_y_max)
+
+        F_bounds[i] -= np.array([x_min_diff, y_min_diff])
+        F_bounds[i] -= np.array([x_max_diff, y_max_diff])
+
+    # Label-region attraction
+    F_attr = np.zeros_like(updates)
+    for i, label_i in enumerate(label_bbs):
+        for j, region_j in enumerate(label_target_regions):
+            vec, dist = get_vector_between(label_i, region_j, between="boundaries")
+
+            # Once the label is close enough to the region, don't apply
+            # attraction
+            weight = min(1, max(0, dist - label_region_margin))
+            F_attr[i] -= weight * vec
+
+    # Label-label repulsion
+    F_label_rep = np.zeros_like(updates)
+    for i in range(len(labels)):
+        for j in range(i + 1, len(labels)):
+            vec, dist = get_vector_between(label_bbs[i], label_bbs[j])
+
+            # After a certain point, we don't really care how far apart the
+            # labels are
+            weight = max(0, -dist + label_label_margin)
+            F_label_rep[i] += weight * vec
+            F_label_rep[j] -= weight * vec
+
+    # Label-region repulsion
+    F_region_rep = np.zeros_like(updates)
+    for i, label_i in enumerate(label_bbs):
+        for j, region_j in enumerate(all_regions):
+            # TODO: Check if necessary, if so, write comment
+            circle_radius = max(ax_x_max - ax_x_min, ax_y_max - ax_y_min) / 3
+            label_eff_radius = shapely.Point(label_i.centroid).buffer(circle_radius)
+            effective_region = shapely.intersection(region_j, label_eff_radius)
+            if effective_region.area == 0:
+                effective_region = region_j
+            effective_region = region_j
+
+            vec, dist = get_vector_between(label_i, effective_region)
+
+            # After a certain point, we don't really care how far apart the
+            # labels are
+            weight = max(0, -dist + label_region_margin)
+            F_region_rep[i] += weight * vec
+
+    # print(np.array([
+    #     np.linalg.norm(F_bounds),
+    #     np.linalg.norm(F_attr),
+    #     np.linalg.norm(F_region_rep),
+    #     np.linalg.norm(F_label_rep),
+    # ]))
+
+    return (
+        100 * F_bounds +
+        0.0001 * F_attr +
+        1 * F_region_rep +
+        1 * F_label_rep
+    )
+
+
+def optimize_label_positions(
+    labels: list[matplotlib.text.Text],
+    label_target_regions: list[shapely.Polygon],
+    all_regions: list[shapely.Polygon],
+    ax: matplotlib.axes.Axes,
+    eps: float = 0.1,
+    lr: float = 10,
+    max_iter: int = 200,
+    max_step_norm: float = 1,
+    label_region_margin: float = 0.03,
+    label_label_margin: float = 0.03,
+    bounds_margin: float = 0.03,
+):
+    assert len(labels) == len(label_target_regions), \
+        "Each label needs an associated target region!"
+
+    # TODO: Move this out of the function
+    import logging
+    logger = logging.getLogger("VERA")
+
+    label_region_margin = convert_ax_to_data(ax, label_region_margin)
+    label_label_margin = convert_ax_to_data(ax, label_label_margin)
+    bounds_margin = convert_ax_to_data(ax, bounds_margin)
+
+    learning_rates = np.linspace(lr, 0, num=max_iter)
+    for epoch in range(max_iter):
+        updates = _optimize_label_positions_update_step(
+            labels,
+            label_target_regions,
+            all_regions,
+            ax,
+            label_region_margin=label_region_margin,
+            label_label_margin=label_label_margin,
+            bounds_margin=bounds_margin,
+        )
+        update_norms = np.linalg.norm(updates, axis=1)
+
+        updates *= learning_rates[epoch]
+
+        if max_step_norm is not None:
+            update_rescale = (
+                np.minimum(update_norms, max_step_norm) / (update_norms + 1e-8)
+            )
+            updates *= update_rescale[:, None]
+
+        for label_obj, label_update in zip(labels, updates):
+            text_pos = np.array(label_obj.get_position())
+            label_obj.set_position(text_pos + label_update)
+
+        logger.debug("update norm", np.linalg.norm(updates))
+        # Check if stopping criteria met
+        if np.max(update_norms) < eps:
+            # print("early stopping", epoch, update_norms)
+            break
