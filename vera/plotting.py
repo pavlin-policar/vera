@@ -10,10 +10,8 @@ from warnings import warn
 
 import glasbey
 import matplotlib.axes
-import matplotlib.collections
 import matplotlib.colors as mcolors
 import matplotlib.figure
-import matplotlib.patches
 import matplotlib.pyplot as plt
 import matplotlib.text
 import matplotlib.ticker as ticker
@@ -28,12 +26,16 @@ from matplotlib.path import Path
 import vera.metrics as metrics
 from vera.label_placement import (
     initial_text_location_placement,
-    get_2d_coordinates,
     fix_crossings,
-    fit_elements_onto_axis,
     optimize_label_positions,
     get_ax_bounding_box,
-    set_ax_bounding_box, set_bbox_square_aspect, add_bbox_padding, center_bbox_on_element,
+    set_ax_bounding_box,
+    set_bbox_square_aspect,
+    add_bbox_padding,
+    center_bbox_on_element,
+    get_artist_bounding_boxes,
+    bbox_to_polygon,
+    convert_ax_to_data,
 )
 from vera.region import Density, Region
 from vera.region_annotation import RegionAnnotation
@@ -778,15 +780,12 @@ def plot_annotation(
         )
         label_kwargs_.update(label_kwargs)
 
-        label_objs = []
         for lbl_data, label_text_pos in zip(label_data, label_positions):
-            label_objs.append(
-                ax.text(
-                    *label_text_pos,
-                    lbl_data["text"],
-                    color=lbl_data["color"],
-                    **label_kwargs_,
-                )
+            lbl_data["handle"] = ax.text(
+                *label_text_pos,
+                lbl_data["text"],
+                color=lbl_data["color"],
+                **label_kwargs_,
             )
 
         # Rescale the axes so the text doesn't overflow the canvas
@@ -803,19 +802,29 @@ def plot_annotation(
         label_target_regions = np.array([data["pos_region"] for data in label_data])
 
         ax_bbox = get_ax_bounding_box(ax)
-        ax_bbox = center_bbox_on_element(ax_bbox, center_point=(0, 0))
+        # ax_bbox = center_bbox_on_element(ax_bbox, center_point=(0, 0))
         ax_bbox = set_bbox_square_aspect(ax_bbox)
         ax_bbox = add_bbox_padding(ax_bbox, padding=(0.2, 0.2))
         set_ax_bounding_box(ax, ax_bbox)
 
         # Optimize label positions so that there is minimal overlap and the labels
         # are as compact as possible
+        label_handles = [lbl["handle"] for lbl in label_data]
         optimize_label_positions(
-            label_objs, label_target_regions, region_patches, ax,
+            label_handles, label_target_regions, region_patches, ax,
         )
 
         # Plot line from region to the label bounding box
-        ...
+        label_bbs = [
+            bbox_to_polygon(bbox) for bbox in get_artist_bounding_boxes(label_handles, ax)
+        ]
+        for lbl_data, label in zip(label_data, label_bbs):
+            label_padding = convert_ax_to_data(ax, 0.01)
+            target_region = lbl_data["pos_region"]
+            p_g1, p_g2 = shapely.ops.nearest_points(
+                label.buffer(label_padding).boundary, target_region.boundary
+            )
+            ax.plot(*np.hstack([p_g1.xy, p_g2.xy]), color=lbl_data["color"])
 
     # ax.set(xticks=[], yticks=[])
     # ax.set(box_aspect=1, aspect=1)
@@ -824,7 +833,7 @@ def plot_annotation(
         fig.show()
 
     if return_ax:
-        return label_objs, fig, ax
+        return label_handles, fig, ax
 
 
 def plot_annotations(

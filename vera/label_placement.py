@@ -14,26 +14,26 @@ except ImportError:
     matplot_get_renderer = None
 
 # Define useful types
-BoundingBox = tuple[float, float, float, float]
+BoundingBox = tuple[float, float, float, float]  # (x0, y0, x1, y1)
 
 
 def ccw(a, b, c):
     return (c[1] - a[1]) * (b[0] - a[0]) > (b[1] - a[1]) * (c[0] - a[0])
 
 
-def intersect(a, b, c, d):
-    return ccw(a, c, d) != ccw(b, c, d) and ccw(a, b, c) != ccw(a, b, d)
+def intersect(x0, y0, x1, y1):
+    return ccw(x0, y0, y1) != ccw(x1, y0, y1) and ccw(x0, x1, y0) != ccw(x0, x1, y1)
 
 
 def fix_crossings(text_locations, label_locations, n_iter=3):
-    # Find crossing lines and swap labels; repeat as required
+    """Find crossing lines and swap labels; repeat as required"""
     for n in range(n_iter):
         for i in range(text_locations.shape[0]):
             for j in range(text_locations.shape[0]):
                 if intersect(
                     text_locations[i],
-                    label_locations[i],
                     text_locations[j],
+                    label_locations[i],
                     label_locations[j],
                 ):
                     swap = text_locations[i].copy()
@@ -67,15 +67,8 @@ def get_renderer(fig):
         raise ValueError("Unable to determine renderer") from None
 
 
-# From adjustText (https://github.com/Phlya/adjustText)
-def get_bboxes(objs, r=None, expand=(1, 1), ax=None):
-    ax = ax or plt.gca()
-    r = r or get_renderer(ax.get_figure())
-    return [obj.get_window_extent(r).expanded(*expand) for obj in objs]
-
-
 # Adapted from adjustText (https://github.com/Phlya/adjustText)
-def get_2d_coordinates(objs, expand=(1, 1)):
+def get_artist_bounding_boxes(objs, ax, expand=(1, 1)):
     """Get the bounding box bottom-left and top-right coordinates in data units.
 
     Returns
@@ -83,11 +76,9 @@ def get_2d_coordinates(objs, expand=(1, 1)):
     np.ndarray[N, 4]
         Bounding box coordinates in data space: x0, y0, x1, y1
     """
-    try:
-        ax = objs[0].axes
-    except:
-        ax = objs.axes
-    bboxes = get_bboxes(objs, get_renderer(ax.get_figure()), expand, ax)
+    r = get_renderer(ax.get_figure())
+    bboxes = [obj.get_window_extent(r).expanded(*expand) for obj in objs]
+
     bl = np.array([(bbox.xmin, bbox.ymin) for bbox in bboxes])
     tr = np.array([(bbox.xmax, bbox.ymax) for bbox in bboxes])
 
@@ -361,7 +352,7 @@ def fit_elements_onto_axis(
         if center_on_scatter:
             sc_x_center, sc_y_center = np.mean(scatter_positions, axis=0)
 
-    coords = get_2d_coordinates(label_objs)
+    coords = get_artist_bounding_boxes(label_objs, ax)
 
     for i in range(max_iter):
         bb_x_min, bb_y_min = np.min(coords[:, [0, 1]], axis=0)
@@ -409,21 +400,16 @@ def fit_elements_onto_axis(
         ax.set_ylim(bb_y_min, bb_y_max)
 
         # Get new coordinates after rescaling
-        new_coords = get_2d_coordinates(label_objs)
+        new_coords = get_artist_bounding_boxes(label_objs, ax)
         if np.allclose(coords, new_coords, atol=eps):
             logger.debug(f"Stopped after {i} iterations")
             break
         coords = new_coords
 
 
-def get_label_bounding_boxes(labels: list[matplotlib.text.Text]) -> list[shapely.Polygon]:
-    label_coords = get_2d_coordinates(labels, expand=(1, 1))
-    bounding_boxes = []
-    for x0, y0, x1, y1 in label_coords:
-        bounding_box = shapely.Polygon([(x0, y0), (x0, y1), (x1, y1), (x1, y0)])
-        bounding_boxes.append(bounding_box)
-
-    return bounding_boxes
+def bbox_to_polygon(bbox: BoundingBox) -> shapely.Polygon:
+    x0, y0, x1, y1 = bbox
+    return shapely.Polygon([(x0, y0), (x0, y1), (x1, y1), (x1, y0)])
 
 
 def convert_ax_to_data(ax, fraction: float, reduction="max") -> float:
@@ -517,7 +503,7 @@ def _optimize_label_positions_update_step(
     updates = np.zeros(shape=(len(labels), 2), dtype=float)
 
     # Get the bounding boxes of each label object as shapely objects
-    label_bbs = get_label_bounding_boxes(labels)
+    label_bbs = [bbox_to_polygon(bbox) for bbox in get_artist_bounding_boxes(labels, ax)]
 
     # Ensure labels remain within the axes limits
     F_bounds = np.zeros_like(updates)
