@@ -1,10 +1,13 @@
 import io
+import logging
+import operator
+from functools import reduce
 
 import matplotlib
 import numpy as np
 import shapely
+import shapely.affinity
 import shapely.ops
-from matplotlib import pyplot as plt
 from scipy.spatial import distance
 from sklearn.metrics import pairwise_distances
 
@@ -12,6 +15,9 @@ try:
     from matplotlib.backend_bases import _get_renderer as matplot_get_renderer
 except ImportError:
     matplot_get_renderer = None
+
+
+logger = logging.getLogger("VERA")
 
 # Define useful types
 BoundingBox = tuple[float, float, float, float]  # (x0, y0, x1, y1)
@@ -68,38 +74,34 @@ def get_renderer(fig):
 
 
 # Adapted from adjustText (https://github.com/Phlya/adjustText)
-def get_artist_bounding_boxes(objs, ax, expand=(1, 1)):
-    """Get the bounding box bottom-left and top-right coordinates in data units.
-
-    Returns
-    -------
-    np.ndarray[N, 4]
-        Bounding box coordinates in data space: x0, y0, x1, y1
-    """
+def get_artist_bounding_box(obj, ax, expand=(1, 1)) -> BoundingBox:
+    """Get a mpl's artists bounding box in data units."""
     r = get_renderer(ax.get_figure())
-    bboxes = [obj.get_window_extent(r).expanded(*expand) for obj in objs]
-
-    bl = np.array([(bbox.xmin, bbox.ymin) for bbox in bboxes])
-    tr = np.array([(bbox.xmax, bbox.ymax) for bbox in bboxes])
+    bbox = obj.get_window_extent(r).expanded(*expand)
 
     # Convert display coords to data coordinate space
     display_to_data = ax.transData.inverted()
-    bl = display_to_data.transform(bl)
-    tr = display_to_data.transform(tr)
+    bl = display_to_data.transform([bbox.xmin, bbox.ymin])
+    tr = display_to_data.transform([bbox.xmax, bbox.ymax])
 
     return np.hstack([bl, tr])
 
 
+def get_artist_bounding_boxes(objs, ax, expand=(1, 1)) -> list[BoundingBox]:
+    """Get a list of  mpl's artists bounding boxes in data units."""
+    return np.vstack([get_artist_bounding_box(obj, ax, expand) for obj in objs])
+
+
 # Adapted from datamapplot (https://github.com/TutteInstitute/datamapplot)
 def initial_text_location_placement(
-    embedding, label_locations, label_radius=None, radius_factor=0.25,
+    embedding, label_targets, label_radius=None, radius_factor=0.25,
 ):
     """Find an initial placement for labels.
 
     Parameters
     ----------
     embedding : np.ndarray
-    label_locations : np.ndarray
+    label_targets : np.ndarray
         Initial label positions, where the labels are pointing at.
     label_radius : float, optional
         If provided, all the labels will be at this distance from the middle of
@@ -117,7 +119,7 @@ def initial_text_location_placement(
     embedding_center_point = (
         np.min(embedding, axis=0) + np.max(embedding, axis=0)
     ) / 2
-    label_locations = label_locations - embedding_center_point
+    label_targets = label_targets - embedding_center_point
 
     if label_radius is None:
         centered_embedding = embedding - embedding_center_point
@@ -125,7 +127,7 @@ def initial_text_location_placement(
         label_radius = np.max(dists_from_origin) * (1 + radius_factor)
 
     # Determine the angles of the label positions
-    label_thetas = np.arctan2(label_locations.T[0], label_locations.T[1])
+    label_thetas = np.arctan2(label_targets.T[0], label_targets.T[1])
 
     # Construct a ring of possible label placements around the embedding, we
     # refer to these as spokes
@@ -149,7 +151,7 @@ def initial_text_location_placement(
         # Determine an initial ordering on how to match labels to their spokes
         # By default, we will match the closest ones first
         distances = pairwise_distances(
-            label_locations, test_spoke_label_locations, metric="cosine"
+            label_targets, test_spoke_label_locations, metric="cosine"
 )
         # Find and sort the labels by their minimum distance to the nearest spoke
         best_dists_to_labels = np.min(distances, axis=1)
@@ -162,7 +164,7 @@ def initial_text_location_placement(
             # spoke locations
             candidates = list(set(range(test_spoke_label_locations.shape[0])) - spokes_taken)
             candidate_distances = pairwise_distances(
-                [label_locations[label_idx]],
+                [label_targets[label_idx]],
                 test_spoke_label_locations[candidates],
                 metric="cosine",
             )
@@ -173,7 +175,7 @@ def initial_text_location_placement(
         # Having assigned each label its closest available spoke, calculate the
         # average distance for each pair
         cosine_dists = np.array([
-            distance.cosine(label_locations[k], test_spoke_label_locations[v])
+            distance.cosine(label_targets[k], test_spoke_label_locations[v])
             for k, v in label_spoke_pairing.items()
         ])
         score = np.mean(cosine_dists)
@@ -190,13 +192,13 @@ def initial_text_location_placement(
         label_radius * np.sin(spoke_thetas + best_rotation),
     ]).T
 
-    label_locations = np.asarray([
+    label_targets = np.asarray([
         spoke_label_locations[best_label_spoke_pairing[i]]
         for i in sorted(best_label_spoke_pairing.keys())
     ])
 
     # Un-center label positions
-    return label_locations + embedding_center_point
+    return label_targets + embedding_center_point
 
 
 def get_ax_bounding_box(ax: matplotlib.axes.Axes) -> BoundingBox:
@@ -339,9 +341,6 @@ def fit_elements_onto_axis(
     fontsize is kept constant and rescaling the axes changes the size and
     positions of the labels, this has to be iterated until the label bounding
     boxes stop changing."""
-    # TODO: Move this out of the function
-    import logging
-    logger = logging.getLogger("VERA")
 
     # Determine scatter plot bounds if available
     if scatter_obj is not None:
@@ -492,7 +491,7 @@ def get_vector_between(
 
 
 def _optimize_label_positions_update_step(
-    labels: list[matplotlib.text.Text],
+    labels: list[shapely.Polygon],
     label_target_regions: list[shapely.Polygon],
     all_regions: list[shapely.Polygon],
     ax: matplotlib.axes.Axes,
@@ -501,9 +500,6 @@ def _optimize_label_positions_update_step(
     bounds_margin: float,
 ):
     updates = np.zeros(shape=(len(labels), 2), dtype=float)
-
-    # Get the bounding boxes of each label object as shapely objects
-    label_bbs = [bbox_to_polygon(bbox) for bbox in get_artist_bounding_boxes(labels, ax)]
 
     # Ensure labels remain within the axes limits
     F_bounds = np.zeros_like(updates)
@@ -517,7 +513,7 @@ def _optimize_label_positions_update_step(
     ax_y_max -= bounds_margin
 
     # Margin repulsion
-    for i, label_i in enumerate(label_bbs):
+    for i, label_i in enumerate(labels):
         bb_x_min, bb_y_min, bb_x_max, bb_y_max = label_i.bounds
         x_min_diff = min(0, bb_x_min - ax_x_min)
         x_max_diff = max(0, bb_x_max - ax_x_max)
@@ -529,80 +525,66 @@ def _optimize_label_positions_update_step(
 
     # Label-region attraction
     F_attr = np.zeros_like(updates)
-    for i, label_i in enumerate(label_bbs):
+    for i, label_i in enumerate(labels):
         for j, region_j in enumerate(label_target_regions):
             vec, dist = get_vector_between(label_i, region_j, between="boundaries")
-
-            # Once the label is close enough to the region, don't apply
-            # attraction
-            weight = min(1, max(0, dist - label_region_margin))
+            # Beyond the margin, we don't really care how far apart the labels are
+            weight = max(0, dist - label_region_margin)
+            weight = np.sqrt(weight)  # dampen large distances
             F_attr[i] -= weight * vec
 
     # Label-label repulsion
     F_label_rep = np.zeros_like(updates)
     for i in range(len(labels)):
         for j in range(i + 1, len(labels)):
-            vec, dist = get_vector_between(label_bbs[i], label_bbs[j])
-
-            # After a certain point, we don't really care how far apart the
-            # labels are
+            vec, dist = get_vector_between(labels[i], labels[j])
+            # Beyond the margin, we don't really care how far apart the labels are
             weight = max(0, -dist + label_label_margin)
             F_label_rep[i] += weight * vec
             F_label_rep[j] -= weight * vec
 
     # Label-region repulsion
+    # Instead of computing repulsion between all pairs of label-regions, we can
+    # merge the region polygons into a single one, and repel from that one
+    joint_region = reduce(operator.or_, all_regions)
     F_region_rep = np.zeros_like(updates)
-    for i, label_i in enumerate(label_bbs):
-        for j, region_j in enumerate(all_regions):
-            # TODO: Check if necessary, if so, write comment
-            circle_radius = max(ax_x_max - ax_x_min, ax_y_max - ax_y_min) / 3
-            label_eff_radius = shapely.Point(label_i.centroid).buffer(circle_radius)
-            effective_region = shapely.intersection(region_j, label_eff_radius)
-            if effective_region.area == 0:
-                effective_region = region_j
-            effective_region = region_j
+    for i, label_i in enumerate(labels):
+        vec, dist = get_vector_between(label_i, joint_region)
+        # Beyond the margin, we don't really care how far apart the labels are
+        weight = max(0, -dist + label_region_margin)
+        # print(vec, dist, weight)
+        F_region_rep[i] += weight * vec
 
-            vec, dist = get_vector_between(label_i, effective_region)
-
-            # After a certain point, we don't really care how far apart the
-            # labels are
-            weight = max(0, -dist + label_region_margin)
-            F_region_rep[i] += weight * vec
-
-    # print(np.array([
-    #     np.linalg.norm(F_bounds),
-    #     np.linalg.norm(F_attr),
-    #     np.linalg.norm(F_region_rep),
-    #     np.linalg.norm(F_label_rep),
-    # ]))
+    logger.debug(
+        f"F_bounds norm: {np.linalg.norm(F_bounds):.2f} - "
+        f"F_attr norm: {np.linalg.norm(F_attr):.2f} - "
+        f"F_region_rep norm: {np.linalg.norm(F_region_rep):.2f} - "
+        f"F_label_rep norm: {np.linalg.norm(F_label_rep):.2f} - "
+    )
 
     return (
         100 * F_bounds +
-        0.0001 * F_attr +
+        0.01 * F_attr +
         1 * F_region_rep +
         1 * F_label_rep
     )
 
 
 def optimize_label_positions(
-    labels: list[matplotlib.text.Text],
+    labels: list[shapely.Polygon],
     label_target_regions: list[shapely.Polygon],
     all_regions: list[shapely.Polygon],
     ax: matplotlib.axes.Axes,
     eps: float = 0.1,
-    lr: float = 10,
-    max_iter: int = 200,
+    lr: float = 1,
+    max_iter: int = 500,
     max_step_norm: float = 1,
     label_region_margin: float = 0.03,
-    label_label_margin: float = 0.03,
+    label_label_margin: float = 0.02,
     bounds_margin: float = 0.03,
 ):
     assert len(labels) == len(label_target_regions), \
         "Each label needs an associated target region!"
-
-    # TODO: Move this out of the function
-    import logging
-    logger = logging.getLogger("VERA")
 
     label_region_margin = convert_ax_to_data(ax, label_region_margin)
     label_label_margin = convert_ax_to_data(ax, label_label_margin)
@@ -629,12 +611,75 @@ def optimize_label_positions(
             )
             updates *= update_rescale[:, None]
 
-        for label_obj, label_update in zip(labels, updates):
-            text_pos = np.array(label_obj.get_position())
-            label_obj.set_position(text_pos + label_update)
+        # updates += np.random.uniform(0, 10 / max_iter, size=updates.shape)
+
+        for i in range(len(labels)): #label, label_update in zip(labels, updates):
+            labels[i] = shapely.affinity.translate(labels[i], *updates[i])
+            # text_pos = np.array(label_obj.get_position())
+            # print(label_update)
+            # label_obj.set_position(text_pos + label_update)
 
         logger.debug("update norm", np.linalg.norm(updates))
         # Check if stopping criteria met
         if np.max(update_norms) < eps:
-            # print("early stopping", epoch, update_norms)
+            logger.info("early stopping", epoch, update_norms)
             break
+
+    return labels
+
+
+def evaluate_label_pos_quality(
+    labels: list[shapely.Polygon],
+    label_target_regions: list[shapely.Polygon],
+    all_regions: list[shapely.Polygon],
+    ax: matplotlib.axes.Axes,
+    label_region_margin: float = 0.03,
+    label_label_margin: float = 0.03,
+    bounds_margin: float = 0.03,
+):
+    ax_bbox = np.array(get_ax_bounding_box(ax))
+
+    label_region_margin = convert_ax_to_data(ax, label_region_margin)
+    label_label_margin = convert_ax_to_data(ax, label_label_margin)
+    bounds_margin = convert_ax_to_data(ax, bounds_margin)
+
+    # How many labels overflow the axes bounds
+    label_bboxes = np.array([l.bounds for l in labels])
+    mask = np.array([1, 1, -1, -1])
+    hard_overflows = (ax_bbox * mask) > (label_bboxes * mask)
+    n_hard_overflows = float(np.sum(hard_overflows))
+    soft_overflows = (ax_bbox * mask + bounds_margin) > (label_bboxes * mask)
+    n_soft_overflows = float(np.sum(soft_overflows))
+
+    # How many labels intersect each other?
+    hard_label_label_isects = {}
+    soft_label_label_isects = {}
+    for i in range(len(labels)):
+        for j in range(i + 1, len(labels)):
+            label_i = labels[i]
+            label_j = labels[j]
+            if shapely.intersects(label_i, label_j):
+                hard_label_label_isects[i] = 1
+                hard_label_label_isects[j] = 1
+            if shapely.intersects(label_i.buffer(label_label_margin), label_j):
+                soft_label_label_isects[i] = 1
+                soft_label_label_isects[j] = 1
+
+    # How many label-region intersections do we have?
+    hard_label_region_isects = {}
+    soft_label_region_isects = {}
+    for i, label_i in enumerate(labels):
+        for region_j in all_regions:
+            if shapely.intersects(label_i, region_j):
+                hard_label_region_isects[i] = 1.
+            if shapely.intersects(label_i.buffer(label_region_margin), region_j):
+                soft_label_region_isects[i] = 1.
+
+    return {
+        "hard_overflows": n_hard_overflows,
+        "soft_overflows": n_soft_overflows,
+        "hard_label_label_intersects": sum(hard_label_label_isects.values()),
+        "soft_label_label_intersects": sum(soft_label_label_isects.values()),
+        "hard_label_region_intersects": sum(hard_label_region_isects.values()),
+        "soft_label_region_intersects": sum(soft_label_region_isects.values()),
+    }

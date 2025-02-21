@@ -33,9 +33,10 @@ from vera.label_placement import (
     set_bbox_square_aspect,
     add_bbox_padding,
     center_bbox_on_element,
+    evaluate_label_pos_quality,
     get_artist_bounding_boxes,
     bbox_to_polygon,
-    convert_ax_to_data,
+    convert_ax_to_data, get_artist_bounding_box,
 )
 from vera.region import Density, Region
 from vera.region_annotation import RegionAnnotation
@@ -283,7 +284,7 @@ def enumerate_plots(ax: list[matplotlib.axes.Axes], offset=0.025, text_params={}
         ha="left",
         fontweight="bold",
         fontfamily="Arial Black",
-        fontsize=10,
+        fontsize=12,
     )
     text_params_.update(text_params)
     for idx, ax_ in enumerate(ax):
@@ -684,6 +685,8 @@ def plot_annotation(
 ):
     if ax is None:
         fig, ax = plt.subplots(figsize=(figwidth, figwidth), dpi=150)
+    else:
+        fig = ax.get_figure()
 
     if ra_colors is None:
         # Glasbey crashes when requesting fewer colors than are in the cmap
@@ -763,7 +766,7 @@ def plot_annotation(
         # Determine an initial placement for the labels
         label_targets = np.array([lbl["pos"] for lbl in label_data])
         label_positions = initial_text_location_placement(
-            embedding, label_targets, radius_factor=0,
+            embedding, label_targets, radius_factor=1,
         )
         fix_crossings(label_positions, label_targets)
 
@@ -780,39 +783,83 @@ def plot_annotation(
         )
         label_kwargs_.update(label_kwargs)
 
-        for lbl_data, label_text_pos in zip(label_data, label_positions):
-            lbl_data["handle"] = ax.text(
-                *label_text_pos,
-                lbl_data["text"],
-                color=lbl_data["color"],
-                **label_kwargs_,
-            )
-
-        # Rescale the axes so the text doesn't overflow the canvas
-        # fit_elements_onto_axis(
-        #     ax,
-        #     label_objs=label_objs,
-        #     scatter_obj=scatter_obj,
-        #     padding=(0.03, 0.03),
-        #     # padding=(0.1, 0.1),
-        #     min_scatter_size=min_embedding_size,
-        # )
-
-        # Where are the labels supposed to point to?
-        label_target_regions = np.array([data["pos_region"] for data in label_data])
+        penalty_weighing = {
+            "hard_overflows": 10,
+            "hard_label_label_intersects": 10,
+            "hard_label_region_intersects": 10,
+            "soft_overflows": 1,
+            "soft_label_label_intersects": 2,
+            "soft_label_region_intersects": 2,
+        }
 
         ax_bbox = get_ax_bounding_box(ax)
-        # ax_bbox = center_bbox_on_element(ax_bbox, center_point=(0, 0))
+        # Center embedding inside bounding box
+        sc_bbox = np.hstack([embedding.min(axis=0), embedding.max(axis=0)])
+        ax_bbox = center_bbox_on_element(ax_bbox, sc_bbox)
+
         ax_bbox = set_bbox_square_aspect(ax_bbox)
-        ax_bbox = add_bbox_padding(ax_bbox, padding=(0.2, 0.2))
+
+        results = {}
+        for padding in [0.05, 0.1, 0.15, 0.2, 0.25]:
+            # Apply new padding to axis
+            ax_bbox_i = add_bbox_padding(ax_bbox, padding=(padding, padding))
+            set_ax_bounding_box(ax, ax_bbox_i)
+
+            # Get label bounding boxes
+            label_bboxes: list[shapely.Polygon] = []
+            for lbl_data, label_text_pos in zip(label_data, label_positions):
+                # Render the label on the current axis, get its bounding box,
+                # convert that to a polygon, then remove the rendered label
+                handle = ax.text(*label_text_pos, lbl_data["text"], **label_kwargs_)
+                label_bbox = get_artist_bounding_box(handle, ax)
+                label_bboxes.append(bbox_to_polygon(label_bbox))
+                handle.remove()
+
+            # Where are the labels supposed to point to?
+            label_target_regions = [data["pos_region"] for data in label_data]
+
+            # Optimize label positions
+            label_bboxes = optimize_label_positions(
+                label_bboxes, label_target_regions, region_patches, ax,
+            )
+            # Evaluate the current label layout
+            label_pos_quality = evaluate_label_pos_quality(
+                label_bboxes, label_target_regions, region_patches, ax
+            )
+            # And assign an overall score with which to compare layouts
+            layout_score = sum(
+                penalty_weighing[k] * v for k, v in label_pos_quality.items()
+            )
+
+            # Convert the bounding boxes back to the positions understood by
+            # matplotlib labels, so we can use them directly later on
+            label_positions = []
+            for label_bbox in label_bboxes:
+                x0, y0, x1, y1 = label_bbox.bounds
+                midpoint = x0 + (x1 - x0) / 2, y0 + (y1 - y0) / 2
+                label_positions.append(midpoint)
+
+            results[padding] = {
+                "score": layout_score,
+                "label_positions": label_positions,
+            }
+
+        best_padding = min(results, key=lambda d: results[d]["score"])
+        best_label_positions = results[best_padding]["label_positions"]
+
+        ax_bbox = add_bbox_padding(ax_bbox, padding=(best_padding, best_padding))
         set_ax_bounding_box(ax, ax_bbox)
 
-        # Optimize label positions so that there is minimal overlap and the labels
-        # are as compact as possible
-        label_handles = [lbl["handle"] for lbl in label_data]
-        optimize_label_positions(
-            label_handles, label_target_regions, region_patches, ax,
-        )
+        label_handles = []
+        for lbl_data, label_text_pos in zip(label_data, best_label_positions):
+            label_handles.append(
+                ax.text(
+                    *label_text_pos,
+                    lbl_data["text"],
+                    color=lbl_data["color"],
+                    **label_kwargs_,
+                )
+            )
 
         # Plot line from region to the label bounding box
         label_bbs = [
@@ -824,10 +871,14 @@ def plot_annotation(
             p_g1, p_g2 = shapely.ops.nearest_points(
                 label.buffer(label_padding).boundary, target_region.boundary
             )
-            ax.plot(*np.hstack([p_g1.xy, p_g2.xy]), color=lbl_data["color"])
+            ax.plot(
+                *np.hstack([p_g1.xy, p_g2.xy]),
+                color=lbl_data["color"],
+                lw=1.5,
+                zorder=10,
+            )
 
-    # ax.set(xticks=[], yticks=[])
-    # ax.set(box_aspect=1, aspect=1)
+    ax.set(xticks=[], yticks=[])
 
     if show:
         fig.show()
@@ -849,6 +900,7 @@ def plot_annotations(
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
     show: bool = False,
+    ax_spacing: float = 0.03,
 ):
     n_rows = len(layouts) // per_row
     if len(layouts) % per_row > 0:
@@ -856,6 +908,8 @@ def plot_annotations(
 
     figheight = figwidth / per_row * n_rows
     fig, ax = plt.subplots(nrows=n_rows, ncols=per_row, figsize=(figwidth, figheight))
+
+    fig.subplots_adjust(wspace=ax_spacing, hspace=ax_spacing)
 
     if len(layouts) == 1:
         ax = np.array([ax])
