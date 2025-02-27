@@ -37,7 +37,7 @@ def _pd_dtype_to_variable(col_name: Union[str, Variable], col_type, col_vals) ->
     if isinstance(col_name, Variable):
         return col_name
 
-    if pd.api.types.is_categorical_dtype(col_type):
+    if isinstance(col_type, pd.CategoricalDtype):
         vals = col_vals[1].values.codes.astype(float)
         vals[col_vals[1].values.isna()] = np.nan
         variable = DiscreteVariable(
@@ -163,11 +163,9 @@ def one_hot(variable: DiscreteVariable) -> list[IndicatorVariable]:
         raise TypeError("Can only one-hot-encode discrete variables!")
 
     one_hot_vars = []
-
-    xi_onehot = pd.get_dummies(variable.values).values.astype(np.float32)
     for idx, category in enumerate(variable.categories):
         rule = EqualityRule(category, value_name=variable.name)
-        values = xi_onehot[:, idx]
+        values = np.astype(variable.values == idx, float)
         new_var = IndicatorVariable(variable, rule, values)
         one_hot_vars.append(new_var)
 
