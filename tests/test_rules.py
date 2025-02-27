@@ -1,6 +1,8 @@
 import unittest
 
 import vera.rules
+from vera.preprocessing import discretize
+from vera.variables import ContinuousVariable
 
 
 class TestIntervalRule(unittest.TestCase):
@@ -292,3 +294,32 @@ class TestOneOfRule(unittest.TestCase):
         r3 = vera.rules.EqualityRule(10)
         self.assertTrue(r1.contains(r2))
         self.assertFalse(r1.contains(r3))
+
+
+class TestIntervalRuleStringFormatting(unittest.TestCase):
+    def test_decimals(self):
+        r1 = vera.rules.IntervalRule(0, 1, precision=0)
+        r2 = vera.rules.IntervalRule(1, 2, precision=1)
+        r3 = vera.rules.IntervalRule(2, 4, precision=2)
+
+        self.assertEqual(str(r1), "0 < x < 1")
+        self.assertEqual(str(r2), "1.0 < x < 2.0")
+        self.assertEqual(str(r3), "2.00 < x < 4.00")
+
+    def test_none(self):
+        r1 = vera.rules.IntervalRule(12123, 13023, precision=0)
+        r2 = vera.rules.IntervalRule(13024, 13348, precision=0)
+        r3 = vera.rules.IntervalRule(13349, 14012, precision=0)
+
+        self.assertEqual(str(r1), "12123 < x < 13023")
+        self.assertEqual(str(r2), "13024 < x < 13348")
+        self.assertEqual(str(r3), "13349 < x < 14012")
+
+    def test_rounding(self):
+        r1 = vera.rules.IntervalRule(12123, 13023, precision=-3)
+        r2 = vera.rules.IntervalRule(13024, 13348, precision=-3)
+        r3 = vera.rules.IntervalRule(13349, 14012, precision=-3)
+
+        self.assertEqual(str(r1), "12000 < x < 13000")
+        self.assertEqual(str(r2), "13000 < x < 13000")
+        self.assertEqual(str(r3), "13000 < x < 14000")

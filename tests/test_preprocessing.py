@@ -207,6 +207,60 @@ class TestDiscretize(unittest.TestCase):
         self.assertTrue(all(v.base_variable is self.cont1 for v in result))
 
 
+class TestDeterminePrecision(unittest.TestCase):
+    def test_ensure_handles_infs(self):
+        edges = [-np.inf, 1, 2, 3, 4, np.inf]
+        prec = pp.determine_edge_display_precision(edges)
+        self.assertEqual(prec, 0)
+
+    def test_integers_1(self):
+        self.assertEqual(pp.determine_edge_display_precision([1, 2]), 0)
+        self.assertEqual(pp.determine_edge_display_precision([1, 2, 3, 4]), 0)
+        self.assertEqual(pp.determine_edge_display_precision([10, 20, 30]), 0)
+        self.assertEqual(pp.determine_edge_display_precision([18, 19, 20]), 0)
+
+    def test_integers_2(self):
+        self.assertEqual(pp.determine_edge_display_precision([1]), 0)
+        self.assertEqual(pp.determine_edge_display_precision([10]), 0)
+        self.assertEqual(pp.determine_edge_display_precision([100]), 0)
+        self.assertEqual(pp.determine_edge_display_precision([2]), 0)
+        self.assertEqual(pp.determine_edge_display_precision([20]), 0)
+        self.assertEqual(pp.determine_edge_display_precision([200]), 0)
+
+    def test_integers_3(self):
+        edges = [10]
+        prec = pp.determine_edge_display_precision(edges)
+        self.assertEqual(prec, 0)
+
+    # def test_integers_3(self):
+    #     edges = [1001, 2002, 3001, 4004]
+    #     prec = pp.determine_edge_display_precision(edges)
+    #     self.assertEqual(prec, -3)
+
+    def test_decimals_1(self):
+        edges = [1, 2.5, 3.5, 4]
+        prec = pp.determine_edge_display_precision(edges)
+        self.assertEqual(prec, 1)
+
+    def test_decimals_2(self):
+        edges = [0.00555001, 0.00556005, 1]
+        prec = pp.determine_edge_display_precision(edges)
+        self.assertEqual(prec, 5)
+
+    def test_decimals_attrition(self):
+        self.assertEqual(
+            1,
+            pp.determine_edge_display_precision([1.4999999999999991, 2.4999999999999996, 3.5, 4.5]),
+        )
+        self.assertEqual(0, pp.determine_edge_display_precision([5.62, 11.51]))
+        self.assertEqual(-2, pp.determine_edge_display_precision([4112.13, 1336.6]))
+
+    def test_decimals_4(self):
+        self.assertEqual(1, pp.determine_edge_display_precision([0.5]))
+        self.assertEqual(2, pp.determine_edge_display_precision([0.05]))
+        self.assertEqual(3, pp.determine_edge_display_precision([0.005]))
+
+
 class TestOneHotEncoding(unittest.TestCase):
     def setUp(self) -> None:
         self.disc1 = pp.ingest(pd.Series(pd.Categorical([0, 0, 1, 0, 1]), name="disc1"))

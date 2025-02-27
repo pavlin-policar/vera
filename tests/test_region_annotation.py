@@ -79,7 +79,7 @@ class TestRegionAnnotationSplit(unittest.TestCase):
         assert len(split_parts) == 2
         part1, part2 = split_parts
 
-        self.assertNotEquals(part1, part2, "__eq__ not working")
+        self.assertNotEqual(part1, part2, "__eq__ not working")
         self.assertEqual(len({part1, part2}), 2, "__hash__ not working")
 
     def test_split_contained_samples(self):
