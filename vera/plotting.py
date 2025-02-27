@@ -767,7 +767,7 @@ def plot_annotation(
         # Determine an initial placement for the labels
         label_targets = np.array([lbl["pos"] for lbl in label_data])
         label_positions = initial_text_location_placement(
-            embedding, label_targets, radius_factor=1,
+            embedding, label_targets, radius_factor=0.25,
         )
         fix_crossings(label_positions, label_targets)
 
@@ -802,8 +802,7 @@ def plot_annotation(
 
         if optimize_labels:
             results = {}
-            # for padding in [0.1, 0.25, 0.5, 0.75, 1]:
-            for padding in [0.25]:
+            for padding in [0.1, 0.25, 0.5, 0.75, 1]:
                 # Apply new padding to axis
                 ax_bbox_i = add_bbox_padding(ax_bbox, padding=(padding, padding))
                 set_ax_bounding_box(ax, ax_bbox_i)
@@ -822,7 +821,7 @@ def plot_annotation(
                 # Optimize label positions
                 label_bboxes, label_history = optimize_label_positions(
                     label_bboxes, label_target_regions, region_patches, ax,
-                    max_step_norm=5, lr=2, return_history=True,
+                    max_step_norm=5, lr=5, max_iter=100, return_history=True,
                 )
                 # Evaluate the current label layout
                 label_pos_quality = evaluate_label_pos_quality(

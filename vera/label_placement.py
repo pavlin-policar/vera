@@ -498,6 +498,11 @@ def _optimize_label_positions_update_step(
     label_region_margin: float,
     label_label_margin: float,
     bounds_margin: float,
+    bounds_factor: float = 100,
+    region_attraction_factor: float = 0.01,
+    region_repulsion_factor: float = 1,
+    label_repulsion_factor: float = 1,
+
 ):
     updates = np.zeros(shape=(len(labels), 2), dtype=float)
 
@@ -528,8 +533,7 @@ def _optimize_label_positions_update_step(
     for i, (label_i, region_i) in enumerate(zip(labels, label_target_regions)):
         vec, dist = get_vector_between(label_i, region_i, between="boundaries")
         # Beyond the margin, we don't really care how far apart the labels are
-        weight = max(0, dist - label_region_margin) / label_region_margin
-        weight = np.sqrt(weight)  # dampen large distances
+        weight = max(0, dist - label_region_margin)
         F_attr[i] -= weight * vec
 
     # Label-label repulsion
@@ -538,7 +542,7 @@ def _optimize_label_positions_update_step(
         for j in range(i + 1, len(labels)):
             vec, dist = get_vector_between(labels[i], labels[j])
             # Beyond the margin, we don't really care how far apart the labels are
-            weight = max(0, -dist + label_label_margin) / label_label_margin
+            weight = max(0, -dist + label_label_margin)
             F_label_rep[i] += weight * vec
             F_label_rep[j] -= weight * vec
 
@@ -550,7 +554,7 @@ def _optimize_label_positions_update_step(
     for i, label_i in enumerate(labels):
         vec, dist = get_vector_between(label_i, joint_region)
         # Beyond the margin, we don't really care how far apart the labels are
-        weight = max(0, -dist + label_region_margin) / label_region_margin
+        weight = max(0, -dist + label_region_margin)
         F_region_rep[i] += weight * vec
 
     logger.debug(
@@ -561,10 +565,10 @@ def _optimize_label_positions_update_step(
     )
 
     return (
-        10 * F_bounds +
-        0.01 * F_attr +
-        1 * F_region_rep +
-        1 * F_label_rep
+        bounds_factor * F_bounds +
+        region_attraction_factor * F_attr +
+        region_repulsion_factor * F_region_rep +
+        label_repulsion_factor * F_label_rep
     )
 
 
@@ -573,10 +577,10 @@ def optimize_label_positions(
     label_target_regions: list[shapely.Polygon],
     all_regions: list[shapely.Polygon],
     ax: matplotlib.axes.Axes,
-    eps: float = 0.1,
-    lr: float = 10,
-    max_iter: int = 100,
-    max_step_norm: float = 1,
+    eps: float = 0.01,
+    lr: float = 5,
+    max_iter: int = 50,
+    max_step_norm: float = 5,
     label_region_margin: float = 0.03,
     label_label_margin: float = 0.02,
     bounds_margin: float = 0.03,
@@ -593,6 +597,8 @@ def optimize_label_positions(
         label_pos_history = [labels.copy()]
 
     learning_rates = np.linspace(lr, 0, num=max_iter)
+    bounds_factors = np.linspace(0.1, np.sqrt(10), num=max_iter, endpoint=True) ** 2
+
     for epoch in range(max_iter):
         updates = _optimize_label_positions_update_step(
             labels,
@@ -602,6 +608,10 @@ def optimize_label_positions(
             label_region_margin=label_region_margin,
             label_label_margin=label_label_margin,
             bounds_margin=bounds_margin,
+            bounds_factor=bounds_factors[epoch],
+            region_attraction_factor=0.01,
+            region_repulsion_factor=1,
+            label_repulsion_factor=1,
         )
         update_norms = np.linalg.norm(updates, axis=1)
 
@@ -612,8 +622,6 @@ def optimize_label_positions(
                 np.minimum(update_norms, max_step_norm) / (update_norms + 1e-8)
             )
             updates *= update_rescale[:, None]
-
-        updates += np.random.uniform(-20 / (epoch + 1), 20 / (epoch + 1), size=updates.shape)
 
         for i in range(len(labels)):
             labels[i] = shapely.affinity.translate(labels[i], *updates[i])
