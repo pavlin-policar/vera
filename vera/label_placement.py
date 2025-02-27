@@ -525,13 +525,12 @@ def _optimize_label_positions_update_step(
 
     # Label-region attraction
     F_attr = np.zeros_like(updates)
-    for i, label_i in enumerate(labels):
-        for j, region_j in enumerate(label_target_regions):
-            vec, dist = get_vector_between(label_i, region_j, between="boundaries")
-            # Beyond the margin, we don't really care how far apart the labels are
-            weight = max(0, dist - label_region_margin)
-            weight = np.sqrt(weight)  # dampen large distances
-            F_attr[i] -= weight * vec
+    for i, (label_i, region_i) in enumerate(zip(labels, label_target_regions)):
+        vec, dist = get_vector_between(label_i, region_i, between="boundaries")
+        # Beyond the margin, we don't really care how far apart the labels are
+        weight = max(0, dist - label_region_margin) / label_region_margin
+        weight = np.sqrt(weight)  # dampen large distances
+        F_attr[i] -= weight * vec
 
     # Label-label repulsion
     F_label_rep = np.zeros_like(updates)
@@ -539,7 +538,7 @@ def _optimize_label_positions_update_step(
         for j in range(i + 1, len(labels)):
             vec, dist = get_vector_between(labels[i], labels[j])
             # Beyond the margin, we don't really care how far apart the labels are
-            weight = max(0, -dist + label_label_margin)
+            weight = max(0, -dist + label_label_margin) / label_label_margin
             F_label_rep[i] += weight * vec
             F_label_rep[j] -= weight * vec
 
@@ -551,8 +550,7 @@ def _optimize_label_positions_update_step(
     for i, label_i in enumerate(labels):
         vec, dist = get_vector_between(label_i, joint_region)
         # Beyond the margin, we don't really care how far apart the labels are
-        weight = max(0, -dist + label_region_margin)
-        # print(vec, dist, weight)
+        weight = max(0, -dist + label_region_margin) / label_region_margin
         F_region_rep[i] += weight * vec
 
     logger.debug(
@@ -563,7 +561,7 @@ def _optimize_label_positions_update_step(
     )
 
     return (
-        100 * F_bounds +
+        10 * F_bounds +
         0.01 * F_attr +
         1 * F_region_rep +
         1 * F_label_rep
@@ -576,12 +574,13 @@ def optimize_label_positions(
     all_regions: list[shapely.Polygon],
     ax: matplotlib.axes.Axes,
     eps: float = 0.1,
-    lr: float = 1,
-    max_iter: int = 500,
+    lr: float = 10,
+    max_iter: int = 100,
     max_step_norm: float = 1,
     label_region_margin: float = 0.03,
     label_label_margin: float = 0.02,
     bounds_margin: float = 0.03,
+    return_history=False,
 ):
     assert len(labels) == len(label_target_regions), \
         "Each label needs an associated target region!"
@@ -589,6 +588,9 @@ def optimize_label_positions(
     label_region_margin = convert_ax_to_data(ax, label_region_margin)
     label_label_margin = convert_ax_to_data(ax, label_label_margin)
     bounds_margin = convert_ax_to_data(ax, bounds_margin)
+
+    if return_history:
+        label_pos_history = [labels.copy()]
 
     learning_rates = np.linspace(lr, 0, num=max_iter)
     for epoch in range(max_iter):
@@ -611,13 +613,13 @@ def optimize_label_positions(
             )
             updates *= update_rescale[:, None]
 
-        # updates += np.random.uniform(0, 10 / max_iter, size=updates.shape)
+        updates += np.random.uniform(-20 / (epoch + 1), 20 / (epoch + 1), size=updates.shape)
 
-        for i in range(len(labels)): #label, label_update in zip(labels, updates):
+        for i in range(len(labels)):
             labels[i] = shapely.affinity.translate(labels[i], *updates[i])
-            # text_pos = np.array(label_obj.get_position())
-            # print(label_update)
-            # label_obj.set_position(text_pos + label_update)
+
+        if return_history:
+            label_pos_history.append(labels.copy())
 
         logger.debug("update norm", np.linalg.norm(updates))
         # Check if stopping criteria met
@@ -625,7 +627,38 @@ def optimize_label_positions(
             logger.info("early stopping", epoch, update_norms)
             break
 
+    if return_history:
+        return labels, label_pos_history
     return labels
+
+
+def get_label_bounding_boxes_on_ax(
+    ax: matplotlib.axes.Axes,
+    label_strs: list[str],
+    label_positions: list[tuple[float, float]],
+    label_kwargs: dict = None,
+) -> list[shapely.Polygon]:
+    """Determine label bounding boxes after rendered on the given axis.
+
+    This function renders the label on the axis, checks its bounding box, and
+    removes it from the axis.
+
+    This is useful since labels can have very different sizes based on the axis
+    size, dpi, and various font settings, e.g., font family, font size, etc.
+    """
+    if label_kwargs is None:
+        label_kwargs = {}
+
+    label_bboxes = []
+    for label, label_pos in zip(label_strs, label_positions):
+        # Render the label on the current axis, get its bounding box,
+        # convert that to a polygon, then remove the rendered label
+        handle = ax.text(*label_pos, label, **label_kwargs)
+        label_bbox = get_artist_bounding_box(handle, ax)
+        label_bboxes.append(bbox_to_polygon(label_bbox))
+        handle.remove()
+
+    return label_bboxes
 
 
 def evaluate_label_pos_quality(

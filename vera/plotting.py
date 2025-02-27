@@ -36,7 +36,7 @@ from vera.label_placement import (
     evaluate_label_pos_quality,
     get_artist_bounding_boxes,
     bbox_to_polygon,
-    convert_ax_to_data, get_artist_bounding_box,
+    convert_ax_to_data, get_artist_bounding_box, get_label_bounding_boxes_on_ax,
 )
 from vera.region import Density, Region
 from vera.region_annotation import RegionAnnotation
@@ -674,7 +674,8 @@ def plot_annotation(
     indicate_purity: bool = False,
     indicate_membership: bool = False,
     only_color_inside_members: bool = True,
-    draw_labels=True,
+    draw_labels: bool = True,
+    optimize_labels: bool = True,
     ra_colors: dict = None,
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
@@ -799,53 +800,58 @@ def plot_annotation(
 
         ax_bbox = set_bbox_square_aspect(ax_bbox)
 
-        results = {}
-        for padding in [0.05, 0.1, 0.15, 0.2, 0.25]:
-            # Apply new padding to axis
-            ax_bbox_i = add_bbox_padding(ax_bbox, padding=(padding, padding))
-            set_ax_bounding_box(ax, ax_bbox_i)
+        if optimize_labels:
+            results = {}
+            # for padding in [0.1, 0.25, 0.5, 0.75, 1]:
+            for padding in [0.25]:
+                # Apply new padding to axis
+                ax_bbox_i = add_bbox_padding(ax_bbox, padding=(padding, padding))
+                set_ax_bounding_box(ax, ax_bbox_i)
 
-            # Get label bounding boxes
-            label_bboxes: list[shapely.Polygon] = []
-            for lbl_data, label_text_pos in zip(label_data, label_positions):
-                # Render the label on the current axis, get its bounding box,
-                # convert that to a polygon, then remove the rendered label
-                handle = ax.text(*label_text_pos, lbl_data["text"], **label_kwargs_)
-                label_bbox = get_artist_bounding_box(handle, ax)
-                label_bboxes.append(bbox_to_polygon(label_bbox))
-                handle.remove()
+                # Get label bounding boxes
+                label_bboxes = get_label_bounding_boxes_on_ax(
+                    ax,
+                    [lbl["text"] for lbl in label_data],
+                    label_positions,
+                    label_kwargs_,
+                )
 
-            # Where are the labels supposed to point to?
-            label_target_regions = [data["pos_region"] for data in label_data]
+                # Where are the labels supposed to point to?
+                label_target_regions = [data["pos_region"] for data in label_data]
 
-            # Optimize label positions
-            label_bboxes = optimize_label_positions(
-                label_bboxes, label_target_regions, region_patches, ax,
-            )
-            # Evaluate the current label layout
-            label_pos_quality = evaluate_label_pos_quality(
-                label_bboxes, label_target_regions, region_patches, ax
-            )
-            # And assign an overall score with which to compare layouts
-            layout_score = sum(
-                penalty_weighing[k] * v for k, v in label_pos_quality.items()
-            )
+                # Optimize label positions
+                label_bboxes, label_history = optimize_label_positions(
+                    label_bboxes, label_target_regions, region_patches, ax,
+                    max_step_norm=5, lr=2, return_history=True,
+                )
+                # Evaluate the current label layout
+                label_pos_quality = evaluate_label_pos_quality(
+                    label_bboxes, label_target_regions, region_patches, ax
+                )
+                # And assign an overall score with which to compare layouts
+                layout_score = sum(
+                    penalty_weighing[k] * v for k, v in label_pos_quality.items()
+                )
 
-            # Convert the bounding boxes back to the positions understood by
-            # matplotlib labels, so we can use them directly later on
-            label_positions = []
-            for label_bbox in label_bboxes:
-                x0, y0, x1, y1 = label_bbox.bounds
-                midpoint = x0 + (x1 - x0) / 2, y0 + (y1 - y0) / 2
-                label_positions.append(midpoint)
+                # Convert the bounding boxes back to the positions understood by
+                # matplotlib labels, so we can use them directly later on
+                label_positions = []
+                for label_bbox in label_bboxes:
+                    x0, y0, x1, y1 = label_bbox.bounds
+                    midpoint = x0 + (x1 - x0) / 2, y0 + (y1 - y0) / 2
+                    label_positions.append(midpoint)
 
-            results[padding] = {
-                "score": layout_score,
-                "label_positions": label_positions,
-            }
+                results[padding] = {
+                    "score": layout_score,
+                    "label_positions": label_positions,
+                }
 
-        best_padding = min(results, key=lambda d: results[d]["score"])
-        best_label_positions = results[best_padding]["label_positions"]
+            best_padding = min(results, key=lambda d: results[d]["score"])
+            best_label_positions = results[best_padding]["label_positions"]
+
+        else:
+            best_padding = 0.25
+            best_label_positions = label_positions
 
         ax_bbox = add_bbox_padding(ax_bbox, padding=(best_padding, best_padding))
         set_ax_bounding_box(ax, ax_bbox)
@@ -884,7 +890,7 @@ def plot_annotation(
         fig.show()
 
     if return_ax:
-        return label_handles, fig, ax
+        return label_handles, label_history, fig, ax
 
 
 def plot_annotations(
