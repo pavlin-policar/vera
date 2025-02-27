@@ -849,14 +849,17 @@ def plot_annotation(
                 results[padding] = {
                     "score": layout_score,
                     "label_positions": label_positions,
+                    "label_history": label_history
                 }
 
             best_padding = min(results, key=lambda d: results[d]["score"])
             best_label_positions = results[best_padding]["label_positions"]
+            best_label_history = results[best_padding]["label_history"]
 
         else:
             best_padding = 0.25
             best_label_positions = label_positions
+            best_label_history = [label_positions]
 
         ax_bbox = add_bbox_padding(ax_bbox, padding=(best_padding, best_padding))
         set_ax_bounding_box(ax, ax_bbox)
@@ -895,7 +898,7 @@ def plot_annotation(
         fig.show()
 
     if return_ax:
-        return label_handles, label_history, fig, ax
+        return label_handles, best_label_history, fig, ax
 
 
 def plot_annotations(
