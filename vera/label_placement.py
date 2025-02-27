@@ -574,6 +574,7 @@ def optimize_label_positions(
     ax: matplotlib.axes.Axes,
     eps: float = 0.01,
     lr: float = 5,
+    momentum: float = 0.8,
     max_iter: int = 50,
     max_step_norm: float = 5,
     label_region_margin: float = 0.03,
@@ -591,13 +592,12 @@ def optimize_label_positions(
     if return_history:
         label_pos_history = [labels.copy()]
 
-    # Gradually decrease learning rate
-    learning_rates = np.linspace(lr, 0, num=max_iter)
     # Gradually increase the bounding box repulsion factor
     bounds_factors = np.linspace(0.01, 10, num=max_iter, endpoint=True)
 
+    updates = None
     for epoch in range(max_iter):
-        updates = _optimize_label_positions_update_step(
+        step = _optimize_label_positions_update_step(
             labels,
             label_target_regions,
             embedding_region,
@@ -610,15 +610,20 @@ def optimize_label_positions(
             region_repulsion_factor=1,
             label_repulsion_factor=1,
         )
-        update_norms = np.linalg.norm(updates, axis=1)
-
-        updates *= learning_rates[epoch]
-
+        step_norms = np.linalg.norm(step, axis=1)
         if max_step_norm is not None:
-            update_rescale = (
-                np.minimum(update_norms, max_step_norm) / (update_norms + 1e-8)
+            step_rescale = (
+                np.minimum(step_norms, max_step_norm) / (step_norms + 1e-8)
             )
-            updates *= update_rescale[:, None]
+            step *= step_rescale[:, None]
+
+        if updates is not None:
+            updates *= momentum
+            updates += step
+        else:
+            updates = step
+
+        updates *= lr
 
         for i in range(len(labels)):
             labels[i] = shapely.affinity.translate(labels[i], *updates[i])
@@ -628,8 +633,8 @@ def optimize_label_positions(
 
         logger.debug("update norm", np.linalg.norm(updates))
         # Check if stopping criteria met
-        if np.max(update_norms) < eps:
-            logger.info("early stopping", epoch, update_norms)
+        if np.max(np.linalg.norm(updates, axis=1)) < eps:
+            logger.info("early stopping", epoch, step_norms)
             break
 
     if return_history:
