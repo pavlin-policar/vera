@@ -34,12 +34,14 @@ class IntervalRule(Rule):
         lower: float = -np.inf,
         upper: float = np.inf,
         value_name: str = "x",
+        precision: int = 2,
     ):
         if lower is None and upper is None:
             raise ValueError("`lower` and `upper` can't both be `None`!")
         self.lower = lower
         self.upper = upper
         self.value_name = value_name
+        self.precision = precision
 
     def can_merge_with(self, other: Rule) -> bool:
         if not isinstance(other, IntervalRule):
@@ -63,7 +65,11 @@ class IntervalRule(Rule):
             raise IncompatibleRuleError(self, other)
         lower = min(self.lower, other.lower)
         upper = max(self.upper, other.upper)
-        return self.__class__(lower=lower, upper=upper, value_name=self.value_name)
+        # Use the higher precision of the two
+        new_prec = max(self.precision, other.precision)
+        return IntervalRule(
+            lower=lower, upper=upper, value_name=self.value_name, precision=new_prec,
+        )
 
     def contains(self, other: Rule) -> Rule:
         if not isinstance(other, IntervalRule):
@@ -71,16 +77,22 @@ class IntervalRule(Rule):
         return other.lower >= self.lower and other.upper <= self.upper
 
     def __str__(self):
+        def _format_num(x):
+            if self.precision < 0:
+                return str(round(x, self.precision))
+            else:
+                return f"{x:.{self.precision}f}"
+
         # Special handling for `x > 5`. Easier to read
         if np.isfinite(self.lower) and not np.isfinite(self.upper):
-            return f"{self.value_name} > {self.lower:.2f}"
+            return f"{self.value_name} > {_format_num(self.lower)}"
 
         s = ""
         if np.isfinite(self.lower):
-            s += f"{self.lower:.2f} < "
+            s += f"{_format_num(self.lower)} < "
         s += str(self.value_name)
         if np.isfinite(self.upper):
-            s += f" < {self.upper:.2f}"
+            s += f" < {_format_num(self.upper)}"
         return s
 
     def __repr__(self):

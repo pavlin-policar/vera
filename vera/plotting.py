@@ -683,7 +683,6 @@ def plot_annotation(
     figwidth: int = 4,
     return_ax: bool = False,
     show: bool = False,
-    min_embedding_size: float = 0.25,
 ):
     if ax is None:
         fig, ax = plt.subplots(figsize=(figwidth, figwidth), dpi=150)
@@ -803,7 +802,7 @@ def plot_annotation(
         ax_bbox = set_bbox_square_aspect(ax_bbox)
 
         if optimize_labels:
-            # Obtain polygon that encompasses the embedding
+            # Obtain a polygon that encompasses the embedding
             embedding_density = embedding_obj.estimate_density(1)
             embedding_region = Region.from_density(embedding_obj, embedding_density)
             embedding_polygon = embedding_region.polygon
