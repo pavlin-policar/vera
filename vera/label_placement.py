@@ -1,7 +1,5 @@
 import io
 import logging
-import operator
-from functools import reduce
 
 import matplotlib
 import numpy as np

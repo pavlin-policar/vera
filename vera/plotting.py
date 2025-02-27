@@ -767,10 +767,10 @@ def plot_annotation(
 
         # Determine an initial placement for the labels
         label_targets = np.array([lbl["pos"] for lbl in label_data])
-        label_positions = initial_text_location_placement(
-            embedding, label_targets, radius_factor=0.25,
+        initial_label_positions = initial_text_location_placement(
+            embedding, label_targets, radius_factor=1,
         )
-        fix_crossings(label_positions, label_targets)
+        fix_crossings(initial_label_positions, label_targets)
 
         # Create label objects, which can later be optimized
         label_kwargs_ = dict(
@@ -817,7 +817,7 @@ def plot_annotation(
                 label_bboxes = get_label_bounding_boxes_on_ax(
                     ax,
                     [lbl["text"] for lbl in label_data],
-                    label_positions,
+                    initial_label_positions,
                     label_kwargs_,
                 )
 
@@ -858,8 +858,8 @@ def plot_annotation(
 
         else:
             best_padding = 0.25
-            best_label_positions = label_positions
-            best_label_history = [label_positions]
+            best_label_positions = initial_label_positions
+            best_label_history = [initial_label_positions]
 
         ax_bbox = add_bbox_padding(ax_bbox, padding=(best_padding, best_padding))
         set_ax_bounding_box(ax, ax_bbox)
