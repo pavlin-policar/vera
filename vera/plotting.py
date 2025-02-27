@@ -36,7 +36,8 @@ from vera.label_placement import (
     evaluate_label_pos_quality,
     get_artist_bounding_boxes,
     bbox_to_polygon,
-    convert_ax_to_data, get_artist_bounding_box, get_label_bounding_boxes_on_ax,
+    convert_ax_to_data,
+    get_label_bounding_boxes_on_ax,
 )
 from vera.region import Density, Region
 from vera.region_annotation import RegionAnnotation
@@ -715,7 +716,8 @@ def plot_annotation(
         # region_patches.extend(fill_patches)
         region_patches.extend(region_annotation.region.polygon.geoms)
 
-    embedding = region_annotations[0].region.embedding.X
+    embedding_obj = region_annotations[0].region.embedding
+    embedding = embedding_obj.X
     scatter_kwargs_ = {
         "zorder": 2,
         "s": 6,
@@ -801,6 +803,11 @@ def plot_annotation(
         ax_bbox = set_bbox_square_aspect(ax_bbox)
 
         if optimize_labels:
+            # Obtain polygon that encompasses the embedding
+            embedding_density = embedding_obj.estimate_density(1)
+            embedding_region = Region.from_density(embedding_obj, embedding_density)
+            embedding_polygon = embedding_region.polygon
+
             results = {}
             for padding in [0.1, 0.25, 0.5, 0.75, 1]:
                 # Apply new padding to axis
@@ -820,7 +827,7 @@ def plot_annotation(
 
                 # Optimize label positions
                 label_bboxes, label_history = optimize_label_positions(
-                    label_bboxes, label_target_regions, region_patches, ax,
+                    label_bboxes, label_target_regions, embedding_polygon, ax,
                     max_step_norm=5, lr=1, max_iter=100, return_history=True,
                 )
                 # Evaluate the current label layout

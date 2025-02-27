@@ -1,3 +1,4 @@
+import numbers
 from functools import cached_property
 
 import numpy as np
@@ -48,6 +49,9 @@ class Embedding:
     def estimate_density(self, values: np.ndarray, kernel: str = "gaussian") -> "Density":
         # Avoid circular imports
         from vera.region import Density
+
+        if isinstance(values, numbers.Number):
+            values = values * np.ones(self.X.shape[0])
 
         kde = KDEpy.FFTKDE(kernel=kernel, bw=self.scale).fit(self.X, weights=values)
         kde_esimates = kde.evaluate(self._density_grid)

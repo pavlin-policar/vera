@@ -493,12 +493,12 @@ def get_vector_between(
 def _optimize_label_positions_update_step(
     labels: list[shapely.Polygon],
     label_target_regions: list[shapely.Polygon],
-    all_regions: list[shapely.Polygon],
+    embedding_region: shapely.Polygon,
     ax: matplotlib.axes.Axes,
     label_region_margin: float,
     label_label_margin: float,
     bounds_margin: float,
-    bounds_factor: float = 100,
+    bounds_factor: float = 10,
     region_attraction_factor: float = 0.01,
     region_repulsion_factor: float = 1,
     label_repulsion_factor: float = 1,
@@ -547,12 +547,9 @@ def _optimize_label_positions_update_step(
             F_label_rep[j] -= weight * vec
 
     # Label-region repulsion
-    # Instead of computing repulsion between all pairs of label-regions, we can
-    # merge the region polygons into a single one, and repel from that one
-    joint_region = reduce(operator.or_, all_regions)
     F_region_rep = np.zeros_like(updates)
     for i, label_i in enumerate(labels):
-        vec, dist = get_vector_between(label_i, joint_region)
+        vec, dist = get_vector_between(label_i, embedding_region)
         # Beyond the margin, we don't really care how far apart the labels are
         weight = max(0, -dist + label_region_margin)
         F_region_rep[i] += weight * vec
@@ -575,7 +572,7 @@ def _optimize_label_positions_update_step(
 def optimize_label_positions(
     labels: list[shapely.Polygon],
     label_target_regions: list[shapely.Polygon],
-    all_regions: list[shapely.Polygon],
+    embedding_region: shapely.Polygon,
     ax: matplotlib.axes.Axes,
     eps: float = 0.01,
     lr: float = 5,
@@ -605,7 +602,7 @@ def optimize_label_positions(
         updates = _optimize_label_positions_update_step(
             labels,
             label_target_regions,
-            all_regions,
+            embedding_region,
             ax,
             label_region_margin=label_region_margin,
             label_label_margin=label_label_margin,
