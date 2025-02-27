@@ -821,7 +821,7 @@ def plot_annotation(
                 # Optimize label positions
                 label_bboxes, label_history = optimize_label_positions(
                     label_bboxes, label_target_regions, region_patches, ax,
-                    max_step_norm=5, lr=5, max_iter=100, return_history=True,
+                    max_step_norm=5, lr=1, max_iter=100, return_history=True,
                 )
                 # Evaluate the current label layout
                 label_pos_quality = evaluate_label_pos_quality(

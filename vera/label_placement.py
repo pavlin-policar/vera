@@ -596,8 +596,10 @@ def optimize_label_positions(
     if return_history:
         label_pos_history = [labels.copy()]
 
+    # Gradually decrease learning rate
     learning_rates = np.linspace(lr, 0, num=max_iter)
-    bounds_factors = np.linspace(0.1, np.sqrt(10), num=max_iter, endpoint=True) ** 2
+    # Gradually increase the bounding box repulsion factor
+    bounds_factors = np.linspace(0.01, 10, num=max_iter, endpoint=True)
 
     for epoch in range(max_iter):
         updates = _optimize_label_positions_update_step(
@@ -675,7 +677,7 @@ def evaluate_label_pos_quality(
     all_regions: list[shapely.Polygon],
     ax: matplotlib.axes.Axes,
     label_region_margin: float = 0.03,
-    label_label_margin: float = 0.03,
+    label_label_margin: float = 0.02,
     bounds_margin: float = 0.03,
 ):
     ax_bbox = np.array(get_ax_bounding_box(ax))
