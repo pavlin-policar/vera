@@ -81,7 +81,7 @@ class Variable(metaclass=abc.ABCMeta):
         if not isinstance(other, self.__class__):
             return False
         eq_cond = all(getattr(self, f) == getattr(other, f) for f in self.eq_attrs)
-        val_cond = np.allclose(self.values, other.values)
+        val_cond = np.allclose(self.values, other.values, equal_nan=True)
         return eq_cond and val_cond
 
     def __hash__(self):
