@@ -114,6 +114,7 @@ def __discretize_nonconst(variable: ContinuousVariable, n_bins: int) -> Indicato
         n_bins=n_bins,
         strategy="kmeans",
         encode="onehot-dense",
+        random_state=0,
     )
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=ConvergenceWarning)
