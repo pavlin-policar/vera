@@ -250,7 +250,6 @@ def extract_region_annotations(
 def merge_overfragmented(
     region_annotations: list[RegionAnnotation],
     min_sample_overlap: float = 0.5,
-    min_purity_gain: float = 0.5,
 ) -> list[RegionAnnotation]:
     # If we only have a single variable, there is nothing to merge
     if len(region_annotations) == 1:
@@ -281,12 +280,7 @@ def merge_overfragmented(
         if shared_sample_pct < min_sample_overlap:
             return 0
 
-        new_ra = _merge_region_annotations([ra1, ra2])
-        ra1_purity_gain = metrics.purity(new_ra) / metrics.purity(ra1) - 1
-        ra2_purity_gain = metrics.purity(new_ra) / metrics.purity(ra2) - 1
-        purity_gain = np.max([ra1_purity_gain, ra2_purity_gain])
-
-        return int(purity_gain >= min_purity_gain)
+        return 1
 
     def _merge_round(region_annotations):
         # Group region annotatins based on base variables. At this point, all

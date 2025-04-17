@@ -19,7 +19,6 @@ def generate_region_annotations(
     kernel: str = "gaussian",
     contour_level: float = 0.25,
     merge_min_sample_overlap: float = 0.8,
-    merge_min_purity_gain: float = 0.5,
     filter_uninformative: bool = True,
     random_state: Any = None,
 ) -> list[list[RegionAnnotation]]:
@@ -52,9 +51,7 @@ def generate_region_annotations(
     # Perform iterative merging on every single region annotation group
     region_annotations = [
         pp.merge_overfragmented(
-            ra_group,
-            min_sample_overlap=merge_min_sample_overlap,
-            min_purity_gain=merge_min_purity_gain,
+            ra_group, min_sample_overlap=merge_min_sample_overlap
         )
         for ra_group in tqdm(region_annotations)
     ]
