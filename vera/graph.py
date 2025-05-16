@@ -174,7 +174,7 @@ def max_cliques(g: Graph) -> list[Graph]:
 
 
 def max_cliques_nx(g: Graph) -> list[Graph]:
-    g_nx = nx.from_edgelist(graph_to_edgelist(g))
+    g_nx = nx.from_dict_of_lists(g)
     cliques = list(nx.algorithms.clique.find_cliques(g_nx))
 
     cliques = list(map(NodeList, map(list, cliques)))

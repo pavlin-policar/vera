@@ -162,8 +162,8 @@ def generate_descriptive_layout(
         layout.append(selected_layout)
 
         # Remove variables in the current panel from the remaining variables
-        for var in selected_layout:
-            region_annotations.remove(var)
+        for ra in selected_layout:
+            region_annotations.remove(ra)
 
     return layout
 
