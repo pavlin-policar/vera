@@ -182,6 +182,7 @@ def descriptive(
     background_enrichment_threshold: float = 0.9,
     ranking_funcs=DEFAULT_RANKING_FUNCS,
 ):
+    print("-1")
     region_annotations = flatten(region_annotations)
 
     # Split explanatory features into their polygons

@@ -6,7 +6,10 @@ from vera.region_annotation import RegionAnnotation
 
 
 def purity(ra: RegionAnnotation) -> float:
-    return np.mean(ra.descriptor.values[list(ra.region.contained_samples)])
+    contained_vals = ra.descriptor.values[list(ra.region.contained_samples)]
+    if len(contained_vals) == 0:
+        return 0
+    return np.mean(contained_vals)
 
 
 def pdist(l: list[Any], metric: Callable):
