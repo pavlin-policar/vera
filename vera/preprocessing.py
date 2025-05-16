@@ -184,6 +184,8 @@ def expand(variables: list[Variable], n_discretization_bins: int = 5) -> list[li
             expanded_vars = one_hot(variable)
         elif variable.is_indicator:
             expanded_vars = [variable]
+        else:
+            raise RuntimeError(f"Variable type not recognized, got `{variable}`")
 
         var_groups.append(expanded_vars)
 

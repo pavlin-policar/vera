@@ -22,6 +22,10 @@ class RegionAnnotation:
         if not isinstance(other, RegionAnnotation):
             return False
 
+        # The descriptors need to be compatible
+        if not self.descriptor.can_merge_with(other.descriptor):
+            return False
+
         # The embedding has to be the same
         if not np.allclose(self.region.embedding.X, other.region.embedding.X):
             return False

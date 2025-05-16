@@ -3,7 +3,6 @@ import unittest
 import numpy as np
 import pandas as pd
 
-import vera.plotting
 import vera.preprocessing as pp
 from tests.utils import generate_clusters
 from vera.annotate import generate_region_annotations

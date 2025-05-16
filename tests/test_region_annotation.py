@@ -8,7 +8,12 @@ import vera
 from vera import preprocessing as pp
 from tests.utils import generate_clusters
 from vera.region_annotation import RegionAnnotation
-from vera.variables import IndicatorVariable, MergeError, IndicatorVariableGroup
+from vera.variables import (
+    IndicatorVariable,
+    IndicatorVariableGroup,
+    MergeError,
+    merge_indicator_variables,
+)
 
 
 class TestRegionAnnotationSplit(unittest.TestCase):
@@ -294,7 +299,7 @@ class TestIndicatorVariableGroupMerge(unittest.TestCase):
             for i in range(5)
         }
         self.variable_parts = {
-            k: pp.discretize(pp.ingest(v), n_bins=3) for k, v in variables.items()
+            k: pp.discretize(pp.ingest(v), n_bins=5) for k, v in variables.items()
         }
 
     def test_merge_with_indicator_1(self):
@@ -336,3 +341,90 @@ class TestIndicatorVariableGroupMerge(unittest.TestCase):
         self.assertEqual(2, len(result2.variables))
 
         self.assertEqual(result1, result2)
+
+    def test_merge_with_indicator_3(self):
+        """For a variable group [C1_0, C2_0], add in C1_1. The result should be
+        [C1_12, C2_0]."""
+        vg1 = IndicatorVariableGroup([
+            self.variable_parts["c1"][0],
+            self.variable_parts["c2"][0],
+        ])
+        vg2 = IndicatorVariableGroup([
+            self.variable_parts["c1"][1],
+            self.variable_parts["c2"][1],
+        ])
+        vg3 = IndicatorVariableGroup([
+            self.variable_parts["c1"][2],
+            self.variable_parts["c2"][2],
+        ])
+        vg4 = IndicatorVariableGroup([
+            self.variable_parts["c1"][3],
+            self.variable_parts["c2"][3],
+        ])
+
+        # Merge [C1_0, C2_0] with [C1_1, C2_1]
+        result1 = vg1.merge_with(vg2)
+        self.assertIsInstance(result1, IndicatorVariableGroup)
+        self.assertEqual(2, len(result1.variables))
+
+        result2 = result1.merge_with(vg3)
+        self.assertIsInstance(result2, IndicatorVariableGroup)
+        self.assertEqual(2, len(result2.variables))
+
+        result3 = result2.merge_with(vg4)
+        print(result3)
+        self.assertIsInstance(result3, IndicatorVariableGroup)
+        self.assertEqual(2, len(result3.variables))
+
+        result3 = vg1.merge_with(vg3)
+        self.assertIsInstance(result3, IndicatorVariableGroup)
+        self.assertEqual(4, len(result3.variables))
+
+
+class TestMergeIndicatorVariables(unittest.TestCase):
+    def setUp(self) -> None:
+        np.random.seed(0)
+        variables = {
+            f"c{i + 1}": pd.Series(np.random.normal(0, 1, size=50), name=f"c{i + 1}")
+            for i in range(5)
+        }
+        self.variable_parts = {
+            k: pp.discretize(pp.ingest(v), n_bins=5) for k, v in variables.items()
+        }
+
+    def test_merge_multiple_continuous(self):
+        to_merge = [
+            self.variable_parts["c1"][0],
+            self.variable_parts["c1"][1],
+            self.variable_parts["c1"][2],
+            self.variable_parts["c1"][3],
+            self.variable_parts["c1"][4],
+        ]
+        print(merge_indicator_variables(to_merge))
+
+        to_merge = [
+            self.variable_parts["c1"][0],
+            self.variable_parts["c1"][1],
+            self.variable_parts["c1"][3],
+            self.variable_parts["c1"][4],
+        ]
+        print(merge_indicator_variables(to_merge))
+
+    def test_problematic_1(self):
+        import datasets
+        data = datasets.Dataset.load("fifa22")
+        x, embedding = data.features, data.embedding
+
+        x.drop(columns=["Club", "Work Rate", "Body Type", "Preferred Foot", "Position",
+                        "Best Position"], inplace=True)
+
+        region_annotations = vera.an.generate_region_annotations(
+            x.iloc[:, 24:25],
+            embedding,
+            n_discretization_bins=5,
+            scale_factor=1,
+            # sample_size=5000,
+            contour_level=0.25,
+            merge_min_sample_overlap=0.9,
+            merge_min_purity_gain=0.5,
+        )

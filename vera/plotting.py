@@ -808,7 +808,8 @@ def plot_annotation(
             embedding_polygon = embedding_region.polygon
 
             results = {}
-            for padding in [0.1, 0.25, 0.5, 0.75, 1]:
+            # for padding in [0.1, 0.25, 0.5, 0.75, 1]:
+            for padding in [0.25]:
                 # Apply new padding to axis
                 ax_bbox_i = add_bbox_padding(ax_bbox, padding=(padding, padding))
                 set_ax_bounding_box(ax, ax_bbox_i)

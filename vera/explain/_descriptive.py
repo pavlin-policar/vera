@@ -1,3 +1,4 @@
+from collections import defaultdict
 from typing import Callable
 
 import numpy as np
@@ -13,8 +14,8 @@ DEFAULT_RANKING_FUNCS = [
     (_layout_scores.variable_occurs_in_all_regions, 30),
     (_layout_scores.mean_variable_occurence, 10),
     (_layout_scores.num_regions_matches_perception, 10),
-    (_layout_scores.mean_purity, 5),
-    (_layout_scores.sample_coverage, 2),
+    (_layout_scores.mean_purity, 2),
+    (_layout_scores.sample_coverage, 10),
 ]
 
 
@@ -137,7 +138,14 @@ def generate_descriptive_layout(
         node_labels = dict(enumerate(region_annotations))
         graph = g.label_nodes(graph, node_labels)
 
-        layouts = g.independent_sets(graph)
+        if len(graph) < 20:
+            layouts = g.independent_sets(graph)
+        else:
+            node_colors = g.graph_coloring_greedy_nx(graph)
+            groups = defaultdict(set)
+            for k, v in node_colors.items():
+                groups[v].add(k)
+            layouts = [list(v) for v in groups.values()]
 
         # Sort the panels according to their metric scores
         panel_scores = np.array([

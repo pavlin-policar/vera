@@ -1,6 +1,8 @@
 from collections import defaultdict
 from itertools import permutations
 from typing import NewType, TypeVar, Union
+
+import networkx as nx
 import scipy.sparse as sp
 
 import numpy as np
@@ -163,7 +165,24 @@ def max_cliques(g: Graph) -> list[Graph]:
     cliques = sorted(cliques, key=len, reverse=True)
 
     clique_graphs = [
-        Graph({k: v for k, v in g.items() if k in c}) for c in cliques
+        Graph({k: {vi for vi in v if vi in c} for k, v in g.items() if k in c})
+        for c in cliques
+    ]
+    clique_graphs = sorted(clique_graphs, key=len, reverse=True)
+
+    return clique_graphs
+
+
+def max_cliques_nx(g: Graph) -> list[Graph]:
+    g_nx = nx.from_edgelist(graph_to_edgelist(g))
+    cliques = list(nx.algorithms.clique.find_cliques(g_nx))
+
+    cliques = list(map(NodeList, map(list, cliques)))
+    cliques = sorted(cliques, key=len, reverse=True)
+
+    clique_graphs = [
+        Graph({k: {vi for vi in v if vi in c} for k, v in g.items() if k in c})
+        for c in cliques
     ]
     clique_graphs = sorted(clique_graphs, key=len, reverse=True)
 
@@ -171,7 +190,7 @@ def max_cliques(g: Graph) -> list[Graph]:
 
 
 def independent_sets(g: Graph) -> list[NodeList]:
-    return list(map(nodes, max_cliques(graph_complement(g))))
+    return list(map(nodes, max_cliques_nx(graph_complement(g))))
 
 
 def graph_coloring_greedy(
@@ -179,6 +198,7 @@ def graph_coloring_greedy(
 ) -> dict[T, int]:
     def _next_available_color(g, colors, v):
         neighboring_colors = {colors[u] for u in g[v]}
+        print(neighboring_colors)
         i = 0
         while i in neighboring_colors:
             i += 1
@@ -192,6 +212,12 @@ def graph_coloring_greedy(
     for v in g:
         colors[v] = _next_available_color(g, colors, v)
 
+    return colors
+
+
+def graph_coloring_greedy_nx(g: Graph, strategy: str = "largest_first"):
+    g_nx = nx.from_edgelist(graph_to_edgelist(g))
+    colors = nx.coloring.greedy_color(g_nx, strategy=strategy)
     return colors
 
 

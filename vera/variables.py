@@ -51,6 +51,13 @@ class RegionDescriptor(metaclass=abc.ABCMeta):
 
         return IndicatorVariableGroup(merged_indicators)
 
+    def can_merge_with(self, other: "RegionDescriptor"):
+        try:
+            self.merge_with(other)
+            return True
+        except MergeError:
+            return False
+
 
 class Variable(metaclass=abc.ABCMeta):
     repr_attrs = ["name"]
@@ -238,11 +245,10 @@ class IndicatorVariableGroup(RegionDescriptor):
             other_variables = [other]
         elif isinstance(other, IndicatorVariableGroup):
             other_variables = other.variables
-        elif not isinstance(other, IndicatorVariableGroup):
+        else:
             raise RuntimeError("This should never be reached.")
 
-        merged_variables = merge_indicator_variables(self.variables + other_variables)
-        return IndicatorVariableGroup(merged_variables)
+        return IndicatorVariableGroup(self.variables + other_variables)
 
     @property
     def contained_variables(self) -> tuple[Variable]:
