@@ -2,12 +2,13 @@
 
 [![BSD 3-Clause License](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
 
-> [!warning]
-> This library is under active development. While the core algorithm and code are mostly stable, the plotting utilities will certainly change. I still haven't found a satisfactory way to do label placement, so this will definitely change.
+**VERA** is a Python library for generating **static visual explanations** of arbitrary two-dimensional point embeddings, usually produced by t-SNE, UMAP, or other dimensionality reduction techniques. The goal of VERA is to quickly and automatically generate explanations that give users a high-level overview of the embedding space without users having to load and interact with sometimes clunky interactive tools.
 
-VERA automatically generates visual explanations of two-dimensional embeddings. When dealing with high-dimensional data, a common first step is to generate a two-dimensional embedding using your dimensionality reduction algorithm of choice (t-SNE, UMAP, PCA) and visualize it in a scatter plot. However, once we have a visualization, the next step typically involves figuring out what each particular region or cluster in the embedding corresponds to. This is often tedious and requires us to tinker around in notebooks or interactive tools to figure out what's what.
 
-The aim of VERA is to automate this process and automatically generate a series of potentially interesting explanatory visualizations, each of which explain different regions of the embedding in terms of the original data features. This way, users can quickly get a big-picture overview of the two-dimensional embedding without hassle.
+
+
+
+
 
 - [Documentation]() (TODO)
 - [User Guide and Tutorial]() (TODO)
@@ -15,15 +16,25 @@ The aim of VERA is to automate this process and automatically generate a series 
 
 ![](docs/source/images/main-example.png)
 
-A few caveats and limitations:
-- VERA generates explanations using a provided set of features, which should be interpretable to the user.
-- Currently, VERA is limited when dealing with large numbers of features. This can be both slow to run, and can generate very long region descriptions, which oftentimes end up unreadable.
+## Why VERA?
 
-While the API and core algorithm is stable, VERA is under **active development** and some its behaviour may change slightly in subsequent versions.
-The following things are still on my todo list:
-- better label placement
-- better scalability
-- label formatting and summarization
+Two-dimensional embeddings are widely used in exploratory data analysis to visualize and understand complex data. While tools like scatter plots help users spot clusters or patterns, interpreting what these structures actually *mean* is still a largely manual process.
+
+VERA automates this process. By identifying informative features and characteristic regions in the embedding, VERA produces multiple small, static visualizations that summarize the main structural patterns -- allowing users to quickly understand and communicate key insights.
+
+VERA is particularly useful in workflows where:
+
+- The original features are at least partially human-interpretable (e.g., tabular data).
+
+- Users seek a quick overview of structure without manual exploration.
+
+- There is a need to generate publication-ready summaries of embeddings.
+
+## Limitations
+
+- As a general purpose embedding explanation tool, VERA requires at least some human-interpretable features in order to generate embeddings (although embeddings can be generated from arbitrary feature sets). While VERA could be extended to text, image, and video data with domain-specific adaptations, this is currently not supported.
+
+- Descriptive explanations generate annotations that include many features. If your data set contains a large number of features, the annotations may also become very long, rendering the visualization unusable. In this case, we suggest limiting explanations to a subset of features.
 
 ## Installation
 
