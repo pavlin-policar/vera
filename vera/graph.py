@@ -198,7 +198,6 @@ def graph_coloring_greedy(
 ) -> dict[T, int]:
     def _next_available_color(g, colors, v):
         neighboring_colors = {colors[u] for u in g[v]}
-        print(neighboring_colors)
         i = 0
         while i in neighboring_colors:
             i += 1

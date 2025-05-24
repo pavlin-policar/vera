@@ -119,6 +119,7 @@ def generate_descriptive_layout(
     max_panels: int | None = None,
     max_overlap: float = 0.0,
     ranking_funcs=DEFAULT_RANKING_FUNCS,
+    allow_greedy_approx=True,
 ):
     # Create a working copy of our clusters
     region_annotations = list(region_annotations)
@@ -138,7 +139,7 @@ def generate_descriptive_layout(
         node_labels = dict(enumerate(region_annotations))
         graph = g.label_nodes(graph, node_labels)
 
-        if len(graph) < 20:
+        if len(graph) < 20 or not allow_greedy_approx:
             layouts = g.independent_sets(graph)
         else:
             node_colors = g.graph_coloring_greedy_nx(graph)
@@ -181,8 +182,8 @@ def descriptive(
     enrich_with_background: bool = True,
     background_enrichment_threshold: float = 0.9,
     ranking_funcs=DEFAULT_RANKING_FUNCS,
+    allow_greedy_approx=True,
 ):
-    print("-1")
     region_annotations = flatten(region_annotations)
 
     # Split explanatory features into their polygons
@@ -208,6 +209,7 @@ def descriptive(
         max_panels=max_panels,
         max_overlap=max_overlap,
         ranking_funcs=ranking_funcs,
+        allow_greedy_approx=allow_greedy_approx
     )
 
     if enrich_with_background:
