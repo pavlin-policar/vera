@@ -219,22 +219,55 @@ def extract_region_annotations(
     variables: list[list[IndicatorVariable]],
     embedding: Embedding | np.ndarray,
     scale_factor: float = 1,
+    method: str = "kde",
+    # KDE parameters
     kernel: str = "gaussian",
     contour_level: float = 0.25,
 ) -> list[RegionAnnotation]:
+    """Extract region annotations for each indicator variable.
 
-    def _generate_single(v):
-        density = embedding.estimate_density(v.values, kernel=kernel)
-        region = Region.from_density(
-            embedding=embedding, density=density, level=contour_level
-        )
-        return RegionAnnotation(region, v)
+    Parameters
+    ----------
+    variables : list of lists of IndicatorVariable
+    embedding : Embedding or np.ndarray
+    scale_factor : float
+        Controls both the KDE bandwidth and the rangeset edge-pruning
+        threshold (via ``embedding.scale``).
+    method : ``"kde"`` or ``"rangeset"``
+        ``"kde"`` extracts regions via kernel density estimation and contour
+        thresholding.  ``"rangeset"`` extracts regions via Delaunay
+        triangulation with edge-length pruning (Sohns et al., 2021).
+    kernel : str
+        KDE kernel (only used when *method* is ``"kde"``).
+    contour_level : float
+        Density contour level (only used when *method* is ``"kde"``).
+    """
 
     # Create embedding instance which will be shared across all explanatory
     # variables. The shared instance is necessary to avoid slow recomputation of
     # adjacency matrices
     if not isinstance(embedding, Embedding):
         embedding = Embedding(embedding, scale_factor=scale_factor)
+
+    if method == "kde":
+        def _generate_single(v):
+            density = embedding.estimate_density(v.values, kernel=kernel)
+            region = Region.from_density(
+                embedding=embedding, density=density, level=contour_level
+            )
+            return RegionAnnotation(region, v)
+    elif method == "rangeset":
+        def _generate_single(v):
+            region = Region.from_triangulation(
+                embedding=embedding,
+                member_mask=v.values,
+            )
+            return RegionAnnotation(region, v)
+    else:
+        raise ValueError(
+            f"Unknown region extraction method '{method}'. "
+            f"Supported methods are 'kde' and 'rangeset'."
+        )
 
     # Create explanatory variables from each of the derived features
     region_annotations = []
@@ -243,9 +276,14 @@ def extract_region_annotations(
         for var_group in variables:
             ra_group = []
             for v in var_group:
-                ra_group.append(_generate_single(v))
+                ra = _generate_single(v)
+                # Drop regions with empty polygons (e.g. when all Delaunay
+                # triangles are pruned by the rangeset threshold)
+                if not ra.region.polygon.is_empty:
+                    ra_group.append(ra)
                 pbar.update(1)
-            region_annotations.append(ra_group)
+            if ra_group:
+                region_annotations.append(ra_group)
 
     return region_annotations
 

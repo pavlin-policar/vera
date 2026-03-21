@@ -4,8 +4,18 @@ from functools import cached_property, reduce
 import contourpy
 import numpy as np
 from shapely import geometry as geom
+from shapely.ops import triangulate, unary_union
 
 from vera.embedding import Embedding
+
+
+def _max_edge_length(polygon: geom.Polygon) -> float:
+    """Return the length of the longest edge of a polygon."""
+    coords = polygon.boundary.coords
+    return max(
+        geom.LineString([p, q]).length
+        for p, q in zip(coords[:-1], coords[1:])
+    )
 
 
 class Density:
@@ -75,7 +85,7 @@ class Region:
     def contained_samples(self) -> set[int]:
         contained_indices = set()
         for i in range(len(self.embedding.points)):
-            if self.polygon.contains(self.embedding.points[i]):
+            if self.polygon.covers(self.embedding.points[i]):
                 contained_indices.add(i)
 
         return contained_indices
@@ -95,6 +105,52 @@ class Region:
     @classmethod
     def from_density(cls, embedding: Embedding, density: Density, level: float = 0.25):
         polygon = cls._ensure_multipolygon(density.get_polygons_at(level))
+        return cls(embedding, polygon)
+
+    @classmethod
+    def from_triangulation(
+        cls,
+        embedding: Embedding,
+        member_mask: np.ndarray,
+    ):
+        """Construct a region via Delaunay triangulation with edge-length
+        pruning, following the "rangeset" approach from:
+
+            J.-T. Sohns, M. Schmitt, F. Jirasek, H. Hasse, and H. Leitte,
+            "Attribute-based Explanation of Non-Linear Embeddings of
+            High-Dimensional Data," IEEE VIS, 2021.
+
+        Adapted from https://github.com/leitte/NoLiES
+
+        Triangles whose longest edge exceeds ``2 * embedding.scale`` are
+        pruned.  Use ``scale_factor`` on the :class:`Embedding` to control
+        this threshold.
+
+        Parameters
+        ----------
+        embedding : Embedding
+        member_mask : np.ndarray
+            Binary array indicating which points belong to this group.
+        """
+        active_idx = np.flatnonzero(member_mask)
+
+        if len(active_idx) < 3:
+            return cls(embedding, geom.MultiPolygon())
+
+        threshold = embedding.scale * 2
+
+        points = geom.MultiPoint(embedding.X[active_idx])
+        triangles = triangulate(points)
+
+        surviving = [
+            t for t in triangles
+            if _max_edge_length(t) < threshold
+        ]
+
+        if not surviving:
+            return cls(embedding, geom.MultiPolygon())
+
+        polygon = unary_union(surviving)
         return cls(embedding, polygon)
 
     @classmethod

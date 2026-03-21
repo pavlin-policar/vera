@@ -16,12 +16,61 @@ def generate_region_annotations(
     filter_constant: bool = True,
     n_discretization_bins: int = 5,
     scale_factor: float = 1,
+    method: str = "kde",
     kernel: str = "gaussian",
     contour_level: float = 0.25,
     merge_min_sample_overlap: float = 0.8,
     filter_uninformative: bool = True,
     random_state: Any = None,
 ) -> list[list[RegionAnnotation]]:
+    """
+    Generate region annotations for variables in a features DataFrame and an
+    embedding.
+
+    This function samples the data if it exceeds a given sample size, expands
+    each feature into indicator variables (via discretization or one-hot 
+    encoding), and generates  region annotations using either KDE contouring or
+    rangeset triangulation methods. Optionally, overfragmented regions are
+    iteratively merged, and uninformative variables (those described by a single
+    (those described by a single region) can be filtered out.
+
+    Parameters
+    ----------
+    features : pd.DataFrame
+        Explanatory features.
+    embedding : np.ndarray
+        Low-dimensional embedding of the data to explain.
+    sample_size : int, default=5000
+        Maximum number of samples to use; if the data has more rows, it is 
+        randomly subsampled.
+    filter_constant : bool, default=True
+        If True, constant (uninformative) features are filtered out.
+    n_discretization_bins : int, default=5
+        Number of bins used for discretizing continuous variables.
+    scale_factor : float, default=1
+        Controls the KDE bandwidth and/or rangeset edge-cutoff threshold.
+    method : {"kde", "rangeset"}, default="kde"
+        Region extraction method.
+    kernel : str, default="gaussian"
+        KDE kernel; only used if method="kde".
+    contour_level : float, default=0.25
+        Density contour level for region extraction; only used if method="kde".
+    merge_min_sample_overlap : float, default=0.8
+        Minimum overlap (fraction of shared samples) required for merging
+        overfragmented region annotations.
+    filter_uninformative : bool, default=True
+        If True, variables described by only a single region annotation are
+        filtered out.
+    random_state : Any, default=None
+        Random state for reproducibility of sampling.
+
+    Returns
+    -------
+    region_annotations : list[list[RegionAnnotation]]
+        List of lists, where each inner list contains
+        :class:`RegionAnnotation` objects describing the regions associated with
+        one variable or variable group.
+    """
     # Sample the data if necessary. Running on large data sets can be very slow
     random_state = check_random_state(random_state)
     if sample_size is not None and features.shape[0] > sample_size:
@@ -44,6 +93,7 @@ def generate_region_annotations(
         variables,
         embedding,
         scale_factor=scale_factor,
+        method=method,
         kernel=kernel,
         contour_level=contour_level,
     )

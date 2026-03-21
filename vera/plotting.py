@@ -690,13 +690,14 @@ def plot_annotation(
         fig = ax.get_figure()
 
     if ra_colors is None:
-        # Glasbey crashes when requesting fewer colors than are in the cmap
-        cmap_len = len(get_cmap_colors(cmap))
-        request_len = max(cmap_len, len(region_annotations))
-        cmap = glasbey.extend_palette(cmap, palette_size=request_len)
+        cmap_colors = get_cmap_colors(cmap)
+        if len(region_annotations) > len(cmap_colors):
+            cmap_colors = glasbey.extend_palette(cmap, palette_size=len(region_annotations))
         ra_colors = {
-            ra: mcolors.to_rgb(c) for ra, c in zip(region_annotations, cmap)
+            ra: mcolors.to_rgb(c) for ra, c in zip(region_annotations, cmap_colors)
         }
+
+    embedding_obj = region_annotations[0].region.embedding
 
     # Save region patches to be used for label placement. We don't need both
     # fill and edge patches, so use either of the two. Here, we use fill patches
@@ -714,8 +715,6 @@ def plot_annotation(
         )
         # region_patches.extend(fill_patches)
         region_patches.extend(region_annotation.region.polygon.geoms)
-
-    embedding_obj = region_annotations[0].region.embedding
     embedding = embedding_obj.X
     scatter_kwargs_ = {
         "zorder": 2,
@@ -965,16 +964,15 @@ def layout_variable_colors(
     # We use the region descriptors rule as color key
     region_annotation_keys = {ra: ra.descriptor for ra in all_region_annotations}
 
-    # Glasbey crashes when requesting fewer colors than the cmap contains
-    num_cmap_colors = len(get_cmap_colors(cmap))
-    num_colors_to_request = max(num_cmap_colors, len(region_annotation_keys))
-    cmap = glasbey.extend_palette(
-        cmap, palette_size=num_colors_to_request, colorblind_safe=True
-    )
+    cmap_colors = get_cmap_colors(cmap)
+    if len(region_annotation_keys) > len(cmap_colors):
+        cmap_colors = glasbey.extend_palette(
+            cmap, palette_size=len(region_annotation_keys), colorblind_safe=True
+        )
 
     descriptor_color_mapping = {
         descriptor: mcolors.to_rgb(c)
-        for descriptor, c in zip(region_annotation_keys.values(), cmap)
+        for descriptor, c in zip(region_annotation_keys.values(), cmap_colors)
     }
     region_annotation_colors = {
         ra: descriptor_color_mapping[region_annotation_keys[ra]]

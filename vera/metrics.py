@@ -30,6 +30,8 @@ def dict_pdist(d: dict[Any, Any], metric: Callable):
 
 def max_shared_sample_pct(ra1: RegionAnnotation, ra2: RegionAnnotation) -> float:
     v1_samples, v2_samples = ra1.contained_samples, ra2.contained_samples
+    if not v1_samples or not v2_samples:
+        return 0
     shared_samples = v1_samples & v2_samples
     v1_shared_sample_pct = len(shared_samples) / len(v1_samples)
     v2_shared_sample_pct = len(shared_samples) / len(v2_samples)
@@ -38,6 +40,8 @@ def max_shared_sample_pct(ra1: RegionAnnotation, ra2: RegionAnnotation) -> float
 
 def min_shared_sample_pct(ra1: RegionAnnotation, ra2: RegionAnnotation) -> float:
     v1_samples, v2_samples = ra1.contained_samples, ra2.contained_samples
+    if not v1_samples or not v2_samples:
+        return 0
     shared_samples = v1_samples & v2_samples
     v1_shared_sample_pct = len(shared_samples) / len(v1_samples)
     v2_shared_sample_pct = len(shared_samples) / len(v2_samples)
@@ -59,6 +63,8 @@ def intersection_area(ra1: RegionAnnotation, ra2: RegionAnnotation) -> float:
 def intersection_percentage(ra1: RegionAnnotation, ra2: RegionAnnotation) -> float:
     """The maximum percentage of the overlap between two regions."""
     p1, p2 = ra1.region.polygon, ra2.region.polygon
+    if p1.is_empty or p2.is_empty:
+        return 0
     i = p1.intersection(p2).area
     return max(i / p1.area, i / p2.area)
 
@@ -66,13 +72,18 @@ def intersection_percentage(ra1: RegionAnnotation, ra2: RegionAnnotation) -> flo
 def max_intersection_percentage(ra1: RegionAnnotation, ra2: RegionAnnotation) -> float:
     """The maximum percentage of the overlap between two regions."""
     p1, p2 = ra1.region.polygon, ra2.region.polygon
+    if p1.is_empty or p2.is_empty:
+        return 0
     i = p1.intersection(p2).area
     return max(i / p1.area, i / p2.area)
 
 
 def intersection_over_union(ra1: RegionAnnotation, ra2: RegionAnnotation) -> float:
     p1, p2 = ra1.region.polygon, ra2.region.polygon
-    return p1.intersection(p2).area / p1.union(p2).area
+    union_area = p1.union(p2).area
+    if union_area == 0:
+        return 0
+    return p1.intersection(p2).area / union_area
 
 
 def intersection_over_union_dist(ra1: RegionAnnotation, ra2: RegionAnnotation) -> float:
