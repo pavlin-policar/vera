@@ -16,7 +16,7 @@ def generate_region_annotations(
     filter_constant: bool = True,
     n_discretization_bins: int = 5,
     scale_factor: float = 1,
-    method: str = "kde",
+    region_method: str = "kde",
     kernel: str = "gaussian",
     contour_level: float = 0.25,
     merge_min_sample_overlap: float = 0.8,
@@ -93,7 +93,7 @@ def generate_region_annotations(
         variables,
         embedding,
         scale_factor=scale_factor,
-        method=method,
+        region_method=region_method,
         kernel=kernel,
         contour_level=contour_level,
     )

@@ -219,7 +219,7 @@ def extract_region_annotations(
     variables: list[list[IndicatorVariable]],
     embedding: Embedding | np.ndarray,
     scale_factor: float = 1,
-    method: str = "kde",
+    region_method: str = "kde",
     # KDE parameters
     kernel: str = "gaussian",
     contour_level: float = 0.25,
@@ -233,7 +233,7 @@ def extract_region_annotations(
     scale_factor : float
         Controls both the KDE bandwidth and the rangeset edge-pruning
         threshold (via ``embedding.scale``).
-    method : ``"kde"`` or ``"rangeset"``
+    region_method : ``"kde"`` or ``"rangeset"``
         ``"kde"`` extracts regions via kernel density estimation and contour
         thresholding.  ``"rangeset"`` extracts regions via Delaunay
         triangulation with edge-length pruning (Sohns et al., 2021).
@@ -249,14 +249,14 @@ def extract_region_annotations(
     if not isinstance(embedding, Embedding):
         embedding = Embedding(embedding, scale_factor=scale_factor)
 
-    if method == "kde":
+    if region_method == "kde":
         def _generate_single(v):
             density = embedding.estimate_density(v.values, kernel=kernel)
             region = Region.from_density(
                 embedding=embedding, density=density, level=contour_level
             )
             return RegionAnnotation(region, v)
-    elif method == "rangeset":
+    elif region_method == "rangeset":
         def _generate_single(v):
             region = Region.from_triangulation(
                 embedding=embedding,
@@ -265,7 +265,7 @@ def extract_region_annotations(
             return RegionAnnotation(region, v)
     else:
         raise ValueError(
-            f"Unknown region extraction method '{method}'. "
+            f"Unknown region_method '{region_method}'. "
             f"Supported methods are 'kde' and 'rangeset'."
         )
 
