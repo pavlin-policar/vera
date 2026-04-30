@@ -418,6 +418,7 @@ def _plot_region(
         purity_factor = metrics.purity(region_annotation) * purity_effect_size + (1 - purity_effect_size)
         edge_alpha *= purity_factor
         fill_alpha *= purity_factor
+        lw *= purity_factor
 
     fill_patches, edge_patches = [], []
     for geom in region_annotation.region.polygon.geoms:
