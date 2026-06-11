@@ -92,7 +92,7 @@ def ingested_to_pandas(variables: list[Variable]) -> pd.DataFrame:
     return df_new
 
 
-def __discretize_const(variable: ContinuousVariable) -> IndicatorVariable:
+def __discretize_const(variable: ContinuousVariable) -> list[IndicatorVariable]:
     """Convert constant features into discrete equality rules"""
     uniq_val = variable.values[0]
     rule = EqualityRule(uniq_val, value_name=variable.name)
@@ -102,7 +102,7 @@ def __discretize_const(variable: ContinuousVariable) -> IndicatorVariable:
 
 def __discretize_nonconst(
     variable: ContinuousVariable, n_bins: int, random_state: Any = 0
-) -> IndicatorVariable:
+) -> list[IndicatorVariable]:
     """Discretize non-constant continuous variables."""
     from sklearn.preprocessing import KBinsDiscretizer
     from sklearn.exceptions import ConvergenceWarning
