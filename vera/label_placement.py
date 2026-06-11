@@ -641,10 +641,10 @@ def optimize_label_positions(
         if return_history:
             label_pos_history.append(labels.copy())
 
-        logger.debug("update norm", np.linalg.norm(updates))
+        logger.debug("update norm: %.4f", np.linalg.norm(updates))
         # Check if stopping criteria met
         if np.max(np.linalg.norm(updates, axis=1)) < eps:
-            logger.info("early stopping", epoch, step_norms)
+            logger.info("early stopping at epoch %d, step norms: %s", epoch, step_norms)
             break
 
     if return_history:
