@@ -595,7 +595,7 @@ def optimize_label_positions(
     # Gradually increase the bounding box repulsion factor
     bounds_factors = np.linspace(0.01, 10, num=max_iter, endpoint=True)
 
-    updates = None
+    velocity = None
     for epoch in range(max_iter):
         step = _optimize_label_positions_update_step(
             labels,
@@ -617,13 +617,14 @@ def optimize_label_positions(
             )
             step *= step_rescale[:, None]
 
-        if updates is not None:
-            updates *= momentum
-            updates += step
+        # The velocity buffer accumulates unscaled force; lr scales only the
+        # applied displacement, leaving the decay factor at momentum
+        if velocity is not None:
+            velocity = momentum * velocity + step
         else:
-            updates = step
+            velocity = step
 
-        updates *= lr
+        updates = lr * velocity
 
         for i in range(len(labels)):
             labels[i] = shapely.affinity.translate(labels[i], *updates[i])
