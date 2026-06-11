@@ -507,7 +507,7 @@ def _optimize_label_positions_update_step(
     # Ensure labels remain within the axes limits
     F_bounds = np.zeros_like(updates)
     ax_x_min, ax_x_max = ax.get_xlim()
-    ax_y_min, ax_y_max = ax.get_xlim()
+    ax_y_min, ax_y_max = ax.get_ylim()
 
     # Add margin to bounds
     ax_x_min += bounds_margin
