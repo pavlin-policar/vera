@@ -1,6 +1,6 @@
 import warnings
 from collections import defaultdict
-from typing import Union
+from typing import Any, Union
 
 import numpy as np
 import pandas as pd
@@ -92,7 +92,7 @@ def ingested_to_pandas(variables: list[Variable]) -> pd.DataFrame:
     return df_new
 
 
-def __discretize_const(variable: ContinuousVariable) -> IndicatorVariable:
+def __discretize_const(variable: ContinuousVariable) -> list[IndicatorVariable]:
     """Convert constant features into discrete equality rules"""
     uniq_val = variable.values[0]
     rule = EqualityRule(uniq_val, value_name=variable.name)
@@ -100,7 +100,9 @@ def __discretize_const(variable: ContinuousVariable) -> IndicatorVariable:
     return [IndicatorVariable(variable, rule, const_vals)]
 
 
-def __discretize_nonconst(variable: ContinuousVariable, n_bins: int) -> IndicatorVariable:
+def __discretize_nonconst(
+    variable: ContinuousVariable, n_bins: int, random_state: Any = 0
+) -> list[IndicatorVariable]:
     """Discretize non-constant continuous variables."""
     from sklearn.preprocessing import KBinsDiscretizer
     from sklearn.exceptions import ConvergenceWarning
@@ -114,7 +116,7 @@ def __discretize_nonconst(variable: ContinuousVariable, n_bins: int) -> Indicato
         n_bins=n_bins,
         strategy="kmeans",
         encode="onehot-dense",
-        random_state=0,
+        random_state=random_state,
     )
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=ConvergenceWarning)
@@ -145,7 +147,9 @@ def __discretize_nonconst(variable: ContinuousVariable, n_bins: int) -> Indicato
     return derived_vars
 
 
-def discretize(variable: ContinuousVariable, n_bins: int = 5) -> list[IndicatorVariable]:
+def discretize(
+    variable: ContinuousVariable, n_bins: int = 5, random_state: Any = 0
+) -> list[IndicatorVariable]:
     """Discretize a continuous variable."""
     if not isinstance(variable, ContinuousVariable):
         raise TypeError("Can only discretize continuous variables!")
@@ -153,7 +157,7 @@ def discretize(variable: ContinuousVariable, n_bins: int = 5) -> list[IndicatorV
     if len(np.unique(variable.values)) == 1:
         disc_vars = __discretize_const(variable)
     else:
-        disc_vars = __discretize_nonconst(variable, n_bins)
+        disc_vars = __discretize_nonconst(variable, n_bins, random_state=random_state)
 
     return disc_vars
 
@@ -173,13 +177,19 @@ def one_hot(variable: DiscreteVariable) -> list[IndicatorVariable]:
     return one_hot_vars
 
 
-def expand(variables: list[Variable], n_discretization_bins: int = 5) -> list[list[IndicatorVariable]]:
+def expand(
+    variables: list[Variable],
+    n_discretization_bins: int = 5,
+    random_state: Any = 0,
+) -> list[list[IndicatorVariable]]:
     """Expand a list of variables into indicator variables via discretization or
     one-hot encoding."""
     var_groups = []
     for variable in variables:
         if variable.is_continuous:
-            expanded_vars = discretize(variable, n_bins=n_discretization_bins)
+            expanded_vars = discretize(
+                variable, n_bins=n_discretization_bins, random_state=random_state
+            )
         elif variable.is_discrete:
             expanded_vars = one_hot(variable)
         elif variable.is_indicator:
@@ -203,6 +213,7 @@ def expand_df(
     df: pd.DataFrame,
     n_discretization_bins: int = 5,
     filter_constant_features: bool = True,
+    random_state: Any = 0,
 ) -> list[list[IndicatorVariable]]:
     # Filter out features with identical values
     if filter_constant_features:
@@ -210,7 +221,11 @@ def expand_df(
 
     variables = ingest(df)
 
-    expanded = expand(variables, n_discretization_bins=n_discretization_bins)
+    expanded = expand(
+        variables,
+        n_discretization_bins=n_discretization_bins,
+        random_state=random_state,
+    )
 
     return expanded
 

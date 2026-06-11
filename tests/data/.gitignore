@@ -1,3 +1,6 @@
 *
 !.keep
 !.gitignore
+# Small fixtures vendored for the test suite
+!iris/
+!iris/*.csv

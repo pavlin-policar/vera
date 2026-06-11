@@ -97,6 +97,8 @@ class Variable(metaclass=abc.ABCMeta):
         )
 
     def __lt__(self, other: "Variable"):
+        if not isinstance(other, Variable):
+            return NotImplemented
         return self.name < other.name
 
     def __repr__(self):

@@ -409,22 +409,3 @@ class TestMergeIndicatorVariables(unittest.TestCase):
             self.variable_parts["c1"][4],
         ]
         print(merge_indicator_variables(to_merge))
-
-    def test_problematic_1(self):
-        import datasets
-        data = datasets.Dataset.load("fifa22")
-        x, embedding = data.features, data.embedding
-
-        x.drop(columns=["Club", "Work Rate", "Body Type", "Preferred Foot", "Position",
-                        "Best Position"], inplace=True)
-
-        region_annotations = vera.an.generate_region_annotations(
-            x.iloc[:, 24:25],
-            embedding,
-            n_discretization_bins=5,
-            scale_factor=1,
-            # sample_size=5000,
-            contour_level=0.25,
-            merge_min_sample_overlap=0.9,
-            merge_min_purity_gain=0.5,
-        )

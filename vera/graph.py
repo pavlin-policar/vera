@@ -125,10 +125,14 @@ def configuration_graph(g: Graph, random_state) -> Graph:
 def connected_components(g: Graph) -> list[Graph]:
     components = []
     remaining_nodes = set(g.keys())
-    while len(remaining_nodes):
-        v = next(iter(remaining_nodes))
+    # Iterate nodes in graph insertion order: seeding traversal from a set
+    # would make component order depend on object hashes, which vary between
+    # processes
+    for v0 in g.keys():
+        if v0 not in remaining_nodes:
+            continue
         visited = set()
-        stack = [v]
+        stack = [v0]
         while len(stack):
             v = stack.pop()
             if v not in visited:

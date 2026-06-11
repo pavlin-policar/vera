@@ -107,7 +107,7 @@ def contrastive(
     # Panels corresponding to a variable with a single explanatory variable
     # aren't informative, so give them the lowest ranking
     single_expl_var_idx = [
-        i for i in range(len(candidate_panels)) if len(candidate_panels) == 1
+        i for i in range(len(candidate_panels)) if len(candidate_panels[i]) == 1
     ]
     mean_ranks[single_expl_var_idx] = -1
 
