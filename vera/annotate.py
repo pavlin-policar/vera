@@ -62,7 +62,8 @@ def generate_region_annotations(
         If True, variables described by only a single region annotation are
         filtered out.
     random_state : Any, default=None
-        Random state for reproducibility of sampling.
+        Random state for reproducibility of sampling and of the k-means
+        discretization of continuous variables.
 
     Returns
     -------
@@ -86,6 +87,7 @@ def generate_region_annotations(
         features,
         n_discretization_bins=n_discretization_bins,
         filter_constant_features=filter_constant,
+        random_state=random_state,
     )
 
     # Generate explanatory region annotations from each of the derived features
