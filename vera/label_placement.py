@@ -626,6 +626,15 @@ def optimize_label_positions(
 
         updates = lr * velocity
 
+        # Momentum accumulates the force, so the displacement reaches roughly
+        # step / (1 - momentum); bound it as well
+        if max_step_norm is not None:
+            update_norms = np.linalg.norm(updates, axis=1)
+            update_rescale = (
+                np.minimum(update_norms, max_step_norm) / (update_norms + 1e-8)
+            )
+            updates *= update_rescale[:, None]
+
         for i in range(len(labels)):
             labels[i] = shapely.affinity.translate(labels[i], *updates[i])
 
