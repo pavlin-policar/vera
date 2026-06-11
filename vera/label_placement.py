@@ -418,7 +418,7 @@ def convert_ax_to_data(ax, fraction: float, reduction="max") -> float:
         case "max":
             return np.max(diff)
         case "min":
-            return np.max(diff)
+            return np.min(diff)
         case _:
             raise ValueError(f"Unrecognized reduction `{reduction}`")
 
