@@ -143,10 +143,11 @@ def generate_descriptive_layout(
             layouts = g.independent_sets(graph)
         else:
             node_colors = g.graph_coloring_greedy_nx(graph)
-            groups = defaultdict(set)
+            # Lists, not sets, so the group ordering is deterministic
+            groups = defaultdict(list)
             for k, v in node_colors.items():
-                groups[v].add(k)
-            layouts = [list(v) for v in groups.values()]
+                groups[v].append(k)
+            layouts = list(groups.values())
 
         # Sort the panels according to their metric scores
         panel_scores = np.array([
