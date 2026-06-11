@@ -1,25 +1,35 @@
-import sys
+import os
 import unittest
+
+import pandas as pd
 
 import vera
 
-sys.path.append("../experiments/")
-import datasets
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "iris")
+
+
+def load_iris():
+    """Load the vendored iris fixture: features and a precomputed 2D embedding."""
+    features = pd.read_csv(os.path.join(DATA_DIR, "features.csv"))
+    embedding = pd.read_csv(
+        os.path.join(DATA_DIR, "embedding.csv"), header=None
+    ).values
+    return features, embedding
 
 
 class ExplainTestBase(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.iris = datasets.Dataset.load("iris")
+        cls.features, cls.embedding = load_iris()
         cls.region_annotations = vera.an.generate_region_annotations(
-            cls.iris.features,
-            cls.iris.embedding,
-            n_discretization_bins=10,
+            cls.features,
+            cls.embedding,
+            n_discretization_bins=5,
             scale_factor=1,
             sample_size=5000,
             contour_level=0.25,
             merge_min_sample_overlap=0.5,
-            merge_min_purity_gain=0.5,
+            random_state=0,
         )
 
 
