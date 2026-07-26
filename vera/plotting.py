@@ -251,13 +251,24 @@ def plot_features(
 
 
 def get_cmap_colors(cmap: str):
-    return matplotlib.colormaps[cmap].colors
+    """Return the colors of a colormap as a sequence of RGB(A) tuples.
+
+    A ListedColormap carries an explicit color list, covering both the
+    qualitative palettes (tab10) and the perceptual ones (viridis, a listed
+    colormap with 256 entries). A LinearSegmentedColormap (coolwarm, RdBu)
+    is defined by interpolation and has to be sampled.
+    """
+    cmap_obj = matplotlib.colormaps[cmap]
+    if isinstance(cmap_obj, mcolors.ListedColormap):
+        return cmap_obj.colors
+    n = min(cmap_obj.N, 256)
+    return [tuple(c) for c in cmap_obj(np.linspace(0, 1, n))]
 
 
 def get_cmap_hues(cmap: str):
     """Extract the hue values from a given colormap."""
-    colors = get_cmap_colors(cmap)
-    hues = [c[0] for c in colors.rgb_to_hsv(colors)]
+    rgb = np.asarray(get_cmap_colors(cmap))[:, :3]
+    hues = mcolors.rgb_to_hsv(rgb)[:, 0]
 
     return np.array(hues)
 
