@@ -9,6 +9,7 @@ from typing import Any, Union
 from warnings import warn
 
 import glasbey
+import matplotlib
 import matplotlib.axes
 import matplotlib.colors as mcolors
 import matplotlib.figure
@@ -250,9 +251,7 @@ def plot_features(
 
 
 def get_cmap_colors(cmap: str):
-    import matplotlib.cm
-
-    return matplotlib.cm.get_cmap(cmap).colors
+    return matplotlib.colormaps[cmap].colors
 
 
 def get_cmap_hues(cmap: str):
