@@ -27,7 +27,7 @@ from matplotlib.path import Path
 import vera.metrics as metrics
 from vera.label_placement import (
     initial_text_location_placement,
-    fix_crossings,
+    uncross_points,
     optimize_label_positions,
     get_ax_bounding_box,
     set_ax_bounding_box,
@@ -780,7 +780,7 @@ def plot_annotation(
         initial_label_positions = initial_text_location_placement(
             embedding, label_targets, radius_factor=0.25,
         )
-        fix_crossings(initial_label_positions, label_targets)
+        uncross_points(initial_label_positions, label_targets)
 
         # Create label objects, which can later be optimized
         label_kwargs_ = dict(

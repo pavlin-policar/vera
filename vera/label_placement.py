@@ -29,20 +29,101 @@ def intersect(x0, y0, x1, y1):
     return ccw(x0, y0, y1) != ccw(x1, y0, y1) and ccw(x0, x1, y0) != ccw(x0, x1, y1)
 
 
-def fix_crossings(text_locations, label_locations, n_iter=3):
-    """Find crossing lines and swap labels; repeat as required"""
-    for n in range(n_iter):
-        for i in range(text_locations.shape[0]):
-            for j in range(text_locations.shape[0]):
+def count_crossings(text_locations, label_locations) -> int:
+    """Number of leader-line pairs that cross.
+
+    The leader line for label ``i`` runs from ``text_locations[i]`` to
+    ``label_locations[i]``.
+    """
+    n = len(text_locations)
+    return sum(
+        bool(
+            intersect(
+                text_locations[i],
+                text_locations[j],
+                label_locations[i],
+                label_locations[j],
+            )
+        )
+        for i in range(n)
+        for j in range(i + 1, n)
+    )
+
+
+def _crossing_swaps(text_locations, label_locations, n_iter=3):
+    """Index pairs to swap so that no two leader lines cross.
+
+    Swapping the text ends of a crossing pair uncrosses it and, by the
+    triangle inequality, shortens the two leaders together, so repeated passes
+    converge. A swap moves both labels relative to every other one and can
+    produce new crossings, hence ``n_iter`` passes.
+
+    The returned pairs are cumulative: each assumes every earlier pair has
+    already been swapped, so apply them in order.
+    """
+    positions = np.array(text_locations, dtype=float)
+    n = len(positions)
+
+    swaps = []
+    for _ in range(n_iter):
+        # Each unordered pair at most once per pass: a repeated swap of the
+        # same pair is a no-op
+        for i in range(n):
+            for j in range(i + 1, n):
                 if intersect(
-                    text_locations[i],
-                    text_locations[j],
+                    positions[i],
+                    positions[j],
                     label_locations[i],
                     label_locations[j],
                 ):
-                    swap = text_locations[i].copy()
-                    text_locations[i] = text_locations[j]
-                    text_locations[j] = swap
+                    positions[[i, j]] = positions[[j, i]]
+                    swaps.append((i, j))
+
+    return swaps
+
+
+def uncross_points(text_locations, label_locations, n_iter=3):
+    """Swap anchor points whose leader lines cross.
+
+    Operates in place on ``text_locations``. Returns the swapped index pairs,
+    which is empty when nothing crossed.
+    """
+    assert len(text_locations) == len(label_locations), \
+        "Each label needs an associated target region!"
+
+    swaps = _crossing_swaps(text_locations, label_locations, n_iter=n_iter)
+    for i, j in swaps:
+        text_locations[[i, j]] = text_locations[[j, i]]
+
+    return swaps
+
+
+def uncross_boxes(labels, label_target_regions, n_iter=3):
+    """Swap rendered label boxes whose leader lines cross.
+
+    Boxes have extent where anchor points do not, so a swap translates each
+    box onto the other's centroid: the two keep their own dimensions and only
+    trade positions. Two boxes of different size therefore do not occupy each
+    other's bounds, and a swapped layout needs settling again.
+
+    Operates in place on ``labels``. Returns the swapped index pairs, which is
+    empty when nothing crossed.
+    """
+    assert len(labels) == len(label_target_regions), \
+        "Each label needs an associated target region!"
+
+    text_locations = np.array([l.centroid.coords[0] for l in labels])
+    label_locations = np.array([r.centroid.coords[0] for r in label_target_regions])
+
+    swaps = _crossing_swaps(text_locations, label_locations, n_iter=n_iter)
+    for i, j in swaps:
+        centroid_i = np.asarray(labels[i].centroid.coords[0])
+        centroid_j = np.asarray(labels[j].centroid.coords[0])
+        offset = centroid_j - centroid_i
+        labels[i] = shapely.affinity.translate(labels[i], *offset)
+        labels[j] = shapely.affinity.translate(labels[j], *-offset)
+
+    return swaps
 
 
 # From adjustText (https://github.com/Phlya/adjustText)
@@ -736,3 +817,5 @@ def evaluate_label_pos_quality(
         "hard_label_region_intersects": sum(hard_label_region_isects.values()),
         "soft_label_region_intersects": sum(soft_label_region_isects.values()),
     }
+
+
