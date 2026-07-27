@@ -1,5 +1,4 @@
 from collections import defaultdict
-from itertools import permutations
 from typing import NewType, TypeVar, Union
 
 import networkx as nx
@@ -75,17 +74,33 @@ def nodes(g: Graph) -> NodeList:
     return list(g.keys())
 
 
+def index_nodes(g: Graph) -> tuple[Graph, dict[int, T]]:
+    """Relabel graph nodes to integers in graph insertion order.
+
+    Graph algorithms iterate sets of nodes, so when nodes are identity-hashed
+    objects, iteration order -- and therefore output order -- depends on
+    object addresses, which vary between runs and processes. Integer hashes
+    are stable, so running the algorithms on an integer-relabelled graph makes
+    their output deterministic. Map results back via the returned labels.
+    """
+    indices = {v: i for i, v in enumerate(g)}
+    return label_nodes(g, indices), dict(enumerate(g))
+
+
 def graph_complement(g: Graph) -> Graph:
     v = list(g.keys())
-    e = graph_to_edgelist(g)
-    e_inv = list(set(permutations(v, 2)) - set(e))
+    e = set(graph_to_edgelist(g))
+    # Enumerate in node insertion order, so the edge order is deterministic
+    e_inv = [(i, j) for i in v for j in v if i != j and (i, j) not in e]
     return edgelist_to_graph(v, e_inv)
 
 
 def to_undirected(g: Graph) -> UndirectedGraph:
     g_undirected = defaultdict(set)
+    # Seed keys in graph insertion order, so the node order is deterministic
+    for i in g:
+        g_undirected[i]  # access to ensure empty set
     for i, v in g.items():
-        g_undirected[i]  # access to ensure empty list
         for j in v:
             g_undirected[i].add(j)
             g_undirected[j].add(i)
@@ -125,9 +140,8 @@ def configuration_graph(g: Graph, random_state) -> Graph:
 def connected_components(g: Graph) -> list[Graph]:
     components = []
     remaining_nodes = set(g.keys())
-    # Iterate nodes in graph insertion order: seeding traversal from a set
-    # would make component order depend on object hashes, which vary between
-    # processes
+    # Seed traversal in graph insertion order, so component order is
+    # deterministic
     for v0 in g.keys():
         if v0 not in remaining_nodes:
             continue
@@ -155,17 +169,22 @@ def max_cliques(g: Graph) -> list[Graph]:
             return [r]
 
         result = []
-        pivot = max(p | x, key=lambda u: len(g[u] & p))
-        for v in p - g[pivot]:
+        # Sort candidate sets by node index, so clique order and pivot
+        # tie-breaking are deterministic
+        pivot = max(sorted(p | x), key=lambda u: len(g[u] & p))
+        for v in sorted(p - g[pivot]):
             result.extend(_bron_kerbosch(g, r | {v}, p & g[v], x & g[v]))
             p = p - {v}
             x = x | {v}
 
         return result
 
-    cliques = _bron_kerbosch(g, set(), set(g.keys()), set())
+    # The recursion iterates sets of nodes, so search an integer-relabelled
+    # graph
+    g_idx, labels = index_nodes(g)
+    cliques = _bron_kerbosch(g_idx, set(), set(g_idx.keys()), set())
 
-    cliques = list(map(NodeList, map(list, cliques)))
+    cliques = [NodeList([labels[i] for i in sorted(c)]) for c in cliques]
     cliques = sorted(cliques, key=len, reverse=True)
 
     clique_graphs = [
@@ -178,10 +197,13 @@ def max_cliques(g: Graph) -> list[Graph]:
 
 
 def max_cliques_nx(g: Graph) -> list[Graph]:
-    g_nx = nx.from_dict_of_lists(g)
+    # find_cliques iterates sets of nodes internally, so search an
+    # integer-relabelled graph
+    g_idx, labels = index_nodes(g)
+    g_nx = nx.from_dict_of_lists({k: sorted(v) for k, v in g_idx.items()})
     cliques = list(nx.algorithms.clique.find_cliques(g_nx))
 
-    cliques = list(map(NodeList, map(list, cliques)))
+    cliques = [NodeList([labels[i] for i in sorted(c)]) for c in cliques]
     cliques = sorted(cliques, key=len, reverse=True)
 
     clique_graphs = [
@@ -219,9 +241,14 @@ def graph_coloring_greedy(
 
 
 def graph_coloring_greedy_nx(g: Graph, strategy: str = "largest_first"):
-    g_nx = nx.from_edgelist(graph_to_edgelist(g))
+    # greedy_color breaks degree ties by node iteration order, so color an
+    # integer-relabelled graph
+    g_idx, labels = index_nodes(g)
+    g_nx = nx.from_edgelist(
+        (k, u) for k, v in g_idx.items() for u in sorted(v)
+    )
     colors = nx.coloring.greedy_color(g_nx, strategy=strategy)
-    return colors
+    return {labels[i]: c for i, c in sorted(colors.items())}
 
 
 def plot_graph(coords, e: EdgeList, vc="tab:blue", edge_alpha=0.25, ax=None):
