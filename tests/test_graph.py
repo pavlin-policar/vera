@@ -90,6 +90,25 @@ class TestOutputOrderDeterminism(unittest.TestCase):
         self.assertSameOutputOrder(color_groups)
 
 
+class TestGraphColoringGreedyNx(unittest.TestCase):
+    def test_colors_every_node(self):
+        # Node 2 has no edges. Region annotations that overlap nothing are
+        # exactly this shape, and they still have to be placed in a panel.
+        graph = g.to_undirected(g.edgelist_to_graph([0, 1, 2], [(0, 1)]))
+
+        colors = g.graph_coloring_greedy_nx(graph)
+
+        self.assertEqual({0, 1, 2}, set(colors))
+
+    def test_adjacent_nodes_differ(self):
+        graph = g.to_undirected(g.edgelist_to_graph([0, 1, 2], [(0, 1), (1, 2)]))
+
+        colors = g.graph_coloring_greedy_nx(graph)
+
+        self.assertNotEqual(colors[0], colors[1])
+        self.assertNotEqual(colors[1], colors[2])
+
+
 class TestMergeNodes(unittest.TestCase):
     def test_merge_nodes(self):
         graph = [(0, 1), (1, 2), (2, 3), (3, 4)]

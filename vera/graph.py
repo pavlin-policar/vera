@@ -244,9 +244,8 @@ def graph_coloring_greedy_nx(g: Graph, strategy: str = "largest_first"):
     # greedy_color breaks degree ties by node iteration order, so color an
     # integer-relabelled graph
     g_idx, labels = index_nodes(g)
-    g_nx = nx.from_edgelist(
-        (k, u) for k, v in g_idx.items() for u in sorted(v)
-    )
+    # Build from the adjacency dict, so nodes without edges are included
+    g_nx = nx.from_dict_of_lists({k: sorted(v) for k, v in g_idx.items()})
     colors = nx.coloring.greedy_color(g_nx, strategy=strategy)
     return {labels[i]: c for i, c in sorted(colors.items())}
 
