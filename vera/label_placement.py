@@ -1,5 +1,6 @@
 import io
 import logging
+from typing import Callable
 
 import matplotlib
 import numpy as np
@@ -648,7 +649,7 @@ def _optimize_label_positions_update_step(
     )
 
 
-def optimize_label_positions(
+def apply_force_directed_layout(
     labels: list[shapely.Polygon],
     label_target_regions: list[shapely.Polygon],
     embedding_region: shapely.Polygon,
@@ -731,6 +732,67 @@ def optimize_label_positions(
     if return_history:
         return labels, label_pos_history
     return labels
+
+
+def optimize_label_positions(
+    labels: list[shapely.Polygon],
+    label_target_regions: list[shapely.Polygon],
+    embedding_region: shapely.Polygon,
+    ax: matplotlib.axes.Axes,
+    score_fn: Callable[[list[shapely.Polygon]], float],
+    n_rounds: int = 3,
+    **kwargs,
+):
+    """Lay out labels, alternating force-directed layout with uncrossing.
+
+    Swapping two labels is a discrete move the layout cannot make on its own,
+    and it lands boxes somewhere the layout never settled, possibly
+    overlapping or outside the axes. Each round therefore uncrosses and then
+    lays out, in that order, so the labels returned have always been settled
+    by a layout pass. Rounds stop once an uncrossing finds nothing to swap.
+
+    Each settled layout is scored by ``score_fn``, lower being better, and the
+    best is returned -- a layout pass is free to reintroduce a crossing it has
+    just resolved, so the last round is not necessarily the best one.
+
+    Returns
+    -------
+    tuple[list[shapely.Polygon], list]
+        The best-scoring labels, and the position history of every round.
+    """
+    assert n_rounds >= 1, "At least one layout round is needed!"
+    kwargs.pop("return_history", None)
+
+    # The layout passes mutate the list they are given, so work on our own
+    labels = list(labels)
+
+    best_labels, best_score = None, np.inf
+    history = []
+
+    for round_idx in range(n_rounds):
+        swaps = uncross_boxes(labels, label_target_regions)
+        # A round that swaps nothing would re-settle an already settled
+        # layout, so there is nothing left to do
+        if round_idx > 0 and not swaps:
+            break
+
+        labels, round_history = apply_force_directed_layout(
+            labels,
+            label_target_regions,
+            embedding_region,
+            ax,
+            return_history=True,
+            **kwargs,
+        )
+        history.extend(round_history)
+
+        # The first round always wins, so that a score_fn returning inf or nan
+        # for every layout still yields one rather than nothing
+        score = score_fn(labels)
+        if best_labels is None or score < best_score:
+            best_labels, best_score = list(labels), score
+
+    return best_labels, history
 
 
 def get_label_bounding_boxes_on_ax(

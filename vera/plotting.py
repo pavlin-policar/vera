@@ -837,19 +837,19 @@ def plot_annotation(
                 label_target_regions = [data["pos_region"] for data in label_data]
 
                 # Optimize label positions
+                def score_layout(labels):
+                    quality = evaluate_label_pos_quality(
+                        labels, label_target_regions, region_patches, ax,
+                        score_crossings=True,
+                    )
+                    return sum(penalty_weighing[k] * v for k, v in quality.items())
+
                 label_bboxes, label_history = optimize_label_positions(
                     label_bboxes, label_target_regions, embedding_polygon, ax,
-                    max_step_norm=1, lr=1, max_iter=100, return_history=True,
+                    score_fn=score_layout, n_rounds=3,
+                    max_step_norm=1, lr=1, max_iter=100,
                 )
-                # Evaluate the current label layout
-                label_pos_quality = evaluate_label_pos_quality(
-                    label_bboxes, label_target_regions, region_patches, ax,
-                    score_crossings=True,
-                )
-                # And assign an overall score with which to compare layouts
-                layout_score = sum(
-                    penalty_weighing[k] * v for k, v in label_pos_quality.items()
-                )
+                layout_score = score_layout(label_bboxes)
 
                 # Convert the bounding boxes back to the positions understood by
                 # matplotlib labels, so we can use them directly later on
