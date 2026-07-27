@@ -770,7 +770,14 @@ def evaluate_label_pos_quality(
     label_region_margin: float = 0.03,
     label_label_margin: float = 0.02,
     bounds_margin: float = 0.03,
+    score_crossings: bool = False,
 ):
+    """Count the ways in which a label layout is poor. Lower is better.
+
+    ``score_crossings`` adds a ``crossings`` entry counting leader lines that
+    cross. It is optional because callers weight the returned entries by name,
+    and an entry they do not know about has no weight to be given.
+    """
     ax_bbox = np.array(get_ax_bounding_box(ax))
 
     label_region_margin = convert_ax_to_data(ax, label_region_margin)
@@ -809,7 +816,7 @@ def evaluate_label_pos_quality(
             if shapely.intersects(label_i.buffer(label_region_margin), region_j):
                 soft_label_region_isects[i] = 1.
 
-    return {
+    quality = {
         "hard_overflows": n_hard_overflows,
         "soft_overflows": n_soft_overflows,
         "hard_label_label_intersects": sum(hard_label_label_isects.values()),
@@ -818,4 +825,12 @@ def evaluate_label_pos_quality(
         "soft_label_region_intersects": sum(soft_label_region_isects.values()),
     }
 
+    if score_crossings:
+        quality["crossings"] = float(
+            count_crossings(
+                [label.centroid.coords[0] for label in labels],
+                [region.centroid.coords[0] for region in label_target_regions],
+            )
+        )
 
+    return quality

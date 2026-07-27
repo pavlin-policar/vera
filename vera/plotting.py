@@ -802,6 +802,7 @@ def plot_annotation(
             "soft_overflows": 1,
             "soft_label_label_intersects": 2,
             "soft_label_region_intersects": 2,
+            "crossings": 5,
         }
 
         ax_bbox = get_ax_bounding_box(ax)
@@ -842,7 +843,8 @@ def plot_annotation(
                 )
                 # Evaluate the current label layout
                 label_pos_quality = evaluate_label_pos_quality(
-                    label_bboxes, label_target_regions, region_patches, ax
+                    label_bboxes, label_target_regions, region_patches, ax,
+                    score_crossings=True,
                 )
                 # And assign an overall score with which to compare layouts
                 layout_score = sum(
