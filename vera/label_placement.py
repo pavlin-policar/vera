@@ -30,6 +30,45 @@ def intersect(x0, y0, x1, y1):
     return ccw(x0, y0, y1) != ccw(x1, y0, y1) and ccw(x0, x1, y0) != ccw(x0, x1, y1)
 
 
+LEADER_EXTENT = 0.6
+
+
+def leader_attachment_boundary(label: shapely.Polygon, extent: float = LEADER_EXTENT):
+    """The part of a label's outline a leader line may attach to.
+
+    Each edge is trimmed to its middle ``extent``, keeping the attachment away
+    from the corners. A text bounding box is mostly whitespace at the corners,
+    so a leader ending there reads as pointing past the label.
+    """
+    x0, y0, x1, y1 = label.bounds
+    margin_x = (1 - extent) / 2 * (x1 - x0)
+    margin_y = (1 - extent) / 2 * (y1 - y0)
+    return shapely.MultiLineString([
+        [(x0 + margin_x, y0), (x1 - margin_x, y0)],
+        [(x0 + margin_x, y1), (x1 - margin_x, y1)],
+        [(x0, y0 + margin_y), (x0, y1 - margin_y)],
+        [(x1, y0 + margin_y), (x1, y1 - margin_y)],
+    ])
+
+
+def leader_endpoints(labels, label_target_regions, extent: float = LEADER_EXTENT):
+    """Where each leader line starts and ends, as drawn.
+
+    The endpoints are the closest pair between the label's attachment boundary
+    and the region's outline, matching the nearest-point direction the layout
+    pulls each label along.
+    """
+    starts, ends = [], []
+    for label, region in zip(labels, label_target_regions):
+        start, end = shapely.ops.nearest_points(
+            leader_attachment_boundary(label, extent), region.boundary
+        )
+        starts.append(start.coords[0])
+        ends.append(end.coords[0])
+
+    return np.array(starts), np.array(ends)
+
+
 def count_crossings(text_locations, label_locations) -> int:
     """Number of leader-line pairs that cross.
 
@@ -102,10 +141,11 @@ def uncross_points(text_locations, label_locations, n_iter=3):
 def uncross_boxes(labels, label_target_regions, n_iter=3):
     """Swap rendered label boxes whose leader lines cross.
 
-    Boxes have extent where anchor points do not, so a swap translates each
-    box onto the other's centroid: the two keep their own dimensions and only
-    trade positions. Two boxes of different size therefore do not occupy each
-    other's bounds, and a swapped layout needs settling again.
+    Crossings are detected between the leaders as drawn, so this sees exactly
+    what the reader does. A swap translates each box onto the other's
+    centroid: the two keep their own dimensions and only trade positions. Two
+    boxes of different size therefore do not occupy each other's bounds, and a
+    swapped layout needs settling again.
 
     Operates in place on ``labels``. Returns the swapped index pairs, which is
     empty when nothing crossed.
@@ -113,16 +153,25 @@ def uncross_boxes(labels, label_target_regions, n_iter=3):
     assert len(labels) == len(label_target_regions), \
         "Each label needs an associated target region!"
 
-    text_locations = np.array([l.centroid.coords[0] for l in labels])
-    label_locations = np.array([r.centroid.coords[0] for r in label_target_regions])
+    n = len(labels)
+    swaps = []
+    for _ in range(n_iter):
+        # Endpoints move with the boxes, so they are recomputed after each
+        # swap rather than tracked alongside
+        starts, ends = leader_endpoints(labels, label_target_regions)
+        for i in range(n):
+            for j in range(i + 1, n):
+                if not intersect(starts[i], starts[j], ends[i], ends[j]):
+                    continue
 
-    swaps = _crossing_swaps(text_locations, label_locations, n_iter=n_iter)
-    for i, j in swaps:
-        centroid_i = np.asarray(labels[i].centroid.coords[0])
-        centroid_j = np.asarray(labels[j].centroid.coords[0])
-        offset = centroid_j - centroid_i
-        labels[i] = shapely.affinity.translate(labels[i], *offset)
-        labels[j] = shapely.affinity.translate(labels[j], *-offset)
+                centroid_i = np.asarray(labels[i].centroid.coords[0])
+                centroid_j = np.asarray(labels[j].centroid.coords[0])
+                offset = centroid_j - centroid_i
+                labels[i] = shapely.affinity.translate(labels[i], *offset)
+                labels[j] = shapely.affinity.translate(labels[j], *-offset)
+                swaps.append((i, j))
+
+                starts, ends = leader_endpoints(labels, label_target_regions)
 
     return swaps
 
@@ -761,7 +810,6 @@ def optimize_label_positions(
         The best-scoring labels, and the position history of every round.
     """
     assert n_rounds >= 1, "At least one layout round is needed!"
-    kwargs.pop("return_history", None)
 
     # The layout passes mutate the list they are given, so work on our own
     labels = list(labels)
@@ -888,11 +936,7 @@ def evaluate_label_pos_quality(
     }
 
     if score_crossings:
-        quality["crossings"] = float(
-            count_crossings(
-                [label.centroid.coords[0] for label in labels],
-                [region.centroid.coords[0] for region in label_target_regions],
-            )
-        )
+        starts, ends = leader_endpoints(labels, label_target_regions)
+        quality["crossings"] = float(count_crossings(starts, ends))
 
     return quality

@@ -28,6 +28,7 @@ import vera.metrics as metrics
 from vera.label_placement import (
     initial_text_location_placement,
     uncross_points,
+    leader_attachment_boundary,
     optimize_label_positions,
     get_ax_bounding_box,
     set_ax_bounding_box,
@@ -894,12 +895,12 @@ def plot_annotation(
         ]
         for lbl_data, label in zip(label_data, label_bbs):
             label_padding = convert_ax_to_data(ax, 0.01)
-            target_region = lbl_data["pos_region"]
-            p_g1, p_g2 = shapely.ops.nearest_points(
-                label.buffer(label_padding).boundary, target_region.boundary
+            start, end = shapely.ops.nearest_points(
+                leader_attachment_boundary(label.buffer(label_padding)),
+                lbl_data["pos_region"].boundary,
             )
             ax.plot(
-                *np.hstack([p_g1.xy, p_g2.xy]),
+                *np.hstack([start.xy, end.xy]),
                 color=lbl_data["color"],
                 lw=1.5,
                 zorder=10,

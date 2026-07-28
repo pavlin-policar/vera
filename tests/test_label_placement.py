@@ -9,11 +9,14 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import shapely
+import shapely.ops
 
 import vera.label_placement as label_placement
 from vera.label_placement import (
     convert_ax_to_data,
     count_crossings,
+    leader_attachment_boundary,
+    leader_endpoints,
     uncross_points,
     uncross_boxes,
     evaluate_label_pos_quality,
@@ -379,3 +382,57 @@ class TestOptimizeLabelPositions(OptimizerTestBase):
                 [box(-3, 4)], [box(-3, -4)], self.embedding_region, self.ax,
                 score_fn=lambda ls: 1.0, n_rounds=0,
             )
+
+
+class TestLeaderGeometry(unittest.TestCase):
+    """Leaders are drawn, and crossings detected, on the nearest-point line
+    the layout pulls each label along, with the attachment kept off the
+    corners of the label's box."""
+
+    def setUp(self):
+        self.label = shapely.box(0, 0, 4, 1)
+
+    def attach(self, target_x, target_y):
+        point, _ = shapely.ops.nearest_points(
+            leader_attachment_boundary(self.label),
+            shapely.Point(target_x, target_y),
+        )
+        return point.coords[0]
+
+    def test_diagonal_target_does_not_attach_at_a_corner(self):
+        self.assertNotIn(self.attach(6, 3), set(self.label.exterior.coords))
+
+    def test_attachment_stays_within_the_middle_of_an_edge(self):
+        """One coordinate sits on the edge itself; the other, which runs along
+        the edge, must fall inside its middle 60%."""
+        for target in [(6, 3), (-4, 4), (2, -5), (6, 0.5), (-2, -3)]:
+            with self.subTest(target=target):
+                x, y = self.attach(*target)
+
+                on_side = np.isclose(x, 0) or np.isclose(x, 4)
+                along = y if on_side else x
+                lo, hi = (0.2, 0.8) if on_side else (0.8, 3.2)
+                self.assertTrue(
+                    lo <= along <= hi,
+                    f"attachment {(x, y)} runs to {along}, outside [{lo}, {hi}]",
+                )
+
+    def test_endpoints_lie_on_label_and_region(self):
+        region = shapely.Point(8, 5).buffer(1.5)
+        starts, ends = leader_endpoints([self.label], [region])
+
+        self.assertAlmostEqual(
+            0.0, self.label.boundary.distance(shapely.Point(starts[0]))
+        )
+        self.assertAlmostEqual(
+            0.0, region.boundary.distance(shapely.Point(ends[0]))
+        )
+
+    def test_detection_uses_the_drawn_endpoints(self):
+        """Two labels whose boxes do not cross by centroid, but whose drawn
+        leaders do, must be seen as crossing."""
+        labels = [box(-3, 4), box(3, 4)]
+        targets = [shapely.Point(3, -4).buffer(0.5), shapely.Point(-3, -4).buffer(0.5)]
+        starts, ends = leader_endpoints(labels, targets)
+
+        self.assertEqual(1, count_crossings(starts, ends))
