@@ -27,7 +27,8 @@ from matplotlib.path import Path
 import vera.metrics as metrics
 from vera.label_placement import (
     initial_text_location_placement,
-    fix_crossings,
+    uncross_points,
+    leader_attachment_boundary,
     optimize_label_positions,
     get_ax_bounding_box,
     set_ax_bounding_box,
@@ -780,7 +781,7 @@ def plot_annotation(
         initial_label_positions = initial_text_location_placement(
             embedding, label_targets, radius_factor=0.25,
         )
-        fix_crossings(initial_label_positions, label_targets)
+        uncross_points(initial_label_positions, label_targets)
 
         # Create label objects, which can later be optimized
         label_kwargs_ = dict(
@@ -802,6 +803,7 @@ def plot_annotation(
             "soft_overflows": 1,
             "soft_label_label_intersects": 2,
             "soft_label_region_intersects": 2,
+            "crossings": 5,
         }
 
         ax_bbox = get_ax_bounding_box(ax)
@@ -836,18 +838,19 @@ def plot_annotation(
                 label_target_regions = [data["pos_region"] for data in label_data]
 
                 # Optimize label positions
+                def score_layout(labels):
+                    quality = evaluate_label_pos_quality(
+                        labels, label_target_regions, region_patches, ax,
+                        score_crossings=True,
+                    )
+                    return sum(penalty_weighing[k] * v for k, v in quality.items())
+
                 label_bboxes, label_history = optimize_label_positions(
                     label_bboxes, label_target_regions, embedding_polygon, ax,
-                    max_step_norm=1, lr=1, max_iter=100, return_history=True,
+                    score_fn=score_layout, n_rounds=3,
+                    max_step_norm=1, lr=1, max_iter=100,
                 )
-                # Evaluate the current label layout
-                label_pos_quality = evaluate_label_pos_quality(
-                    label_bboxes, label_target_regions, region_patches, ax
-                )
-                # And assign an overall score with which to compare layouts
-                layout_score = sum(
-                    penalty_weighing[k] * v for k, v in label_pos_quality.items()
-                )
+                layout_score = score_layout(label_bboxes)
 
                 # Convert the bounding boxes back to the positions understood by
                 # matplotlib labels, so we can use them directly later on
@@ -892,12 +895,12 @@ def plot_annotation(
         ]
         for lbl_data, label in zip(label_data, label_bbs):
             label_padding = convert_ax_to_data(ax, 0.01)
-            target_region = lbl_data["pos_region"]
-            p_g1, p_g2 = shapely.ops.nearest_points(
-                label.buffer(label_padding).boundary, target_region.boundary
+            start, end = shapely.ops.nearest_points(
+                leader_attachment_boundary(label.buffer(label_padding)),
+                lbl_data["pos_region"].boundary,
             )
             ax.plot(
-                *np.hstack([p_g1.xy, p_g2.xy]),
+                *np.hstack([start.xy, end.xy]),
                 color=lbl_data["color"],
                 lw=1.5,
                 zorder=10,

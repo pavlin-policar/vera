@@ -1,5 +1,6 @@
 import io
 import logging
+from typing import Callable
 
 import matplotlib
 import numpy as np
@@ -29,20 +30,150 @@ def intersect(x0, y0, x1, y1):
     return ccw(x0, y0, y1) != ccw(x1, y0, y1) and ccw(x0, x1, y0) != ccw(x0, x1, y1)
 
 
-def fix_crossings(text_locations, label_locations, n_iter=3):
-    """Find crossing lines and swap labels; repeat as required"""
-    for n in range(n_iter):
-        for i in range(text_locations.shape[0]):
-            for j in range(text_locations.shape[0]):
+LEADER_EXTENT = 0.6
+
+
+def leader_attachment_boundary(label: shapely.Polygon, extent: float = LEADER_EXTENT):
+    """The part of a label's outline a leader line may attach to.
+
+    Each edge is trimmed to its middle ``extent``, keeping the attachment away
+    from the corners. A text bounding box is mostly whitespace at the corners,
+    so a leader ending there reads as pointing past the label.
+    """
+    x0, y0, x1, y1 = label.bounds
+    margin_x = (1 - extent) / 2 * (x1 - x0)
+    margin_y = (1 - extent) / 2 * (y1 - y0)
+    return shapely.MultiLineString([
+        [(x0 + margin_x, y0), (x1 - margin_x, y0)],
+        [(x0 + margin_x, y1), (x1 - margin_x, y1)],
+        [(x0, y0 + margin_y), (x0, y1 - margin_y)],
+        [(x1, y0 + margin_y), (x1, y1 - margin_y)],
+    ])
+
+
+def leader_endpoints(labels, label_target_regions, extent: float = LEADER_EXTENT):
+    """Where each leader line starts and ends, as drawn.
+
+    The endpoints are the closest pair between the label's attachment boundary
+    and the region's outline, matching the nearest-point direction the layout
+    pulls each label along.
+    """
+    starts, ends = [], []
+    for label, region in zip(labels, label_target_regions):
+        start, end = shapely.ops.nearest_points(
+            leader_attachment_boundary(label, extent), region.boundary
+        )
+        starts.append(start.coords[0])
+        ends.append(end.coords[0])
+
+    return np.array(starts), np.array(ends)
+
+
+def count_crossings(text_locations, label_locations) -> int:
+    """Number of leader-line pairs that cross.
+
+    The leader line for label ``i`` runs from ``text_locations[i]`` to
+    ``label_locations[i]``.
+    """
+    n = len(text_locations)
+    return sum(
+        bool(
+            intersect(
+                text_locations[i],
+                text_locations[j],
+                label_locations[i],
+                label_locations[j],
+            )
+        )
+        for i in range(n)
+        for j in range(i + 1, n)
+    )
+
+
+def _crossing_swaps(text_locations, label_locations, n_iter=3):
+    """Index pairs to swap so that no two leader lines cross.
+
+    Swapping the text ends of a crossing pair uncrosses it and, by the
+    triangle inequality, shortens the two leaders together, so repeated passes
+    converge. A swap moves both labels relative to every other one and can
+    produce new crossings, hence ``n_iter`` passes.
+
+    The returned pairs are cumulative: each assumes every earlier pair has
+    already been swapped, so apply them in order.
+    """
+    positions = np.array(text_locations, dtype=float)
+    n = len(positions)
+
+    swaps = []
+    for _ in range(n_iter):
+        # Each unordered pair at most once per pass: a repeated swap of the
+        # same pair is a no-op
+        for i in range(n):
+            for j in range(i + 1, n):
                 if intersect(
-                    text_locations[i],
-                    text_locations[j],
+                    positions[i],
+                    positions[j],
                     label_locations[i],
                     label_locations[j],
                 ):
-                    swap = text_locations[i].copy()
-                    text_locations[i] = text_locations[j]
-                    text_locations[j] = swap
+                    positions[[i, j]] = positions[[j, i]]
+                    swaps.append((i, j))
+
+    return swaps
+
+
+def uncross_points(text_locations, label_locations, n_iter=3):
+    """Swap anchor points whose leader lines cross.
+
+    Operates in place on ``text_locations``. Returns the swapped index pairs,
+    which is empty when nothing crossed.
+    """
+    assert len(text_locations) == len(label_locations), \
+        "Each label needs an associated target region!"
+
+    swaps = _crossing_swaps(text_locations, label_locations, n_iter=n_iter)
+    for i, j in swaps:
+        text_locations[[i, j]] = text_locations[[j, i]]
+
+    return swaps
+
+
+def uncross_boxes(labels, label_target_regions, n_iter=3):
+    """Swap rendered label boxes whose leader lines cross.
+
+    Crossings are detected between the leaders as drawn, so this sees exactly
+    what the reader does. A swap translates each box onto the other's
+    centroid: the two keep their own dimensions and only trade positions. Two
+    boxes of different size therefore do not occupy each other's bounds, and a
+    swapped layout needs settling again.
+
+    Operates in place on ``labels``. Returns the swapped index pairs, which is
+    empty when nothing crossed.
+    """
+    assert len(labels) == len(label_target_regions), \
+        "Each label needs an associated target region!"
+
+    n = len(labels)
+    swaps = []
+    for _ in range(n_iter):
+        # Endpoints move with the boxes, so they are recomputed after each
+        # swap rather than tracked alongside
+        starts, ends = leader_endpoints(labels, label_target_regions)
+        for i in range(n):
+            for j in range(i + 1, n):
+                if not intersect(starts[i], starts[j], ends[i], ends[j]):
+                    continue
+
+                centroid_i = np.asarray(labels[i].centroid.coords[0])
+                centroid_j = np.asarray(labels[j].centroid.coords[0])
+                offset = centroid_j - centroid_i
+                labels[i] = shapely.affinity.translate(labels[i], *offset)
+                labels[j] = shapely.affinity.translate(labels[j], *-offset)
+                swaps.append((i, j))
+
+                starts, ends = leader_endpoints(labels, label_target_regions)
+
+    return swaps
 
 
 # From adjustText (https://github.com/Phlya/adjustText)
@@ -418,7 +549,7 @@ def convert_ax_to_data(ax, fraction: float, reduction="max") -> float:
         case "max":
             return np.max(diff)
         case "min":
-            return np.max(diff)
+            return np.min(diff)
         case _:
             raise ValueError(f"Unrecognized reduction `{reduction}`")
 
@@ -567,7 +698,7 @@ def _optimize_label_positions_update_step(
     )
 
 
-def optimize_label_positions(
+def apply_force_directed_layout(
     labels: list[shapely.Polygon],
     label_target_regions: list[shapely.Polygon],
     embedding_region: shapely.Polygon,
@@ -595,7 +726,7 @@ def optimize_label_positions(
     # Gradually increase the bounding box repulsion factor
     bounds_factors = np.linspace(0.01, 10, num=max_iter, endpoint=True)
 
-    updates = None
+    velocity = None
     for epoch in range(max_iter):
         step = _optimize_label_positions_update_step(
             labels,
@@ -617,13 +748,23 @@ def optimize_label_positions(
             )
             step *= step_rescale[:, None]
 
-        if updates is not None:
-            updates *= momentum
-            updates += step
+        # The velocity buffer accumulates unscaled force; lr scales only the
+        # applied displacement, leaving the decay factor at momentum
+        if velocity is not None:
+            velocity = momentum * velocity + step
         else:
-            updates = step
+            velocity = step
 
-        updates *= lr
+        updates = lr * velocity
+
+        # Momentum accumulates the force, so the displacement reaches roughly
+        # step / (1 - momentum); bound it as well
+        if max_step_norm is not None:
+            update_norms = np.linalg.norm(updates, axis=1)
+            update_rescale = (
+                np.minimum(update_norms, max_step_norm) / (update_norms + 1e-8)
+            )
+            updates *= update_rescale[:, None]
 
         for i in range(len(labels)):
             labels[i] = shapely.affinity.translate(labels[i], *updates[i])
@@ -631,15 +772,75 @@ def optimize_label_positions(
         if return_history:
             label_pos_history.append(labels.copy())
 
-        logger.debug("update norm", np.linalg.norm(updates))
+        logger.debug("update norm: %.4f", np.linalg.norm(updates))
         # Check if stopping criteria met
         if np.max(np.linalg.norm(updates, axis=1)) < eps:
-            logger.info("early stopping", epoch, step_norms)
+            logger.info("early stopping at epoch %d, step norms: %s", epoch, step_norms)
             break
 
     if return_history:
         return labels, label_pos_history
     return labels
+
+
+def optimize_label_positions(
+    labels: list[shapely.Polygon],
+    label_target_regions: list[shapely.Polygon],
+    embedding_region: shapely.Polygon,
+    ax: matplotlib.axes.Axes,
+    score_fn: Callable[[list[shapely.Polygon]], float],
+    n_rounds: int = 3,
+    **kwargs,
+):
+    """Lay out labels, alternating force-directed layout with uncrossing.
+
+    Swapping two labels is a discrete move the layout cannot make on its own,
+    and it lands boxes somewhere the layout never settled, possibly
+    overlapping or outside the axes. Each round therefore uncrosses and then
+    lays out, in that order, so the labels returned have always been settled
+    by a layout pass. Rounds stop once an uncrossing finds nothing to swap.
+
+    Each settled layout is scored by ``score_fn``, lower being better, and the
+    best is returned -- a layout pass is free to reintroduce a crossing it has
+    just resolved, so the last round is not necessarily the best one.
+
+    Returns
+    -------
+    tuple[list[shapely.Polygon], list]
+        The best-scoring labels, and the position history of every round.
+    """
+    assert n_rounds >= 1, "At least one layout round is needed!"
+
+    # The layout passes mutate the list they are given, so work on our own
+    labels = list(labels)
+
+    best_labels, best_score = None, np.inf
+    history = []
+
+    for round_idx in range(n_rounds):
+        swaps = uncross_boxes(labels, label_target_regions)
+        # A round that swaps nothing would re-settle an already settled
+        # layout, so there is nothing left to do
+        if round_idx > 0 and not swaps:
+            break
+
+        labels, round_history = apply_force_directed_layout(
+            labels,
+            label_target_regions,
+            embedding_region,
+            ax,
+            return_history=True,
+            **kwargs,
+        )
+        history.extend(round_history)
+
+        # The first round always wins, so that a score_fn returning inf or nan
+        # for every layout still yields one rather than nothing
+        score = score_fn(labels)
+        if best_labels is None or score < best_score:
+            best_labels, best_score = list(labels), score
+
+    return best_labels, history
 
 
 def get_label_bounding_boxes_on_ax(
@@ -679,7 +880,14 @@ def evaluate_label_pos_quality(
     label_region_margin: float = 0.03,
     label_label_margin: float = 0.02,
     bounds_margin: float = 0.03,
+    score_crossings: bool = False,
 ):
+    """Count the ways in which a label layout is poor. Lower is better.
+
+    ``score_crossings`` adds a ``crossings`` entry counting leader lines that
+    cross. It is optional because callers weight the returned entries by name,
+    and an entry they do not know about has no weight to be given.
+    """
     ax_bbox = np.array(get_ax_bounding_box(ax))
 
     label_region_margin = convert_ax_to_data(ax, label_region_margin)
@@ -718,7 +926,7 @@ def evaluate_label_pos_quality(
             if shapely.intersects(label_i.buffer(label_region_margin), region_j):
                 soft_label_region_isects[i] = 1.
 
-    return {
+    quality = {
         "hard_overflows": n_hard_overflows,
         "soft_overflows": n_soft_overflows,
         "hard_label_label_intersects": sum(hard_label_label_isects.values()),
@@ -726,3 +934,9 @@ def evaluate_label_pos_quality(
         "hard_label_region_intersects": sum(hard_label_region_isects.values()),
         "soft_label_region_intersects": sum(soft_label_region_isects.values()),
     }
+
+    if score_crossings:
+        starts, ends = leader_endpoints(labels, label_target_regions)
+        quality["crossings"] = float(count_crossings(starts, ends))
+
+    return quality
