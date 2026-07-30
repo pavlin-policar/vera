@@ -1,10 +1,20 @@
+import copy
+
 import numpy as np
 
+from vera import metrics
 from vera.region import Region
-from vera.variables import RegionDescriptor
+from vera.variables import IndicatorVariableGroup, RegionDescriptor
 
 
 class RegionAnnotation:
+    """Pairs a region of the embedding with the descriptor that explains it.
+
+    A group descriptor's variables are stored ranked: most characteristic of
+    this region first. The ranking is a property of the descriptor-region
+    pairing, so the same group held by different region annotations (e.g. the
+    parts of a split) may be ordered differently.
+    """
     def __init__(
         self,
         region: Region,
@@ -14,6 +24,25 @@ class RegionAnnotation:
         self.descriptor = descriptor
         self.region = region
         self.source_region_annotations = source_region_annotations
+
+        if isinstance(descriptor, IndicatorVariableGroup):
+            self.descriptor = self._ranked_descriptor(descriptor)
+
+    def _ranked_descriptor(
+        self, group: IndicatorVariableGroup
+    ) -> IndicatorVariableGroup:
+        """A copy of the group with its variables ranked for this region.
+
+        Descriptor objects can be shared between region annotations, so the
+        group is copied rather than reordered in place. Ties are broken by the
+        variables' natural order, which makes the ranking deterministic.
+        """
+        scores = metrics.descriptor_scores(self)
+        ranked = sorted(sorted(scores), key=scores.__getitem__, reverse=True)
+
+        ranked_group = copy.copy(group)
+        ranked_group.variables = ranked
+        return ranked_group
 
     def can_merge_with(self, other: "RegionAnnotation") -> bool:
         """Region annotations can be merged if their regions and descriptors are
