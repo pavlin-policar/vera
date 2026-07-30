@@ -58,6 +58,18 @@ class RegionDescriptor(metaclass=abc.ABCMeta):
         except MergeError:
             return False
 
+    def format_label(
+        self,
+        max_descriptors: int = None,
+        truncation_template: str = "(+{n} more)",
+    ) -> str:
+        """The descriptor's display text.
+
+        Equal to ``str(self)``; descriptors composed of multiple variables
+        truncate to the first `max_descriptors` of them.
+        """
+        return str(self)
+
 
 class Variable(metaclass=abc.ABCMeta):
     repr_attrs = ["name"]
@@ -263,6 +275,36 @@ class IndicatorVariableGroup(RegionDescriptor):
         if not isinstance(other, self.__class__):
             return False
         return frozenset(self.variables) == frozenset(other.variables)
+
+    def format_label(
+        self,
+        max_descriptors: int = None,
+        truncation_template: str = "(+{n} more)",
+    ) -> str:
+        """The group's display text, one variable per line, truncated to the
+        first `max_descriptors` variables.
+
+        Truncation is display-only: `values` and everything computed from the
+        full variable set are unaffected. A truncated label always ends with a
+        marker line showing the number of hidden variables.
+
+        Parameters
+        ----------
+        max_descriptors: int
+            The maximum number of variables to display. When None or at least
+            the group size, the full label is returned unchanged.
+        truncation_template: str
+            Template for the truncation marker; ``{n}`` is replaced with the
+            number of hidden variables.
+        """
+        if max_descriptors is None or max_descriptors >= len(self.variables):
+            return str(self)
+
+        lines = [str(v) for v in self.variables[:max_descriptors]]
+        lines.append(
+            truncation_template.format(n=len(self.variables) - max_descriptors)
+        )
+        return "\n".join(lines)
 
     def __str__(self) -> str:
         return "\n".join(str(d) for d in self.variables)
