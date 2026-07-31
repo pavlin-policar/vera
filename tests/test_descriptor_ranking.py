@@ -292,6 +292,10 @@ class TestFormatLabel(unittest.TestCase):
         self.assertEqual(str(self.group), self.group.format_label(max_descriptors=5))
         self.assertEqual(str(self.group), self.group.format_label(max_descriptors=9))
 
+    def test_cap_of_group_size_minus_one_shows_the_full_label(self):
+        # A marker standing in for a single variable saves no lines
+        self.assertEqual(str(self.group), self.group.format_label(max_descriptors=4))
+
     def test_cap_yields_k_variable_lines_plus_truncation_line(self):
         label = self.group.format_label(max_descriptors=2)
         lines = label.split("\n")
@@ -303,8 +307,8 @@ class TestFormatLabel(unittest.TestCase):
     def test_truncation_marker_reports_remaining_count(self):
         label = self.group.format_label(max_descriptors=2)
         self.assertEqual("(+3 more)", label.split("\n")[-1])
-        label = self.group.format_label(max_descriptors=4)
-        self.assertEqual("(+1 more)", label.split("\n")[-1])
+        label = self.group.format_label(max_descriptors=3)
+        self.assertEqual("(+2 more)", label.split("\n")[-1])
 
     def test_custom_truncation_template(self):
         label = self.group.format_label(
@@ -321,6 +325,17 @@ class TestFormatLabel(unittest.TestCase):
             self.group.format_label(max_descriptors=0)
         with self.assertRaises(ValueError):
             self.group.format_label(max_descriptors=-1)
+
+    def test_non_positive_cap_raises_for_single_indicators_too(self):
+        with self.assertRaises(ValueError):
+            self.variables[0].format_label(max_descriptors=0)
+
+    def test_malformed_truncation_template_raises(self):
+        for template in ["", "{}", "{m}"]:
+            with self.assertRaises(ValueError, msg=f"template={template!r}"):
+                self.group.format_label(
+                    max_descriptors=2, truncation_template=template
+                )
 
 
 class TestPlottingLabelTruncation(unittest.TestCase):

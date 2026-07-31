@@ -10,6 +10,28 @@ class MergeError(Exception):
     pass
 
 
+def _validate_format_label_args(max_descriptors, truncation_template):
+    """Validation is shared by every descriptor type, so a call fails the same
+    way whether or not the arguments end up being used."""
+    if max_descriptors is not None and max_descriptors < 1:
+        raise ValueError(
+            f"`max_descriptors` must be a positive integer or None, got "
+            f"{max_descriptors}."
+        )
+    try:
+        marker = truncation_template.format(n=1)
+    except (IndexError, KeyError) as e:
+        raise ValueError(
+            f"`truncation_template` may only reference the {{n}} placeholder, "
+            f"got {truncation_template!r}."
+        ) from e
+    if not marker:
+        raise ValueError(
+            "`truncation_template` must produce a non-empty marker; a "
+            "truncated label has to indicate its hidden variables."
+        )
+
+
 class RegionDescriptor(metaclass=abc.ABCMeta):
     """Abstract interface that provides a textual description of regions."""
     def __init__(self, values: np.ndarray):
@@ -68,6 +90,7 @@ class RegionDescriptor(metaclass=abc.ABCMeta):
         Equal to ``str(self)``; descriptors composed of multiple variables
         truncate to the first `max_descriptors` of them.
         """
+        _validate_format_label_args(max_descriptors, truncation_template)
         return str(self)
 
 
@@ -295,17 +318,15 @@ class IndicatorVariableGroup(RegionDescriptor):
         ----------
         max_descriptors: int
             The maximum number of variables to display. When None or at least
-            the group size, the full label is returned unchanged.
+            one less than the group size, the full label is returned unchanged
+            — a marker standing in for a single variable would not shorten the
+            label.
         truncation_template: str
             Template for the truncation marker; ``{n}`` is replaced with the
             number of hidden variables.
         """
-        if max_descriptors is not None and max_descriptors < 1:
-            raise ValueError(
-                f"`max_descriptors` must be a positive integer or None, got "
-                f"{max_descriptors}."
-            )
-        if max_descriptors is None or max_descriptors >= len(self.variables):
+        _validate_format_label_args(max_descriptors, truncation_template)
+        if max_descriptors is None or max_descriptors >= len(self.variables) - 1:
             return str(self)
 
         lines = [str(v) for v in self.variables[:max_descriptors]]
