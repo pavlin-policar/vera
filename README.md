@@ -100,14 +100,12 @@ features = pd.DataFrame(
     {as_indicator(name, col.values): col.values for name, col in presence.items()}
 )
 
-region_annotations = vera.an.generate_region_annotations(
-    features, embedding, filter_uninformative=False
-)
+region_annotations = vera.an.generate_region_annotations(features, embedding)
 ```
 
 The values must be 0/1 (indicators with no positive samples are dropped), and the rule's `value_name` is what appears on the plot, so `EqualityRule("present", value_name="CD3")` renders as `CD3 = present`.
 
-Passing `filter_uninformative=False` is necessary here. Each indicator forms a group of one, and the default filter discards every variable described by a single region -- which, on this path, is all of them.
+Each indicator forms a group of one, so `filter_uninformative` judges these variables on whether their region says anything: an indicator is dropped when its rule matches, or its region contains, at least `uninformative_max_sample_coverage` (default 0.95) of the data.
 
 ## Citation
 
