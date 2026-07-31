@@ -1,6 +1,6 @@
 import warnings
 from collections import defaultdict
-from typing import Any, Union
+from typing import Any, Iterable, Union
 
 import numpy as np
 import pandas as pd
@@ -10,7 +10,7 @@ import vera.graph as g
 import vera.metrics as metrics
 from vera.embedding import Embedding
 from vera.region import Region
-from vera.rules import IntervalRule, EqualityRule
+from vera.rules import IntervalRule, EqualityRule, IndicatorRule
 from vera.variables import (
     Variable,
     DiscreteVariable,
@@ -56,14 +56,177 @@ def _pd_dtype_to_variable(col_name: Union[str, Variable], col_type, col_vals) ->
     return variable
 
 
-def ingest(data: pd.Series | pd.DataFrame) -> list[Variable]:
-    """Convert a pandas DataFrame to a list of VERA variables."""
+#: Value of ``indicator_columns`` selecting every column of the data.
+ALL_COLUMNS = "all"
+
+#: Ways of selecting the indicator columns of a data frame: ``"all"``, a
+#: collection of column names, or a mapping from column name to display label.
+IndicatorColumns = Union[str, Iterable, dict, None]
+
+
+def _resolve_indicator_columns(
+    data: pd.Series | pd.DataFrame, indicator_columns: IndicatorColumns
+) -> dict[Any, Any]:
+    """Map each column to be ingested as an indicator to its display label."""
+    columns = [data.name] if isinstance(data, pd.Series) else list(data.columns)
+
+    if indicator_columns is None:
+        labels = {}
+    elif isinstance(indicator_columns, str):
+        if indicator_columns != ALL_COLUMNS:
+            raise ValueError(
+                f"`indicator_columns` accepts `{ALL_COLUMNS!r}` or a collection "
+                f"of column names, got the string `{indicator_columns!r}`. A "
+                f"single column has to be wrapped in a list."
+            )
+        labels = {c: c for c in columns}
+    elif isinstance(indicator_columns, dict):
+        labels = dict(indicator_columns)
+    else:
+        labels = {c: c for c in indicator_columns}
+
+    missing = [c for c in labels if c not in columns]
+    if missing:
+        raise KeyError(
+            f"`indicator_columns` names columns that the data does not "
+            f"contain: {', '.join(map(repr, missing))}."
+        )
+
+    predefined = [c for c in labels if isinstance(c, Variable)]
+    if predefined:
+        raise ValueError(
+            f"`indicator_columns` names columns that already carry a variable: "
+            f"{', '.join(map(repr, predefined))}. A column named by a variable "
+            f"is ingested as that variable."
+        )
+
+    return labels
+
+
+def _indicator_values(name: Any, values: pd.Series) -> np.ndarray:
+    """Validate a column of a data frame as indicator values."""
+    dtype = values.dtype
+    is_binary_dtype = not isinstance(dtype, pd.CategoricalDtype) and (
+        pd.api.types.is_bool_dtype(dtype) or pd.api.types.is_numeric_dtype(dtype)
+    )
+    if not is_binary_dtype:
+        raise ValueError(
+            f"Indicator column `{name}` has dtype `{dtype}`. Indicator columns "
+            f"must be boolean, or numeric with values in {{0, 1}}."
+        )
+
+    indicator_values = values.to_numpy(dtype=float, na_value=np.nan)
+
+    observed = np.unique(indicator_values[~np.isnan(indicator_values)])
+    offending = observed[~np.isin(observed, [0.0, 1.0])]
+    if offending.size > 0:
+        shown = ", ".join(str(v) for v in offending[:5])
+        if offending.size > 5:
+            shown += ", ..."
+        raise ValueError(
+            f"Indicator column `{name}` contains values other than 0 and 1: "
+            f"{shown}. Threshold the column, or leave it out of "
+            f"`indicator_columns` to have it discretized."
+        )
+
+    # A sample with no measurement is not flagged by the indicator
+    return np.nan_to_num(indicator_values, nan=0.0)
+
+
+def _indicator_variable(name: Any, values: pd.Series, label: Any) -> IndicatorVariable:
+    if label is None:
+        raise ValueError(
+            "An indicator variable is labelled by the name of its column, so "
+            "an unnamed column needs an explicit label."
+        )
+
+    indicator_values = _indicator_values(name, values)
+    base_variable = ContinuousVariable(name, values=indicator_values)
+    return IndicatorVariable(base_variable, IndicatorRule(label), indicator_values)
+
+
+def ingest_indicators(
+    data: pd.Series | pd.DataFrame, labels: dict = None
+) -> Union[IndicatorVariable, list[IndicatorVariable]]:
+    """Convert binary columns of a pandas DataFrame to VERA indicator variables.
+
+    Each column becomes a single indicator describing its positive case, so a
+    column recording whether a gene is expressed is annotated `CD3`, and the
+    samples that lack it are left undescribed. Values must be boolean or 0/1;
+    missing values mark absence.
+
+    Parameters
+    ----------
+    data: pd.Series or pd.DataFrame
+    labels: dict
+        The text annotating each column, keyed by column name. Columns absent
+        from the mapping are annotated with their name.
+
+    """
+    labels = dict(labels) if labels is not None else {}
+
     if isinstance(data, pd.Series):
+        columns = [data.name]
+    elif isinstance(data, pd.DataFrame):
+        columns = list(data.columns)
+    else:
+        raise TypeError(
+            f"Cannot ingest object of type `{data.__class__.__name__}`. Only "
+            f"pd.Series and pd.DataFrame are supported!"
+        )
+
+    unknown = [c for c in labels if c not in columns]
+    if unknown:
+        raise KeyError(
+            f"`labels` names columns that the data does not contain: "
+            f"{', '.join(map(repr, unknown))}."
+        )
+
+    if isinstance(data, pd.Series):
+        return _indicator_variable(data.name, data, labels.get(data.name, data.name))
+
+    return [
+        _indicator_variable(name, col_vals, labels.get(name, name))
+        for name, col_vals in data.items()
+    ]
+
+
+def ingest(
+    data: pd.Series | pd.DataFrame, indicator_columns: IndicatorColumns = None
+) -> list[Variable]:
+    """Convert a pandas DataFrame to a list of VERA variables.
+
+    Parameters
+    ----------
+    data: pd.Series or pd.DataFrame
+    indicator_columns: str or iterable or dict
+        The columns holding binary indicators, which are described by their
+        positive case alone instead of being discretized or one-hot encoded.
+        ``"all"`` selects every column, a collection of column names selects
+        those columns, and a mapping selects its keys and annotates them with
+        its values. See :func:`ingest_indicators`.
+
+    """
+    labels = _resolve_indicator_columns(data, indicator_columns)
+
+    if isinstance(data, pd.Series):
+        if labels:
+            return ingest_indicators(data, labels=labels)
         return _pd_dtype_to_variable(data.name, data.dtype, (0, data))
     elif isinstance(data, pd.DataFrame):
-        return list(
-            _pd_dtype_to_variable(*p) for p in zip(data.columns, data.dtypes, data.items())
-        )
+        variables = []
+        for col_name, col_type, col_vals in zip(
+            data.columns, data.dtypes, data.items()
+        ):
+            if col_name in labels:
+                variables.append(
+                    _indicator_variable(col_name, col_vals[1], labels[col_name])
+                )
+            else:
+                variables.append(
+                    _pd_dtype_to_variable(col_name, col_type, col_vals)
+                )
+        return variables
     else:
         raise TypeError(
             f"Cannot ingest object of type `{data.__class__.__name__}`. Only "
@@ -213,13 +376,19 @@ def expand_df(
     df: pd.DataFrame,
     n_discretization_bins: int = 5,
     filter_constant_features: bool = True,
+    indicator_columns: IndicatorColumns = None,
     random_state: Any = 0,
 ) -> list[list[IndicatorVariable]]:
+    # The selection is validated against the full frame: a constant column is
+    # dropped, not reported as missing
+    labels = _resolve_indicator_columns(df, indicator_columns)
+
     # Filter out features with identical values
     if filter_constant_features:
         df = df.loc[:, df.nunique(axis=0) > 1]
+        labels = {c: l for c, l in labels.items() if c in df.columns}
 
-    variables = ingest(df)
+    variables = ingest(df, indicator_columns=labels)
 
     expanded = expand(
         variables,

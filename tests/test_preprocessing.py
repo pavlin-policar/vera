@@ -111,6 +111,125 @@ class TestIngest(unittest.TestCase):
         np.testing.assert_equal(result.values, series.values)
 
 
+class TestIngestIndicators(unittest.TestCase):
+    def setUp(self) -> None:
+        df = pd.DataFrame()
+        df["CD3"] = [1.0, 0.0, 1.0, 0.0, 1.0]
+        df["CD4"] = [True, True, False, False, True]
+        df["cont1"] = [5, 2, 3, 1, 5]
+        df["disc1"] = pd.Categorical(["r", "g", "b", "r", "b"])
+        self.df = df
+
+    def test_indicator_columns_are_labelled_by_their_name(self):
+        result = pp.ingest_indicators(self.df[["CD3", "CD4"]])
+
+        self.assertEqual(2, len(result))
+        self.assertTrue(all(isinstance(v, IndicatorVariable) for v in result))
+        self.assertEqual(["CD3", "CD4"], [str(v) for v in result])
+
+    def test_indicator_values_are_taken_from_the_column(self):
+        cd3, cd4 = pp.ingest_indicators(self.df[["CD3", "CD4"]])
+
+        np.testing.assert_equal(cd3.values, [1, 0, 1, 0, 1])
+        np.testing.assert_equal(cd4.values, [1, 1, 0, 0, 1])
+
+    def test_base_variable_carries_the_column_name(self):
+        cd3, _ = pp.ingest_indicators(self.df[["CD3", "CD4"]])
+
+        self.assertEqual("CD3", cd3.base_variable.name)
+        np.testing.assert_equal(cd3.base_variable.values, cd3.values)
+
+    def test_missing_values_mark_absence(self):
+        series = pd.Series([1.0, np.nan, 0.0], name="CD3")
+        result = pp.ingest_indicators(series)
+
+        self.assertIsInstance(result, IndicatorVariable)
+        np.testing.assert_equal(result.values, [1, 0, 0])
+
+    def test_labels_override_the_column_name(self):
+        result = pp.ingest_indicators(
+            self.df[["CD3", "CD4"]], labels={"CD3": "CD3 expressed"}
+        )
+
+        self.assertEqual(["CD3 expressed", "CD4"], [str(v) for v in result])
+        # The variable is still identified by the column it came from
+        self.assertEqual("CD3", result[0].base_variable.name)
+
+    def test_labels_for_unknown_columns_are_rejected(self):
+        with self.assertRaises(KeyError):
+            pp.ingest_indicators(self.df[["CD3"]], labels={"CD8": "CD8"})
+
+    def test_unnamed_columns_are_rejected(self):
+        with self.assertRaises(ValueError):
+            pp.ingest_indicators(pd.Series([1.0, 0.0]))
+
+    def test_non_binary_columns_are_rejected(self):
+        with self.assertRaises(ValueError):
+            pp.ingest_indicators(self.df[["cont1"]])
+
+        with self.assertRaises(ValueError):
+            pp.ingest_indicators(self.df[["disc1"]])
+
+    def test_ingest_selects_indicator_columns(self):
+        result = pp.ingest(self.df, indicator_columns=["CD3", "CD4"])
+
+        self.assertEqual(len(self.df.columns), len(result))
+        types = [type(v) for v in result]
+        self.assertEqual(
+            [IndicatorVariable, IndicatorVariable, ContinuousVariable, DiscreteVariable],
+            types,
+        )
+
+    def test_ingest_with_all_columns(self):
+        result = pp.ingest(self.df[["CD3", "CD4"]], indicator_columns="all")
+
+        self.assertTrue(all(isinstance(v, IndicatorVariable) for v in result))
+
+    def test_ingest_with_labels(self):
+        result = pp.ingest(self.df, indicator_columns={"CD3": "CD3 expressed"})
+
+        self.assertEqual("CD3 expressed", str(result[0]))
+        self.assertIsInstance(result[1], ContinuousVariable)
+
+    def test_ingest_with_a_single_column_name_is_rejected(self):
+        """Only `"all"` is meaningful as a string; a lone column name is a
+        common mistake worth naming."""
+        with self.assertRaises(ValueError):
+            pp.ingest(self.df, indicator_columns="CD3")
+
+    def test_ingest_with_unknown_columns_is_rejected(self):
+        with self.assertRaises(KeyError):
+            pp.ingest(self.df, indicator_columns=["CD8"])
+
+    def test_ingest_of_columns_already_carrying_a_variable_is_rejected(self):
+        v = ContinuousVariable("CD8", np.array([1.0, 0.0, 1.0, 0.0, 1.0]))
+        df = self.df.copy()
+        df[v] = v.values
+
+        with self.assertRaises(ValueError):
+            pp.ingest(df, indicator_columns=[v])
+
+    def test_expanded_indicators_form_groups_of_one(self):
+        result = pp.expand_df(self.df, indicator_columns=["CD3", "CD4"])
+
+        indicator_groups = [
+            group for group in result
+            if group[0].base_variable.name in ("CD3", "CD4")
+        ]
+        self.assertEqual(2, len(indicator_groups))
+        self.assertTrue(all(len(group) == 1 for group in indicator_groups))
+
+    def test_constant_indicator_columns_are_dropped_without_complaint(self):
+        df = self.df.copy()
+        df["CD8"] = 0.0
+
+        result = pp.expand_df(df, indicator_columns=["CD3", "CD8"])
+
+        base_names = [group[0].base_variable.name for group in result]
+        self.assertNotIn("CD8", base_names)
+        self.assertIn("CD3", base_names)
+
+
 class TestIngestedToPandas(unittest.TestCase):
     def setUp(self) -> None:
         df = pd.DataFrame()
