@@ -6,6 +6,8 @@ import pandas as pd
 import vera.preprocessing as pp
 from tests.utils import generate_clusters
 from vera.annotate import generate_region_annotations
+from vera.rules import EqualityRule
+from vera.utils import flatten
 from vera.variables import (
     Variable,
     ContinuousVariable,
@@ -474,3 +476,108 @@ class TestMergeOverfragmented(unittest.TestCase):
             len(region_annotations[0]),
             "Incorrect number of region annotations returned",
         )
+
+
+class TestSampling(unittest.TestCase):
+    """Variables can be passed in as data frame column names, in which case the
+    values used downstream are the ones carried by the column name, and not the
+    ones in the frame body."""
+
+    N_SAMPLES = 10000
+    SAMPLE_SIZE = 5000
+
+    def setUp(self) -> None:
+        np.random.seed(0)
+        x, cluster_features = generate_clusters(
+            [[1, 1], [1, -1], [-1, -1], [-1, 1]],
+            [0.25] * 4,
+            n_samples=self.N_SAMPLES // 4,
+        )
+        self.embedding = x
+        self.clusters = cluster_features["cluster"].cat.codes.values
+
+    def _indicator(self, name: str, cluster_ids: list[int]) -> IndicatorVariable:
+        """An indicator variable marking the samples of the given clusters."""
+        values = np.isin(self.clusters, cluster_ids).astype(float)
+        base_variable = ContinuousVariable(name, values)
+        rule = EqualityRule(1, value_name=name)
+        return IndicatorVariable(base_variable, rule, values)
+
+    def _indicator_df(self) -> pd.DataFrame:
+        df = pd.DataFrame()
+        for name, cluster_ids in [("a", [0, 2]), ("b", [1, 3]), ("c", [0, 1])]:
+            v = self._indicator(name, cluster_ids)
+            df[v] = v.values
+        return df
+
+    def _sample_counts(self, region_annotations) -> set[int]:
+        """The number of samples described by each returned region annotation."""
+        counts = set()
+        for ra in flatten(region_annotations):
+            counts.add(ra.region.embedding.X.shape[0])
+            counts.add(ra.descriptor.values.shape[0])
+            for v in ra.descriptor.contained_variables:
+                counts.add(v.values.shape[0])
+        return counts
+
+    def test_sampling_indicator_variables(self):
+        region_annotations = generate_region_annotations(
+            self._indicator_df(),
+            embedding=self.embedding,
+            scale_factor=0.5,
+            filter_uninformative=False,
+            random_state=0,
+        )
+
+        self.assertEqual(
+            3, len(region_annotations), "Incorrect number of variables returned"
+        )
+        self.assertEqual({self.SAMPLE_SIZE}, self._sample_counts(region_annotations))
+
+    def test_sampling_indicator_variables_reports_the_same_variables(self):
+        """Sampling changes which rows a variable holds, not which variables the
+        pipeline reports."""
+        df = self._indicator_df()
+        kwargs = dict(
+            embedding=self.embedding,
+            scale_factor=0.5,
+            filter_uninformative=False,
+            random_state=0,
+        )
+
+        sampled = generate_region_annotations(df, sample_size=self.SAMPLE_SIZE, **kwargs)
+        unsampled = generate_region_annotations(df, sample_size=None, **kwargs)
+
+        def base_variable_names(region_annotations):
+            return {
+                v.name
+                for ra in flatten(region_annotations)
+                for v in ra.descriptor.contained_variables
+            }
+
+        self.assertEqual({"a", "b", "c"}, base_variable_names(unsampled))
+        self.assertEqual(
+            base_variable_names(unsampled), base_variable_names(sampled)
+        )
+
+    def test_sampling_mixed_dataframe(self):
+        """Columns whose values live in the frame body and columns whose values
+        live on the column name have to be sampled consistently."""
+        df = self._indicator_df()
+        df["cont1"] = np.where(np.isin(self.clusters, [0, 1]), 1.0, -1.0)
+        df["disc1"] = pd.Categorical(
+            np.where(np.isin(self.clusters, [2, 3]), "left", "right")
+        )
+
+        region_annotations = generate_region_annotations(
+            df,
+            embedding=self.embedding,
+            scale_factor=0.5,
+            filter_uninformative=False,
+            random_state=0,
+        )
+
+        self.assertEqual(
+            5, len(region_annotations), "Incorrect number of variables returned"
+        )
+        self.assertEqual({self.SAMPLE_SIZE}, self._sample_counts(region_annotations))

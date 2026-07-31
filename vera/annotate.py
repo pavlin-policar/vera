@@ -7,6 +7,7 @@ from tqdm import tqdm
 
 import vera.preprocessing as pp
 from vera.region_annotation import RegionAnnotation
+from vera.variables import Variable
 
 
 def generate_region_annotations(
@@ -79,7 +80,14 @@ def generate_region_annotations(
         sample_idx = random_state.choice(
             features.shape[0], size=num_samples, replace=False
         )
-        features = features.iloc[sample_idx]
+        # A column name can itself be a variable, in which case the values it
+        # carries are the ones used downstream, and pandas indexing leaves them
+        # untouched
+        columns = [
+            c.subset(sample_idx) if isinstance(c, Variable) else c
+            for c in features.columns
+        ]
+        features = features.iloc[sample_idx].set_axis(columns, axis="columns")
         embedding = embedding[sample_idx]
 
     # Convert the data frame to VERA feature objects
