@@ -134,6 +134,24 @@ class Variable(metaclass=abc.ABCMeta):
     def is_derived(self):
         return self.base_variable is not None
 
+    def subset(self, idx) -> "Variable":
+        """This variable restricted to the samples selected by ``idx``.
+
+        A derived variable holds values on both itself and its base variable,
+        so the selection is applied down the chain: every variable reachable
+        from the copy describes the same samples, in the same order.
+
+        Parameters
+        ----------
+        idx: np.ndarray
+            Integer or boolean index into the sample axis.
+        """
+        new_variable = copy.copy(self)
+        new_variable.values = np.asarray(self.values)[idx]
+        if self.base_variable is not None:
+            new_variable.base_variable = self.base_variable.subset(idx)
+        return new_variable
+
     def __eq__(self, other):
         if not isinstance(other, self.__class__):
             return False
