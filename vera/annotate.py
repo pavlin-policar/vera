@@ -38,7 +38,11 @@ def generate_region_annotations(
     Parameters
     ----------
     features : pd.DataFrame
-        Explanatory features.
+        Explanatory features. A column named by an
+        :class:`~vera.variables.IndicatorVariable` is used as-is instead of
+        being discretized or one-hot encoded; this is how a binary feature is
+        described by its positive case alone. Such a variable forms a group of
+        one, so it survives only with ``filter_uninformative=False``.
     embedding : np.ndarray
         Low-dimensional embedding of the data to explain.
     sample_size : int, default=5000
@@ -123,62 +127,3 @@ def generate_region_annotations(
         ]
 
     return region_annotations
-
-
-# def generate_indicator_explanatory_features(
-#     features: pd.DataFrame,
-#     embedding: np.ndarray,
-#     sample_size: int = 5000,
-#     filter_constant: bool = True,
-#     threshold: str | float = "auto",
-#     scale_factor: float = 1,
-#     kernel: str = "gaussian",
-#     contour_level: float = 0.25,
-#     merge_min_sample_overlap=0.8,
-#     merge_min_purity_gain=0.5,
-#     random_state: Any = None,
-# ):
-#     # Sample the data if necessary. Running on large data sets can be very slow
-#     random_state = check_random_state(random_state)
-#     if sample_size is not None:
-#         num_samples = min(sample_size, features.shape[0])
-#         sample_idx = random_state.choice(
-#             features.shape[0], size=num_samples, replace=False
-#         )
-#         features = features.iloc[sample_idx]
-#         embedding = embedding[sample_idx]
-#
-#     # Filter out features with identical values
-#     if filter_constant:
-#         df = df.loc[:, df.nunique(axis=0) > 1]
-#
-#     df = pp.ingest(df)
-#
-#     # Determine binary features
-#     if threshold == "auto":
-#         df = _one_hot(_discretize(ingest(df), n_bins=2))
-#     else:
-#         df_binary = df > threshold
-#
-#     # Create explanatory variables from each of the derived features
-#     explanatory_features = pp.generate_region_annotations(
-#         df_binary,
-#         embedding,
-#         scale_factor=scale_factor,
-#         kernel=kernel,
-#         contour_level=contour_level,
-#     )
-#
-#     # Perform iterative merging
-#     merged_explanatory_features = pp.merge_overfragmented(
-#         explanatory_features,
-#         min_sample_overlap=merge_min_sample_overlap,
-#         min_purity_gain=merge_min_purity_gain,
-#     )
-#
-#     # Generate list of base variables, sorted for consistency
-#     base_variables = sorted(
-#         list(set(v.base_variable for v in merged_region_annotations))
-#     )
-#
-#     return base_variables

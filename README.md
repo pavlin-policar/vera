@@ -78,6 +78,37 @@ vera.pl.plot_annotations(contrastive_explanations)
 vera.pl.plot_annotations(descriptive_explanations)
 ```
 
+## Binary and presence features
+
+Before regions are extracted, every column is expanded into indicator variables: continuous columns are discretized into bins, categorical columns are one-hot encoded. For a binary feature -- a gene that is either expressed or not, a flag that is either set or not -- this yields two indicators, and the negative one is annotated as a region of its own. A region labelled "gene is absent" is rarely something you want on a plot.
+
+To describe only the positive case, carry the description in the column *name*. Any column whose name is an `IndicatorVariable` is passed through the expansion step unchanged, and its rule becomes the annotation label:
+
+```python
+import pandas as pd
+from vera.rules import EqualityRule
+from vera.variables import ContinuousVariable, IndicatorVariable
+
+def as_indicator(name, values):
+    """Describe a 0/1 column by its positive case only."""
+    base = ContinuousVariable(name, values=values)
+    rule = EqualityRule("present", value_name=name)
+    return IndicatorVariable(base, rule, values)
+
+presence = (expression > 0).astype(float)
+features = pd.DataFrame(
+    {as_indicator(name, col.values): col.values for name, col in presence.items()}
+)
+
+region_annotations = vera.an.generate_region_annotations(
+    features, embedding, filter_uninformative=False
+)
+```
+
+The values must be 0/1 (indicators with no positive samples are dropped), and the rule's `value_name` is what appears on the plot, so `EqualityRule("present", value_name="CD3")` renders as `CD3 = present`.
+
+Passing `filter_uninformative=False` is necessary here. Each indicator forms a group of one, and the default filter discards every variable described by a single region -- which, on this path, is all of them.
+
 ## Citation
 
 If you make use of `vera` for your work we would appreciate it if you would cite the [paper](https://arxiv.org/abs/2406.04808):
