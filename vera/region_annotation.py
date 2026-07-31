@@ -1,10 +1,8 @@
-import copy
-
 import numpy as np
 
 from vera import metrics
 from vera.region import Region
-from vera.variables import IndicatorVariableGroup, RegionDescriptor
+from vera.variables import RegionDescriptor
 
 
 class RegionAnnotation:
@@ -29,30 +27,10 @@ class RegionAnnotation:
         self.region = region
         self.source_region_annotations = source_region_annotations
 
-        if rank_descriptor and isinstance(descriptor, IndicatorVariableGroup):
-            self.descriptor = self._ranked_descriptor(descriptor)
-
-    def _ranked_descriptor(
-        self, group: IndicatorVariableGroup
-    ) -> IndicatorVariableGroup:
-        """A copy of the group with its variables ranked for this region.
-
-        Descriptor objects can be shared between region annotations, so the
-        group is copied rather than reordered in place. Ties are broken by the
-        variables' natural order, which makes the ranking deterministic. A NaN
-        score would corrupt the sort, so it is treated as the lowest possible
-        score.
-        """
-        scores = metrics.descriptor_scores(self)
-
-        def sort_key(v):
-            return -np.inf if np.isnan(scores[v]) else scores[v]
-
-        ranked = sorted(sorted(scores), key=sort_key, reverse=True)
-
-        ranked_group = copy.copy(group)
-        ranked_group.variables = ranked
-        return ranked_group
+        if rank_descriptor:
+            self.descriptor = descriptor.ranked_by(
+                lambda: metrics.descriptor_scores(self)
+            )
 
     def can_merge_with(self, other: "RegionAnnotation") -> bool:
         """Region annotations can be merged if their regions and descriptors are

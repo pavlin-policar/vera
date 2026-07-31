@@ -1,5 +1,7 @@
 import abc
+import copy
 from collections import defaultdict
+from typing import Callable
 
 import numpy as np
 
@@ -92,6 +94,19 @@ class RegionDescriptor(metaclass=abc.ABCMeta):
         """
         _validate_format_label_args(max_descriptors, truncation_template)
         return str(self)
+
+    def ranked_by(
+        self, compute_scores: Callable[[], dict]
+    ) -> "RegionDescriptor":
+        """This descriptor with its constituent variables ordered by
+        descending score.
+
+        `compute_scores` is a zero-argument callable returning a score per
+        variable. A descriptor without constituent parts has nothing to
+        reorder and returns itself without invoking it, so callers may defer
+        expensive score computation.
+        """
+        return self
 
 
 class Variable(metaclass=abc.ABCMeta):
@@ -301,6 +316,28 @@ class IndicatorVariableGroup(RegionDescriptor):
         if not isinstance(other, self.__class__):
             return False
         return frozenset(self.variables) == frozenset(other.variables)
+
+    def ranked_by(
+        self, compute_scores: Callable[[], dict]
+    ) -> "IndicatorVariableGroup":
+        """A copy of the group with its variables ordered by descending score.
+
+        Ties are broken by the variables' natural order, which makes the
+        ranking deterministic, and a NaN score is treated as the lowest
+        possible score — as a sort key it would corrupt the whole ordering.
+        Descriptor objects can be shared between region annotations, so the
+        group is copied rather than reordered in place.
+        """
+        scores = compute_scores()
+
+        def sort_key(v):
+            return -np.inf if np.isnan(scores[v]) else scores[v]
+
+        ranked = sorted(sorted(self.variables), key=sort_key, reverse=True)
+
+        ranked_group = copy.copy(self)
+        ranked_group.variables = ranked
+        return ranked_group
 
     def format_label(
         self,
