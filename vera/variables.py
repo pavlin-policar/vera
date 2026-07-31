@@ -266,7 +266,10 @@ class IndicatorVariableGroup(RegionDescriptor):
 
     @property
     def contained_variables(self) -> tuple[Variable]:
-        return tuple(v.base_variable for v in self.variables)
+        # Canonical order: the tuple is used as an identity key (e.g. in
+        # `utils.group_by_descriptor`), so it must not depend on the display
+        # order of `self.variables`
+        return tuple(sorted(v.base_variable for v in self.variables))
 
     def __hash__(self) -> int:
         return hash((self.__class__.__name__, frozenset(self.variables)))
