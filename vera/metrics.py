@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, Any, Callable, Union
 
 import numpy as np
@@ -10,7 +12,7 @@ if TYPE_CHECKING:
 EPS = 1e-12
 
 
-def purity(ra: "RegionAnnotation") -> float:
+def purity(ra: RegionAnnotation) -> float:
     contained_vals = ra.descriptor.values[list(ra.region.contained_samples)]
     if len(contained_vals) == 0:
         return 0
@@ -18,7 +20,7 @@ def purity(ra: "RegionAnnotation") -> float:
 
 
 def _shrunk_rate_and_base_rate(
-    v: IndicatorVariable, ra: "RegionAnnotation", prior_strength: float
+    v: IndicatorVariable, ra: RegionAnnotation, prior_strength: float
 ) -> tuple[float, float]:
     """Estimate the variable's in-region rate and its background base rate.
 
@@ -79,7 +81,7 @@ DESCRIPTOR_SCORING_METHODS = {
 
 
 def descriptor_scores(
-    ra: "RegionAnnotation",
+    ra: RegionAnnotation,
     method: Union[str, Callable] = "purity_gain",
     prior_strength: float = 10,
 ) -> dict[IndicatorVariable, float]:
