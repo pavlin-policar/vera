@@ -19,9 +19,6 @@ from vera.variables import (
     IndicatorVariableGroup,
 )
 
-PRIOR_STRENGTH = 10
-
-
 def make_indicator(name: str, values: np.ndarray) -> IndicatorVariable:
     values = np.asarray(values, dtype=float)
     base = ContinuousVariable(name, values)
@@ -54,11 +51,10 @@ def make_region_annotation(variables: list[IndicatorVariable], n_in_region: int)
     return RegionAnnotation(region, descriptor)
 
 
-def expected_rates(v, ra, prior_strength=PRIOR_STRENGTH):
+def expected_rates(v, ra):
     S = sorted(ra.region.contained_samples)
-    k = v.values[S].sum()
+    p = v.values[S].mean()
     q = v.values.mean()
-    p = (k + prior_strength * q) / (len(S) + prior_strength)
     return p, q
 
 
@@ -94,29 +90,11 @@ class TestDescriptorScores(unittest.TestCase):
                     expected_score, result[v], msg=f"method={method}, v={v}"
                 )
 
-    def test_zero_prior_strength_yields_raw_rates(self):
-        scores = metrics.descriptor_scores(
-            self.ra, method="purity", prior_strength=0
-        )
+    def test_purity_matches_raw_in_region_rates(self):
+        scores = metrics.descriptor_scores(self.ra, method="purity")
         self.assertAlmostEqual(0.8, scores[self.v_a])
         self.assertAlmostEqual(0.6, scores[self.v_b])
         self.assertAlmostEqual(1.0, scores[self.v_c])
-
-    def test_shrinkage_pulls_small_regions_toward_the_background(self):
-        # The same perfectly pure feature, measured in a small and in a large
-        # region: the small region's estimate ends up closer to the background
-        v_small = make_indicator("v", make_values(400, 5, 5, 35))
-        ra_small = make_region_annotation([v_small], 5)
-        v_large = make_indicator("v", make_values(400, 50, 50, 35))
-        ra_large = make_region_annotation([v_large], 50)
-
-        score_small = metrics.descriptor_scores(ra_small, method="purity")[v_small]
-        score_large = metrics.descriptor_scores(ra_large, method="purity")[v_large]
-        self.assertLess(score_small, score_large)
-
-        q = v_small.values.mean()
-        self.assertLess(abs(score_small - q), abs(score_small - 1.0))
-        self.assertLess(abs(score_large - 1.0), abs(score_large - q))
 
     def test_ubiquitous_feature_scores_no_purity_gain(self):
         # v_c holds for every sample, so knowing the region adds nothing
@@ -137,9 +115,6 @@ class TestDescriptorScores(unittest.TestCase):
         with self.assertRaises(ValueError):
             metrics.descriptor_scores(self.ra, method="not_a_method")
 
-    def test_negative_prior_strength_raises(self):
-        with self.assertRaises(ValueError):
-            metrics.descriptor_scores(self.ra, prior_strength=-1)
 
     def test_single_indicator_descriptor(self):
         v = make_indicator("a", make_values(40, 10, 8, 4))

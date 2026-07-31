@@ -19,30 +19,6 @@ def purity(ra: RegionAnnotation) -> float:
     return np.mean(contained_vals)
 
 
-def _shrunk_rate_and_base_rate(
-    v: IndicatorVariable, ra: RegionAnnotation, prior_strength: float
-) -> tuple[float, float]:
-    """Estimate the variable's in-region rate and its background base rate.
-
-    The in-region rate is the posterior mean of a Beta-Binomial model with the
-    prior centered on the background rate: with ``k`` positives among the
-    ``n`` region samples,
-
-        p = (k + prior_strength * q) / (n + prior_strength)
-
-    ``prior_strength`` is the equivalent sample size of the prior, i.e. the
-    region size at which the observed rate and the prior are weighted equally.
-    Regions with few samples are thereby pulled toward the background rate, so
-    a feature cannot rank highly on a handful of coincidental samples.
-    """
-    S = list(ra.region.contained_samples)
-    q = float(v.values.mean())
-    k = float(v.values[S].sum())
-    n = len(S)
-    p = (k + prior_strength * q) / max(n + prior_strength, EPS)
-    return p, q
-
-
 def _score_purity(p: float, q: float) -> float:
     return p
 
@@ -83,10 +59,19 @@ DESCRIPTOR_SCORING_METHODS = {
 def descriptor_scores(
     ra: RegionAnnotation,
     method: Union[str, Callable] = "purity_gain",
-    prior_strength: float = 10,
 ) -> dict[IndicatorVariable, float]:
     """Score each of the region annotation's descriptor variables on how well
     it describes the region.
+
+    Scores are computed from raw rates: the in-region rate ``p`` (the fraction
+    of the region's samples where the variable holds) and the background base
+    rate ``q`` (its fraction over all samples). Rates are deliberately not
+    shrunk toward a prior: every variable in a region shares the same region
+    size, so a background-centered Beta-Binomial posterior mean rescales the
+    `purity_gain` and `lift` scores by a region-wide constant and leaves their
+    rankings unchanged. Guarding against very small regions is the job of the
+    pipeline's region-size filters (e.g. `cluster_min_samples` in
+    `explain.descriptive`), not of the scores.
 
     Splitting deflates the contrastive scores: a variable concentrated in
     several separate regions has its full prevalence as the background rate,
@@ -99,18 +84,7 @@ def descriptor_scores(
     method: Union[str, Callable]
         One of `DESCRIPTOR_SCORING_METHODS`, or a callable
         ``(v, ra) -> float`` scoring a single indicator variable.
-    prior_strength: float
-        The equivalent sample size of the background-centered prior used to
-        estimate in-region rates (see `_shrunk_rate_and_base_rate`). Keep at
-        or above the smallest region size the pipeline admits; the descriptive
-        pipeline's default `cluster_min_samples=5` makes 10 a 2x margin.
-        Ignored when `method` is a callable.
     """
-    if prior_strength < 0:
-        raise ValueError(
-            f"`prior_strength` must be non-negative, got {prior_strength}."
-        )
-
     descriptor = ra.descriptor
     if isinstance(descriptor, IndicatorVariableGroup):
         variables = list(descriptor.variables)
@@ -132,9 +106,12 @@ def descriptor_scores(
         )
     score_func = DESCRIPTOR_SCORING_METHODS[method]
 
+    S = list(ra.region.contained_samples)
+    n = len(S)
     scores = {}
     for v in variables:
-        p, q = _shrunk_rate_and_base_rate(v, ra, prior_strength)
+        q = float(v.values.mean())
+        p = float(v.values[S].sum()) / n if n > 0 else 0.0
         scores[v] = float(score_func(p, q))
     return scores
 
