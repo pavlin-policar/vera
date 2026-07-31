@@ -37,7 +37,11 @@ def generate_region_annotations(
     Parameters
     ----------
     features : pd.DataFrame
-        Explanatory features.
+        Explanatory features. A column named by an
+        :class:`~vera.variables.IndicatorVariable` is used as-is instead of
+        being discretized or one-hot encoded; this is how a binary feature is
+        described by its positive case alone. Such a variable forms a group of
+        one, so it survives only with ``filter_uninformative=False``.
     embedding : np.ndarray
         Low-dimensional embedding of the data to explain.
     sample_size : int, default=5000
