@@ -323,3 +323,44 @@ class TestIntervalRuleStringFormatting(unittest.TestCase):
         self.assertEqual(str(r1), "12000 < x < 13000")
         self.assertEqual(str(r2), "13000 < x < 13000")
         self.assertEqual(str(r3), "13000 < x < 14000")
+
+
+class TestIndicatorRule(unittest.TestCase):
+    def test_str_is_the_label_alone(self):
+        r = vera.rules.IndicatorRule("CD3")
+        self.assertEqual(str(r), "CD3")
+
+    def test_never_merges(self):
+        r1 = vera.rules.IndicatorRule("CD3")
+        r2 = vera.rules.IndicatorRule("CD4")
+        r3 = vera.rules.EqualityRule("CD3")
+
+        self.assertFalse(r1.can_merge_with(r2))
+        self.assertFalse(r1.can_merge_with(r1))
+        self.assertFalse(r1.can_merge_with(r3))
+        self.assertFalse(r3.can_merge_with(r1))
+
+        with self.assertRaises(vera.rules.IncompatibleRuleError):
+            r1.merge_with(r2)
+
+    def test_contains(self):
+        r1 = vera.rules.IndicatorRule("CD3")
+        r2 = vera.rules.IndicatorRule("CD4")
+
+        self.assertTrue(r1.contains(vera.rules.IndicatorRule("CD3")))
+        self.assertFalse(r1.contains(r2))
+        self.assertFalse(r1.contains(vera.rules.EqualityRule("CD3")))
+
+    def test_equality_and_hashing(self):
+        r1 = vera.rules.IndicatorRule("CD3")
+        r2 = vera.rules.IndicatorRule("CD3")
+        r3 = vera.rules.IndicatorRule("CD4")
+
+        self.assertEqual(r1, r2)
+        self.assertEqual(hash(r1), hash(r2))
+        self.assertNotEqual(r1, r3)
+        # An equality rule rendering the same text describes something else
+        self.assertNotEqual(r1, vera.rules.EqualityRule("CD3"))
+
+    def test_ordering_is_by_label(self):
+        self.assertLess(vera.rules.IndicatorRule("CD3"), vera.rules.IndicatorRule("CD4"))
