@@ -82,30 +82,48 @@ vera.pl.plot_annotations(descriptive_explanations)
 
 Before regions are extracted, every column is expanded into indicator variables: continuous columns are discretized into bins, categorical columns are one-hot encoded. For a binary feature -- a gene that is either expressed or not, a flag that is either set or not -- this yields two indicators, and the negative one is annotated as a region of its own. A region labelled "gene is absent" is rarely something you want on a plot.
 
-To describe only the positive case, carry the description in the column *name*. Any column whose name is an `IndicatorVariable` is passed through the expansion step unchanged, and its rule becomes the annotation label:
+Name such columns in `indicator_columns` and they are used as they are, each described by its positive case alone. For a table of nothing but indicators -- a gene presence matrix, say -- pass `"all"`:
+
+```python
+presence = expression > 0
+
+region_annotations = vera.an.generate_region_annotations(
+    presence, embedding, indicator_columns="all"
+)
+```
+
+In a mixed table, list the columns to be read this way; everything else is discretized or one-hot encoded as before:
+
+```python
+region_annotations = vera.an.generate_region_annotations(
+    features, embedding, indicator_columns=["CD3", "CD4"]
+)
+```
+
+The values must be boolean or 0/1; missing values mark absence, and a column with no positive samples is dropped. The column name is what appears on the plot, so a `CD3` column is annotated `CD3`. To annotate a column with something else, pass a mapping instead of a list:
+
+```python
+region_annotations = vera.an.generate_region_annotations(
+    features, embedding, indicator_columns={"CD3": "CD3 expressed"}
+)
+```
+
+Each indicator forms a group of one, so `filter_uninformative` judges these variables on whether their region says anything: an indicator is dropped when its rule matches, or its region contains, at least `uninformative_max_sample_coverage` (default 0.95) of the data.
+
+For an annotation that a label cannot express -- a threshold, a range, one of several categories -- build the variable yourself and use it as the column *name*. A column named by a `Variable` is passed through the expansion step unchanged, and its rule becomes the annotation:
 
 ```python
 import pandas as pd
-from vera.rules import EqualityRule
+from vera.rules import IntervalRule
 from vera.variables import ContinuousVariable, IndicatorVariable
 
-def as_indicator(name, values):
-    """Describe a 0/1 column by its positive case only."""
-    base = ContinuousVariable(name, values=values)
-    rule = EqualityRule("present", value_name=name)
-    return IndicatorVariable(base, rule, values)
+base = ContinuousVariable("CD3", values=expression["CD3"].values)
+rule = IntervalRule(lower=2.5, value_name="CD3")
+above_threshold = IndicatorVariable(base, rule, (base.values > 2.5).astype(float))
 
-presence = (expression > 0).astype(float)
-features = pd.DataFrame(
-    {as_indicator(name, col.values): col.values for name, col in presence.items()}
-)
-
+features = pd.DataFrame({above_threshold: above_threshold.values})
 region_annotations = vera.an.generate_region_annotations(features, embedding)
 ```
-
-The values must be 0/1 (indicators with no positive samples are dropped), and the rule's `value_name` is what appears on the plot, so `EqualityRule("present", value_name="CD3")` renders as `CD3 = present`.
-
-Each indicator forms a group of one, so `filter_uninformative` judges these variables on whether their region says anything: an indicator is dropped when its rule matches, or its region contains, at least `uninformative_max_sample_coverage` (default 0.95) of the data.
 
 ## Citation
 
