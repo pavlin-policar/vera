@@ -240,7 +240,7 @@ def ingested_to_pandas(variables: list[Variable]) -> pd.DataFrame:
 
     for v in variables:
         if isinstance(v, IndicatorVariable):
-            df_new[v.name] = pd.Series(v.values)
+            df_new[str(v.rule)] = pd.Series(v.values)
         elif isinstance(v, DiscreteVariable):
             vals = np.full_like(v.values, fill_value=np.nan, dtype=object)
             mask = ~np.isnan(v.values)

@@ -257,6 +257,24 @@ class TestIngestedToPandas(unittest.TestCase):
         reverted = pp.ingested_to_pandas(pp.ingest(df))
         self.assertTrue(df.equals(reverted))
 
+    def test_indicators_are_named_by_their_rule(self):
+        """An indicator variable has no name of its own, so its rule names the
+        column: several of them in one frame would otherwise collide."""
+        df = pd.DataFrame({"CD3": [1.0, 0.0, 1.0], "CD4": [0.0, 1.0, 1.0]})
+
+        reverted = pp.ingested_to_pandas(pp.ingest(df, indicator_columns="all"))
+
+        self.assertTrue(df.equals(reverted))
+
+    def test_derived_indicators_are_named_by_their_rule(self):
+        variable = pp.ingest(pd.Series([1.0, 2.0, 3.0, 4.0], name="cont"))
+
+        reverted = pp.ingested_to_pandas(pp.discretize(variable, n_bins=2))
+
+        self.assertEqual(
+            ["cont < 2.50", "cont > 2.50"], list(reverted.columns)
+        )
+
 
 class TestDiscretize(unittest.TestCase):
     def setUp(self) -> None:
