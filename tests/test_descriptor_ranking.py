@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 import matplotlib
 
@@ -170,6 +171,22 @@ class TestRegionAnnotationRanking(unittest.TestCase):
         self.assertEqual(
             frozenset(group.variables), frozenset(ra.descriptor.variables)
         )
+
+    def test_nan_score_ranks_last_without_corrupting_the_order(self):
+        # A NaN sort key breaks sorted()'s transitivity and can leave the
+        # whole list in arbitrary order, not just misplace one element
+        def nan_for_b(ra):
+            return {
+                self.v_a: 1.0,
+                self.v_b: float("nan"),
+                self.v_c: 3.0,
+            }
+
+        with mock.patch.object(
+            metrics, "descriptor_scores", side_effect=nan_for_b
+        ):
+            ra = make_region_annotation(self.variables, self.n_in_region)
+        self.assertEqual([self.v_c, self.v_a, self.v_b], ra.descriptor.variables)
 
     def test_contained_variables_is_independent_of_member_order(self):
         # v_a scores highest in a region over its own support, v_b in another;

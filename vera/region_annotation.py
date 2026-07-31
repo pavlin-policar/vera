@@ -39,10 +39,16 @@ class RegionAnnotation:
 
         Descriptor objects can be shared between region annotations, so the
         group is copied rather than reordered in place. Ties are broken by the
-        variables' natural order, which makes the ranking deterministic.
+        variables' natural order, which makes the ranking deterministic. A NaN
+        score would corrupt the sort, so it is treated as the lowest possible
+        score.
         """
         scores = metrics.descriptor_scores(self)
-        ranked = sorted(sorted(scores), key=scores.__getitem__, reverse=True)
+
+        def sort_key(v):
+            return -np.inf if np.isnan(scores[v]) else scores[v]
+
+        ranked = sorted(sorted(scores), key=sort_key, reverse=True)
 
         ranked_group = copy.copy(group)
         ranked_group.variables = ranked
