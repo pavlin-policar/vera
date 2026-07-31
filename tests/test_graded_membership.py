@@ -8,7 +8,13 @@ import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 
-from vera.plotting import plot_annotation
+from vera.plotting import (
+    MEMBERSHIP_SHADING_METHODS,
+    get_cmap_colors,
+    oklab_to_rgb,
+    plot_annotation,
+    rgb_to_oklab,
+)
 from tests.test_descriptor_ranking import make_indicator, make_region_annotation
 
 BACKGROUND = np.array(mcolors.to_rgb("#aaaaaa"))
@@ -138,6 +144,75 @@ class TestGradedMembershipColors(unittest.TestCase):
         colors = scatter_colors([self.ra], only_color_inside_members=False)
 
         np.testing.assert_allclose(colors[0], colors[4])
+
+
+class TestOklab(unittest.TestCase):
+    def test_roundtrip_preserves_colors(self):
+        colors = np.array([mcolors.to_rgb(c) for c in get_cmap_colors("tab10")])
+
+        np.testing.assert_allclose(
+            colors, oklab_to_rgb(rgb_to_oklab(colors)), atol=1e-6
+        )
+
+    def test_lightness_ordering(self):
+        # Oklab's first coordinate is perceived lightness
+        lightness = rgb_to_oklab(np.array([[0, 0, 0], [0.5, 0.5, 0.5], [1, 1, 1]]))[:, 0]
+
+        self.assertEqual(list(lightness), sorted(lightness))
+
+    def test_midpoint_is_perceptually_centered(self):
+        """Perceived color, not channel value, is what a reader compares. The
+        sRGB midpoint sits past halfway towards the color, so a half-fulfilled
+        descriptor looks more complete than it is; the Oklab midpoint does not.
+        """
+        color = np.array([mcolors.to_rgb("tab:blue")])
+        half = np.array([0.5])
+
+        srgb_mid = MEMBERSHIP_SHADING_METHODS["linear"](color, half, BACKGROUND)
+        oklab_mid = MEMBERSHIP_SHADING_METHODS["perceptual"](color, half, BACKGROUND)
+
+        def perceived_progress(shaded):
+            """How far the shaded color has travelled from gray to the color."""
+            lab, lab_color = rgb_to_oklab(shaded), rgb_to_oklab(color)
+            lab_background = rgb_to_oklab(BACKGROUND)
+            span = np.linalg.norm(lab_color - lab_background)
+            return np.linalg.norm(lab - lab_background) / span
+
+        self.assertAlmostEqual(0.5, float(perceived_progress(oklab_mid)), places=6)
+        self.assertGreater(perceived_progress(srgb_mid), 0.5)
+
+
+class TestShadingMethods(unittest.TestCase):
+    """Every method has to agree on the two endpoints, whatever it does between."""
+
+    def setUp(self):
+        self.color = np.tile(mcolors.to_rgb("tab:blue"), (3, 1))
+        self.weights = np.array([0.0, 0.5, 1.0])
+
+    def test_endpoints_are_fixed(self):
+        for name, method in MEMBERSHIP_SHADING_METHODS.items():
+            with self.subTest(method=name):
+                shaded = method(self.color, self.weights, BACKGROUND)
+
+                np.testing.assert_allclose(BACKGROUND, shaded[0], atol=1e-6)
+                np.testing.assert_allclose(self.color[2], shaded[2], atol=1e-6)
+
+    def test_shading_is_monotone(self):
+        weights = np.linspace(0, 1, 21)
+        colors = np.tile(mcolors.to_rgb("tab:blue"), (len(weights), 1))
+
+        for name, method in MEMBERSHIP_SHADING_METHODS.items():
+            with self.subTest(method=name):
+                shaded = method(colors, weights, BACKGROUND)
+
+                distances = np.linalg.norm(shaded - BACKGROUND, axis=1)
+                self.assertTrue(np.all(np.diff(distances) >= -1e-9))
+
+    def test_unknown_method_is_rejected(self):
+        ra = make_region_annotation([make_indicator("a", [1, 0])], n_in_region=2)
+
+        with self.assertRaises(ValueError):
+            scatter_colors([ra], membership_shading="nonexistent")
 
 
 class TestOverlappingAnnotations(unittest.TestCase):
