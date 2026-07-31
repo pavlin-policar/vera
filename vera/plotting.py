@@ -705,6 +705,7 @@ def plot_annotation(
     indicate_purity: bool = False,
     indicate_membership: bool = False,
     only_color_inside_members: bool = True,
+    graded_membership: bool = True,
     draw_labels: bool = True,
     optimize_labels: bool = True,
     max_descriptors: int = 5,
@@ -757,16 +758,34 @@ def plot_annotation(
     }
 
     # Setup sample colors
-    point_colors = np.array([mcolors.to_rgb("#aaaaaa")] * embedding.shape[0])
+    background_color = mcolors.to_rgb("#aaaaaa")
+    point_colors = np.array([background_color] * embedding.shape[0])
 
     if indicate_membership:
+        # How far each sample is colored towards its region annotation's color
+        color_weights = np.zeros(embedding.shape[0])
+
         # Set sample colors inside regions
         for region_annotation in region_annotations:
             if only_color_inside_members:
-                group_indices = list(region_annotation.contained_members)
+                ra_weights = region_annotation.contained_member_fractions
             else:
-                group_indices = list(region_annotation.all_members)
-            point_colors[group_indices] = ra_colors[region_annotation]
+                ra_weights = region_annotation.all_member_fractions
+
+            if not graded_membership:
+                ra_weights = (ra_weights == 1).astype(float)
+
+            # Samples covered by several region annotations take the color of
+            # the one whose descriptor they fulfill most completely, which keeps
+            # the result independent of the order the annotations are drawn in
+            strongest = ra_weights >= color_weights
+            color_weights[strongest] = ra_weights[strongest]
+            point_colors[strongest] = ra_colors[region_annotation]
+
+        # Interpolate between the background color and the annotation color
+        point_colors = (
+            background_color + color_weights[:, None] * (point_colors - background_color)
+        )
 
         # Desaturate colors slightly
         point_colors = mcolors.rgb_to_hsv(point_colors)
@@ -948,6 +967,7 @@ def plot_annotations(
     indicate_purity: bool = False,
     indicate_membership: bool = True,
     only_color_inside_members: bool = True,
+    graded_membership: bool = True,
     max_descriptors: int = 5,
     truncation_template: str = "(+{n} more)",
     variable_colors: dict = None,
@@ -977,6 +997,7 @@ def plot_annotations(
             indicate_purity=indicate_purity,
             indicate_membership=indicate_membership,
             only_color_inside_members=only_color_inside_members,
+            graded_membership=graded_membership,
             max_descriptors=max_descriptors,
             truncation_template=truncation_template,
             ra_colors=variable_colors,
