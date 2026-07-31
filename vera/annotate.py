@@ -10,6 +10,39 @@ from vera.region_annotation import RegionAnnotation
 from vera.variables import Variable
 
 
+def _is_uninformative(
+    ra_group: list[RegionAnnotation], max_sample_coverage: float
+) -> bool:
+    """Determine whether a variable's region annotations describe nothing.
+
+    A variable that splits the embedding into several regions is informative.
+    A variable left with a single region can still be informative, provided it
+    did not arrive at that single region by having all its indicators merged
+    together — a discretized or one-hot encoded variable whose regions all
+    merged is described by a rule spanning every one of its values, which holds
+    for every sample and therefore explains nothing.
+
+    Otherwise the region itself has to say something, which it fails to do when
+    it singles out almost none of the data. Both the rule and the region are
+    tested for this: the two come apart, since a region tight around a
+    near-universal rule still describes the whole data set, while a rule
+    matched by few samples scattered evenly across the embedding still yields a
+    region spanning all of it.
+    """
+    if len(ra_group) > 1:
+        return False
+
+    ra = ra_group[0]
+    if len(ra.contained_region_annotations) > 1:
+        return True
+
+    max_samples = max_sample_coverage * ra.region.embedding.X.shape[0]
+    return (
+        len(ra.all_members) >= max_samples
+        or len(ra.contained_samples) >= max_samples
+    )
+
+
 def generate_region_annotations(
     features: pd.DataFrame,
     embedding: np.ndarray,
@@ -22,6 +55,7 @@ def generate_region_annotations(
     contour_level: float = 0.25,
     merge_min_sample_overlap: float = 0.8,
     filter_uninformative: bool = True,
+    uninformative_max_sample_coverage: float = 0.95,
     random_state: Any = None,
 ) -> list[list[RegionAnnotation]]:
     """
@@ -29,11 +63,10 @@ def generate_region_annotations(
     embedding.
 
     This function samples the data if it exceeds a given sample size, expands
-    each feature into indicator variables (via discretization or one-hot 
+    each feature into indicator variables (via discretization or one-hot
     encoding), and generates  region annotations using either KDE contouring or
     rangeset triangulation methods. Optionally, overfragmented regions are
-    iteratively merged, and uninformative variables (those described by a single
-    (those described by a single region) can be filtered out.
+    iteratively merged, and uninformative variables can be filtered out.
 
     Parameters
     ----------
@@ -41,8 +74,7 @@ def generate_region_annotations(
         Explanatory features. A column named by an
         :class:`~vera.variables.IndicatorVariable` is used as-is instead of
         being discretized or one-hot encoded; this is how a binary feature is
-        described by its positive case alone. Such a variable forms a group of
-        one, so it survives only with ``filter_uninformative=False``.
+        described by its positive case alone.
     embedding : np.ndarray
         Low-dimensional embedding of the data to explain.
     sample_size : int, default=5000
@@ -64,8 +96,17 @@ def generate_region_annotations(
         Minimum overlap (fraction of shared samples) required for merging
         overfragmented region annotations.
     filter_uninformative : bool, default=True
-        If True, variables described by only a single region annotation are
-        filtered out.
+        If True, variables that describe nothing are filtered out. These are
+        variables whose indicators all merged into a single region annotation,
+        and variables left with a single region annotation that singles out
+        almost none of the data.
+    uninformative_max_sample_coverage : float, default=0.95
+        Fraction of the data that a single region annotation's rule may match,
+        or that its region may contain, before its variable is considered
+        uninformative; only used if `filter_uninformative=True`. This is the
+        sole criterion for variables passed in as
+        :class:`~vera.variables.IndicatorVariable` columns, which are inherently
+        described by one region annotation each.
     random_state : Any, default=None
         Random state for reproducibility of sampling and of the k-means
         discretization of continuous variables.
@@ -120,10 +161,12 @@ def generate_region_annotations(
         for ra_group in tqdm(region_annotations)
     ]
 
-    # Filter annotation groups if the variable is described by a single region
+    # Filter out annotation groups whose variable describes nothing
     if filter_uninformative:
         region_annotations = [
-            ra_group for ra_group in region_annotations if len(ra_group) > 1
+            ra_group
+            for ra_group in region_annotations
+            if not _is_uninformative(ra_group, uninformative_max_sample_coverage)
         ]
 
     return region_annotations
