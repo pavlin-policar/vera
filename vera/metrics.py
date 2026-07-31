@@ -35,7 +35,7 @@ def _shrunk_rate_and_base_rate(
     Regions with few samples are thereby pulled toward the background rate, so
     a feature cannot rank highly on a handful of coincidental samples.
     """
-    S = sorted(ra.region.contained_samples)
+    S = list(ra.region.contained_samples)
     q = float(v.values.mean())
     k = float(v.values[S].sum())
     n = len(S)
