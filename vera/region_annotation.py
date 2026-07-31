@@ -13,19 +13,23 @@ class RegionAnnotation:
     A group descriptor's variables are stored ranked: most characteristic of
     this region first. The ranking is a property of the descriptor-region
     pairing, so the same group held by different region annotations (e.g. the
-    parts of a split) may be ordered differently.
+    parts of a split) may be ordered differently. Pass ``rank_descriptor=False``
+    to keep the group's own alphabetical order instead — contrastive
+    explanations do this so that a variable group reads identically in every
+    region it annotates.
     """
     def __init__(
         self,
         region: Region,
         descriptor: RegionDescriptor,
-        source_region_annotations: list["RegionAnnotation"] = None
+        source_region_annotations: list["RegionAnnotation"] = None,
+        rank_descriptor: bool = True,
     ):
         self.descriptor = descriptor
         self.region = region
         self.source_region_annotations = source_region_annotations
 
-        if isinstance(descriptor, IndicatorVariableGroup):
+        if rank_descriptor and isinstance(descriptor, IndicatorVariableGroup):
             self.descriptor = self._ranked_descriptor(descriptor)
 
     def _ranked_descriptor(
@@ -62,7 +66,11 @@ class RegionAnnotation:
         return True
 
     @classmethod
-    def merge(cls, region_annotations: list["RegionAnnotation"]) -> "RegionAnnotation":
+    def merge(
+        cls,
+        region_annotations: list["RegionAnnotation"],
+        rank_descriptor: bool = True,
+    ) -> "RegionAnnotation":
         if len(region_annotations) == 1:
             return region_annotations[0]
 
@@ -75,6 +83,7 @@ class RegionAnnotation:
             region=merged_region,
             descriptor=merged_descriptor,
             source_region_annotations=region_annotations,
+            rank_descriptor=rank_descriptor,
         )
 
     def split(self) -> list["RegionAnnotation"]:

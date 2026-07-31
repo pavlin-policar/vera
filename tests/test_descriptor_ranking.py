@@ -196,6 +196,25 @@ class TestRegionAnnotationRanking(unittest.TestCase):
             frozenset(group.variables), frozenset(ra.descriptor.variables)
         )
 
+    def test_contained_variables_is_independent_of_member_order(self):
+        # v_a scores highest in a region over its own support, v_b in another;
+        # identity must not depend on which region ranked the group
+        ra_1 = make_region_annotation(self.variables, self.n_in_region)
+        values = np.zeros(self.n_samples)
+        values[self.n_in_region:self.n_in_region + 8] = 1
+        v_b2 = make_indicator("b", values)
+        ra_2 = RegionAnnotation(
+            ra_1.region, IndicatorVariableGroup([self.v_a, v_b2, self.v_c])
+        )
+        self.assertEqual(
+            ra_1.descriptor.contained_variables,
+            tuple(sorted(ra_1.descriptor.contained_variables)),
+        )
+        self.assertEqual(
+            [v.name for v in ra_1.descriptor.contained_variables],
+            [v.name for v in ra_2.descriptor.contained_variables],
+        )
+
     def test_split_parts_rank_against_their_own_regions(self):
         # Two boxes; u dominates the first part, w the second
         n_samples = 40
@@ -221,6 +240,46 @@ class TestRegionAnnotationRanking(unittest.TestCase):
         part_1, part_2 = ra.split()
         self.assertEqual([u, w], part_1.descriptor.variables)
         self.assertEqual([w, u], part_2.descriptor.variables)
+
+
+class TestUnrankedDescriptors(unittest.TestCase):
+    """Contrastive explanations keep group descriptors in alphabetical order
+    so that a variable group reads identically in every region it annotates."""
+
+    def _two_merged_ras(self):
+        """Two rank_descriptor=False merges of the same two base variables,
+        over regions that would rank them oppositely."""
+        n = 40
+        u_values, w_values = np.zeros(n), np.zeros(n)
+        u_values[0:10] = 1
+        w_values[0:10] = 1
+        u_values[20:23] = 1
+        w_values[20:30] = 1
+        u, w = make_indicator("u", u_values), make_indicator("w", w_values)
+
+        ras = []
+        for lo, hi in [(0, 10), (20, 30)]:
+            embedding = Embedding(
+                np.column_stack([np.arange(n, dtype=float), np.zeros(n)])
+            )
+            region = Region(embedding, geom.box(lo - 0.5, -1.0, hi - 0.5, 1.0))
+            ras.append(RegionAnnotation.merge(
+                [RegionAnnotation(region, u), RegionAnnotation(region, w)],
+                rank_descriptor=False,
+            ))
+        return ras
+
+    def test_merge_without_ranking_keeps_alphabetical_order(self):
+        for ra in self._two_merged_ras():
+            self.assertEqual(
+                sorted(ra.descriptor.variables), list(ra.descriptor.variables)
+            )
+
+    def test_same_variable_set_lands_in_one_descriptor_group(self):
+        from vera.utils import group_by_descriptor
+
+        ra_1, ra_2 = self._two_merged_ras()
+        self.assertEqual(1, len(group_by_descriptor([ra_1, ra_2])))
 
 
 class TestFormatLabel(unittest.TestCase):
