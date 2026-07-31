@@ -577,6 +577,8 @@ def plot_regions(
     highlight_members=True,
     member_color="tab:red",
     indicate_purity: bool = False,
+    max_descriptors: int = 5,
+    truncation_template: str = "(+{n} more)",
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
     show: bool = False,
@@ -605,6 +607,8 @@ def plot_regions(
             highlight_members=highlight_members,
             member_color=member_color,
             indicate_purity=indicate_purity,
+            max_descriptors=max_descriptors,
+            truncation_template=truncation_template,
             scatter_kwargs=scatter_kwargs,
             label_kwargs=label_kwargs,
         )
