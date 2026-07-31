@@ -1,5 +1,7 @@
 import abc
+import copy
 from collections import defaultdict
+from typing import Callable
 
 import numpy as np
 
@@ -8,6 +10,28 @@ from vera.rules import Rule
 
 class MergeError(Exception):
     pass
+
+
+def _validate_format_label_args(max_descriptors, truncation_template):
+    """Validation is shared by every descriptor type, so a call fails the same
+    way whether or not the arguments end up being used."""
+    if max_descriptors is not None and max_descriptors < 1:
+        raise ValueError(
+            f"`max_descriptors` must be a positive integer or None, got "
+            f"{max_descriptors}."
+        )
+    try:
+        marker = truncation_template.format(n=1)
+    except (IndexError, KeyError) as e:
+        raise ValueError(
+            f"`truncation_template` may only reference the {{n}} placeholder, "
+            f"got {truncation_template!r}."
+        ) from e
+    if not marker:
+        raise ValueError(
+            "`truncation_template` must produce a non-empty marker; a "
+            "truncated label has to indicate its hidden variables."
+        )
 
 
 class RegionDescriptor(metaclass=abc.ABCMeta):
@@ -57,6 +81,32 @@ class RegionDescriptor(metaclass=abc.ABCMeta):
             return True
         except MergeError:
             return False
+
+    def format_label(
+        self,
+        max_descriptors: int = None,
+        truncation_template: str = "(+{n} more)",
+    ) -> str:
+        """The descriptor's display text.
+
+        Equal to ``str(self)``; descriptors composed of multiple variables
+        truncate to the first `max_descriptors` of them.
+        """
+        _validate_format_label_args(max_descriptors, truncation_template)
+        return str(self)
+
+    def ranked_by(
+        self, compute_scores: Callable[[], dict]
+    ) -> "RegionDescriptor":
+        """This descriptor with its constituent variables ordered by
+        descending score.
+
+        `compute_scores` is a zero-argument callable returning a score per
+        variable. A descriptor without constituent parts has nothing to
+        reorder and returns itself without invoking it, so callers may defer
+        expensive score computation.
+        """
+        return self
 
 
 class Variable(metaclass=abc.ABCMeta):
@@ -254,7 +304,10 @@ class IndicatorVariableGroup(RegionDescriptor):
 
     @property
     def contained_variables(self) -> tuple[Variable]:
-        return tuple(v.base_variable for v in self.variables)
+        # Canonical order: the tuple is used as an identity key (e.g. in
+        # `utils.group_by_descriptor`), so it must not depend on the display
+        # order of `self.variables`
+        return tuple(sorted(v.base_variable for v in self.variables))
 
     def __hash__(self) -> int:
         return hash((self.__class__.__name__, frozenset(self.variables)))
@@ -263,6 +316,61 @@ class IndicatorVariableGroup(RegionDescriptor):
         if not isinstance(other, self.__class__):
             return False
         return frozenset(self.variables) == frozenset(other.variables)
+
+    def ranked_by(
+        self, compute_scores: Callable[[], dict]
+    ) -> "IndicatorVariableGroup":
+        """A copy of the group with its variables ordered by descending score.
+
+        Ties are broken by the variables' natural order, which makes the
+        ranking deterministic, and a NaN score is treated as the lowest
+        possible score — as a sort key it would corrupt the whole ordering.
+        Descriptor objects can be shared between region annotations, so the
+        group is copied rather than reordered in place.
+        """
+        scores = compute_scores()
+
+        def sort_key(v):
+            return -np.inf if np.isnan(scores[v]) else scores[v]
+
+        ranked = sorted(sorted(self.variables), key=sort_key, reverse=True)
+
+        ranked_group = copy.copy(self)
+        ranked_group.variables = ranked
+        return ranked_group
+
+    def format_label(
+        self,
+        max_descriptors: int = None,
+        truncation_template: str = "(+{n} more)",
+    ) -> str:
+        """The group's display text, one variable per line, truncated to the
+        first `max_descriptors` variables.
+
+        Truncation is display-only: `values` and everything computed from the
+        full variable set are unaffected. A truncated label always ends with a
+        marker line showing the number of hidden variables.
+
+        Parameters
+        ----------
+        max_descriptors: int
+            The maximum number of variables to display. When None or at least
+            one less than the group size, the full label is returned unchanged
+            — a marker standing in for a single variable would not shorten the
+            label.
+        truncation_template: str
+            Template for the truncation marker; ``{n}`` is replaced with the
+            number of hidden variables.
+        """
+        _validate_format_label_args(max_descriptors, truncation_template)
+        if max_descriptors is None or max_descriptors >= len(self.variables) - 1:
+            return str(self)
+
+        lines = [str(v) for v in self.variables[:max_descriptors]]
+        lines.append(
+            truncation_template.format(n=len(self.variables) - max_descriptors)
+        )
+        return "\n".join(lines)
 
     def __str__(self) -> str:
         return "\n".join(str(d) for d in self.variables)

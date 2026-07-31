@@ -65,7 +65,12 @@ def merge_contrastive(
     connected_components = g.connected_components(graph)
     connected_components = list(map(g.nodes, connected_components))
 
-    merged_ras = list(map(RegionAnnotation.merge, connected_components))
+    # Contrastive panels show the same variable group over several regions, so
+    # the group keeps its alphabetical order and reads identically everywhere
+    merged_ras = [
+        RegionAnnotation.merge(c, rank_descriptor=False)
+        for c in connected_components
+    ]
 
     # We now have a list of merged RAs. We still need to add the unmerged RAs
     unmerged_ras = set(all_region_annotations) - all_ras_to_merge

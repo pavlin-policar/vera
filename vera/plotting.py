@@ -403,8 +403,16 @@ def plot_densities(
         return fig, ax
 
 
-def _format_descriptor(descriptor: RegionDescriptor, max_width=40):
-    s_lines = str(descriptor).split("\n")
+def _format_descriptor(
+    descriptor: RegionDescriptor,
+    max_descriptors: int = None,
+    truncation_template: str = "(+{n} more)",
+    max_width: int = 40,
+):
+    label_str = descriptor.format_label(
+        max_descriptors=max_descriptors, truncation_template=truncation_template
+    )
+    s_lines = label_str.split("\n")
     s_lines = ["\n".join(wrap(l, width=max_width)) for l in s_lines]
     return "\n".join(s_lines)
 
@@ -479,6 +487,8 @@ def plot_region(
     highlight_members=True,
     member_color="tab:red",
     indicate_purity: bool = False,
+    max_descriptors: int = 5,
+    truncation_template: str = "(+{n} more)",
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
     show: bool = False,
@@ -498,7 +508,11 @@ def plot_region(
     )
 
     if draw_label:
-        label_str = _format_descriptor(region_annotation.descriptor)
+        label_str = _format_descriptor(
+            region_annotation.descriptor,
+            max_descriptors=max_descriptors,
+            truncation_template=truncation_template,
+        )
 
         # Draw the lable on the largest polygon in the region
         largest_polygon = max(region_annotation.region.polygon.geoms, key=lambda x: x.area)
@@ -563,6 +577,8 @@ def plot_regions(
     highlight_members=True,
     member_color="tab:red",
     indicate_purity: bool = False,
+    max_descriptors: int = 5,
+    truncation_template: str = "(+{n} more)",
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
     show: bool = False,
@@ -591,6 +607,8 @@ def plot_regions(
             highlight_members=highlight_members,
             member_color=member_color,
             indicate_purity=indicate_purity,
+            max_descriptors=max_descriptors,
+            truncation_template=truncation_template,
             scatter_kwargs=scatter_kwargs,
             label_kwargs=label_kwargs,
         )
@@ -689,6 +707,8 @@ def plot_annotation(
     only_color_inside_members: bool = True,
     draw_labels: bool = True,
     optimize_labels: bool = True,
+    max_descriptors: int = 5,
+    truncation_template: str = "(+{n} more)",
     ra_colors: dict = None,
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
@@ -763,7 +783,11 @@ def plot_annotation(
     if draw_labels:
         label_data = []
         for region_annotation in region_annotations:
-            label_str = _format_descriptor(region_annotation.descriptor)
+            label_str = _format_descriptor(
+                region_annotation.descriptor,
+                max_descriptors=max_descriptors,
+                truncation_template=truncation_template,
+            )
 
             # Draw the lable on the largest polygon in the region
             largest_polygon = max(region_annotation.region.polygon.geoms, key=lambda x: x.area)
@@ -924,6 +948,8 @@ def plot_annotations(
     indicate_purity: bool = False,
     indicate_membership: bool = True,
     only_color_inside_members: bool = True,
+    max_descriptors: int = 5,
+    truncation_template: str = "(+{n} more)",
     variable_colors: dict = None,
     scatter_kwargs: dict = {},
     label_kwargs: dict = {},
@@ -951,6 +977,8 @@ def plot_annotations(
             indicate_purity=indicate_purity,
             indicate_membership=indicate_membership,
             only_color_inside_members=only_color_inside_members,
+            max_descriptors=max_descriptors,
+            truncation_template=truncation_template,
             ra_colors=variable_colors,
             scatter_kwargs=scatter_kwargs,
             label_kwargs=label_kwargs,

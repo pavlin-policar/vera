@@ -1,19 +1,36 @@
 import numpy as np
 
+from vera import metrics
 from vera.region import Region
 from vera.variables import RegionDescriptor
 
 
 class RegionAnnotation:
+    """Pairs a region of the embedding with the descriptor that explains it.
+
+    A group descriptor's variables are stored ranked: most characteristic of
+    this region first. The ranking is a property of the descriptor-region
+    pairing, so the same group held by different region annotations (e.g. the
+    parts of a split) may be ordered differently. Pass ``rank_descriptor=False``
+    to keep the group's own alphabetical order instead — contrastive
+    explanations do this so that a variable group reads identically in every
+    region it annotates.
+    """
     def __init__(
         self,
         region: Region,
         descriptor: RegionDescriptor,
-        source_region_annotations: list["RegionAnnotation"] = None
+        source_region_annotations: list["RegionAnnotation"] = None,
+        rank_descriptor: bool = True,
     ):
         self.descriptor = descriptor
         self.region = region
         self.source_region_annotations = source_region_annotations
+
+        if rank_descriptor:
+            self.descriptor = descriptor.ranked_by(
+                lambda: metrics.descriptor_scores(self)
+            )
 
     def can_merge_with(self, other: "RegionAnnotation") -> bool:
         """Region annotations can be merged if their regions and descriptors are
@@ -33,7 +50,11 @@ class RegionAnnotation:
         return True
 
     @classmethod
-    def merge(cls, region_annotations: list["RegionAnnotation"]) -> "RegionAnnotation":
+    def merge(
+        cls,
+        region_annotations: list["RegionAnnotation"],
+        rank_descriptor: bool = True,
+    ) -> "RegionAnnotation":
         if len(region_annotations) == 1:
             return region_annotations[0]
 
@@ -46,6 +67,7 @@ class RegionAnnotation:
             region=merged_region,
             descriptor=merged_descriptor,
             source_region_annotations=region_annotations,
+            rank_descriptor=rank_descriptor,
         )
 
     def split(self) -> list["RegionAnnotation"]:
