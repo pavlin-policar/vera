@@ -56,6 +56,7 @@ def generate_region_annotations(
     merge_min_sample_overlap: float = 0.8,
     filter_uninformative: bool = True,
     uninformative_max_sample_coverage: float = 0.95,
+    indicator_columns: pp.IndicatorColumns = None,
     random_state: Any = None,
 ) -> list[list[RegionAnnotation]]:
     """
@@ -71,10 +72,10 @@ def generate_region_annotations(
     Parameters
     ----------
     features : pd.DataFrame
-        Explanatory features. A column named by an
-        :class:`~vera.variables.IndicatorVariable` is used as-is instead of
-        being discretized or one-hot encoded; this is how a binary feature is
-        described by its positive case alone.
+        Explanatory features. Continuous columns are discretized and
+        categorical columns are one-hot encoded, unless the column is selected
+        by `indicator_columns` or named by a
+        :class:`~vera.variables.Variable`, which is used as-is.
     embedding : np.ndarray
         Low-dimensional embedding of the data to explain.
     sample_size : int, default=5000
@@ -104,9 +105,17 @@ def generate_region_annotations(
         Fraction of the data that a single region annotation's rule may match,
         or that its region may contain, before its variable is considered
         uninformative; only used if `filter_uninformative=True`. This is the
-        sole criterion for variables passed in as
-        :class:`~vera.variables.IndicatorVariable` columns, which are inherently
-        described by one region annotation each.
+        sole criterion for indicator columns, which are inherently described by
+        one region annotation each.
+    indicator_columns : str or iterable or dict, default=None
+        Columns holding binary indicators. Such a column is described by its
+        positive case alone -- annotated with its own name, and silent about
+        the samples it does not flag -- which is what a presence feature calls
+        for: a region labelled "gene is absent" says little. Values must be
+        boolean or 0/1; missing values mark absence. Pass ``"all"`` for a table
+        of nothing but indicators, a collection of column names to select them
+        out of a mixed table, or a mapping from column name to the text
+        annotating it.
     random_state : Any, default=None
         Random state for reproducibility of sampling and of the k-means
         discretization of continuous variables.
@@ -140,6 +149,7 @@ def generate_region_annotations(
         features,
         n_discretization_bins=n_discretization_bins,
         filter_constant_features=filter_constant,
+        indicator_columns=indicator_columns,
         random_state=random_state,
     )
 
