@@ -48,6 +48,16 @@ class RegionDescriptor(metaclass=abc.ABCMeta):
     def contained_variables(self) -> tuple["Variable"]:
         pass
 
+    @property
+    def partial_values(self) -> np.ndarray:
+        """For each sample, the fraction of the descriptor it satisfies.
+
+        A sample satisfying the descriptor fully scores 1 and one satisfying
+        none of it scores 0. `values` is the thresholded form: 1 exactly where
+        this is 1.
+        """
+        return np.asarray(self.values, dtype=float)
+
     @staticmethod
     def merge(descriptors: list["RegionDescriptor"]) -> "RegionDescriptor":
         if any(not isinstance(d, RegionDescriptor) for d in descriptors):
@@ -326,6 +336,11 @@ class IndicatorVariableGroup(RegionDescriptor):
         # `utils.group_by_descriptor`), so it must not depend on the display
         # order of `self.variables`
         return tuple(sorted(v.base_variable for v in self.variables))
+
+    @property
+    def partial_values(self) -> np.ndarray:
+        """For each sample, the fraction of the group's variables it satisfies."""
+        return np.mean(np.vstack([v.values for v in self.variables]), axis=0)
 
     def __hash__(self) -> int:
         return hash((self.__class__.__name__, frozenset(self.variables)))

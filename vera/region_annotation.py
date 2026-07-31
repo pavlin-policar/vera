@@ -112,6 +112,21 @@ class RegionAnnotation:
         """Return the indices of all data points that fulfill the rule inside the region."""
         return self.contained_samples & self.all_members
 
+    @property
+    def all_member_fractions(self) -> np.ndarray:
+        """Return, for each data point, the fraction of the rule it fulfills."""
+        return self.descriptor.partial_values
+
+    @property
+    def contained_member_fractions(self) -> np.ndarray:
+        """Return, for each data point inside the region, the fraction of the
+        rule it fulfills. Points outside the region score zero."""
+        all_fractions = self.all_member_fractions
+        fractions = np.zeros_like(all_fractions)
+        contained = list(self.contained_samples)
+        fractions[contained] = all_fractions[contained]
+        return fractions
+
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.descriptor})"
 
