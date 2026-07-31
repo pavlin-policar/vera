@@ -106,6 +106,11 @@ def descriptor_scores(
         pipeline's default `cluster_min_samples=5` makes 10 a 2x margin.
         Ignored when `method` is a callable.
     """
+    if prior_strength < 0:
+        raise ValueError(
+            f"`prior_strength` must be non-negative, got {prior_strength}."
+        )
+
     descriptor = ra.descriptor
     if isinstance(descriptor, IndicatorVariableGroup):
         variables = list(descriptor.variables)

@@ -137,6 +137,10 @@ class TestDescriptorScores(unittest.TestCase):
         with self.assertRaises(ValueError):
             metrics.descriptor_scores(self.ra, method="not_a_method")
 
+    def test_negative_prior_strength_raises(self):
+        with self.assertRaises(ValueError):
+            metrics.descriptor_scores(self.ra, prior_strength=-1)
+
     def test_single_indicator_descriptor(self):
         v = make_indicator("a", make_values(40, 10, 8, 4))
         ra = make_region_annotation([v], 10)
@@ -260,6 +264,12 @@ class TestFormatLabel(unittest.TestCase):
     def test_single_indicator_ignores_the_cap(self):
         v = self.variables[0]
         self.assertEqual(str(v), v.format_label(max_descriptors=1))
+
+    def test_non_positive_cap_raises(self):
+        with self.assertRaises(ValueError):
+            self.group.format_label(max_descriptors=0)
+        with self.assertRaises(ValueError):
+            self.group.format_label(max_descriptors=-1)
 
 
 class TestPlottingLabelTruncation(unittest.TestCase):

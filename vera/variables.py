@@ -297,6 +297,11 @@ class IndicatorVariableGroup(RegionDescriptor):
             Template for the truncation marker; ``{n}`` is replaced with the
             number of hidden variables.
         """
+        if max_descriptors is not None and max_descriptors < 1:
+            raise ValueError(
+                f"`max_descriptors` must be a positive integer or None, got "
+                f"{max_descriptors}."
+            )
         if max_descriptors is None or max_descriptors >= len(self.variables):
             return str(self)
 
