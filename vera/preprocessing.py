@@ -105,14 +105,18 @@ def _resolve_indicator_columns(
 
 def _indicator_values(name: Any, values: pd.Series) -> np.ndarray:
     """Validate a column of a data frame as indicator values."""
+    # Real numbers only: pandas counts complex as numeric, and casting it to
+    # float would drop the imaginary part behind a warning
     dtype = values.dtype
     is_binary_dtype = not isinstance(dtype, pd.CategoricalDtype) and (
-        pd.api.types.is_bool_dtype(dtype) or pd.api.types.is_numeric_dtype(dtype)
+        pd.api.types.is_bool_dtype(dtype)
+        or pd.api.types.is_integer_dtype(dtype)
+        or pd.api.types.is_float_dtype(dtype)
     )
     if not is_binary_dtype:
         raise ValueError(
             f"Indicator column `{name}` has dtype `{dtype}`. Indicator columns "
-            f"must be boolean, or numeric with values in {{0, 1}}."
+            f"must be boolean, or real-valued with values in {{0, 1}}."
         )
 
     indicator_values = values.to_numpy(dtype=float, na_value=np.nan)
@@ -193,8 +197,10 @@ def ingest_indicators(
 
 def ingest(
     data: pd.Series | pd.DataFrame, indicator_columns: IndicatorColumns = None
-) -> list[Variable]:
+) -> Union[Variable, list[Variable]]:
     """Convert a pandas DataFrame to a list of VERA variables.
+
+    A series is converted to a single variable.
 
     Parameters
     ----------

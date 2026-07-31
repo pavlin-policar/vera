@@ -170,6 +170,14 @@ class TestIngestIndicators(unittest.TestCase):
         with self.assertRaises(ValueError):
             pp.ingest_indicators(self.df[["disc1"]])
 
+    def test_complex_columns_are_rejected(self):
+        """Pandas counts complex as numeric and casts it to float by dropping
+        the imaginary part, which would let `1 + 5j` pass as a flag."""
+        series = pd.Series([1 + 5j, 0 + 0j], name="CD3")
+
+        with self.assertRaises(ValueError):
+            pp.ingest_indicators(series)
+
     def test_ingest_selects_indicator_columns(self):
         result = pp.ingest(self.df, indicator_columns=["CD3", "CD4"])
 
