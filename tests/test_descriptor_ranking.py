@@ -320,6 +320,66 @@ class TestFormatLabel(unittest.TestCase):
         v = self.variables[0]
         self.assertEqual(str(v), v.format_label(max_descriptors=1))
 
+    def test_default_sep_untruncated_label_is_one_variable_per_line(self):
+        self.assertEqual(
+            "a = high\nb = high\nc = high\nd = high\ne = high",
+            self.group.format_label(),
+        )
+
+    def test_default_sep_truncated_label_is_one_variable_per_line(self):
+        self.assertEqual(
+            "a = high\nb = high\n(+3 more)",
+            self.group.format_label(max_descriptors=2),
+        )
+
+    def test_custom_sep_joins_the_untruncated_label(self):
+        # No truncation takes the early-return path, which must honor `sep`
+        # rather than fall back to the newline-joined str(self)
+        self.assertEqual(
+            "a = high, b = high, c = high, d = high, e = high",
+            self.group.format_label(max_descriptors=None, sep=", "),
+        )
+
+    def test_custom_sep_leaves_str_unchanged(self):
+        self.group.format_label(sep=", ")
+        self.assertEqual(
+            "a = high\nb = high\nc = high\nd = high\ne = high", str(self.group)
+        )
+
+    def test_custom_sep_joins_variables_and_marker_alike(self):
+        # truncation_sep=None means "same as sep", whether defaulted or passed
+        self.assertEqual(
+            "a = high, b = high, (+3 more)",
+            self.group.format_label(max_descriptors=2, sep=", "),
+        )
+        self.assertEqual(
+            "a = high, b = high, (+3 more)",
+            self.group.format_label(
+                max_descriptors=2, sep=", ", truncation_sep=None
+            ),
+        )
+
+    def test_truncation_sep_applies_to_the_marker_only(self):
+        self.assertEqual(
+            "a = high, b = high (+3 more)",
+            self.group.format_label(
+                max_descriptors=2, sep=", ", truncation_sep=" "
+            ),
+        )
+
+    def test_non_string_sep_raises(self):
+        for bad in [3, None, ["\n"]]:
+            with self.assertRaises(ValueError, msg=f"sep={bad!r}"):
+                self.group.format_label(sep=bad)
+            with self.assertRaises(ValueError, msg=f"sep={bad!r}"):
+                self.variables[0].format_label(sep=bad)
+
+    def test_non_string_truncation_sep_raises(self):
+        with self.assertRaises(ValueError):
+            self.group.format_label(truncation_sep=3)
+        with self.assertRaises(ValueError):
+            self.variables[0].format_label(truncation_sep=3)
+
     def test_non_positive_cap_raises(self):
         with self.assertRaises(ValueError):
             self.group.format_label(max_descriptors=0)
@@ -364,6 +424,58 @@ class TestPlottingLabelTruncation(unittest.TestCase):
         self.assertEqual(1, len(texts))
         self.assertIn("(+2 more)", texts[0])
         self.assertEqual(6, len(texts[0].split("\n")))
+
+    def test_max_width_wraps_a_comma_joined_label(self):
+        label = _format_descriptor(
+            self.ra.descriptor,
+            max_descriptors=5,
+            sep=", ",
+            truncation_sep=" ",
+            max_width=30,
+        )
+        lines = label.split("\n")
+        self.assertGreater(len(lines), 1)
+        for line in lines:
+            self.assertLessEqual(len(line), 30)
+        # Wrapping only re-breaks at spaces, so rejoining recovers the label
+        self.assertEqual(
+            "g = high, f = high, e = high, d = high, c = high (+2 more)",
+            " ".join(lines),
+        )
+
+    def test_token_longer_than_max_width_is_broken_to_fit(self):
+        long_name = "x" * 60
+        ra = make_region_annotation(
+            [make_indicator(long_name, make_values(40, 10, 8, 0))], 10
+        )
+        label = _format_descriptor(ra.descriptor, max_width=20)
+        lines = label.split("\n")
+        self.assertGreater(len(lines), 1)
+        for line in lines:
+            self.assertLessEqual(len(line), 20)
+        self.assertEqual(
+            "".join(str(ra.descriptor).split()), "".join(label.split())
+        )
+
+    def test_plot_annotation_passes_sep_and_max_width_to_labels(self):
+        handles, _, fig, ax = plot_annotation(
+            [self.ra],
+            optimize_labels=False,
+            return_ax=True,
+            sep=", ",
+            truncation_sep=" ",
+            max_width=30,
+        )
+        texts = [h.get_text() for h in handles]
+        self.assertEqual(1, len(texts))
+        lines = texts[0].split("\n")
+        self.assertGreater(len(lines), 1)
+        for line in lines:
+            self.assertLessEqual(len(line), 30)
+        self.assertEqual(
+            "g = high, f = high, e = high, d = high, c = high (+2 more)",
+            " ".join(lines),
+        )
 
 
 class TestMissingValues(unittest.TestCase):
