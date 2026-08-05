@@ -317,10 +317,17 @@ def plot_density(
     skip_first: bool = True,
     ax: matplotlib.axes.Axes = None,
     cmap="RdBu_r",
-    contour_kwargs: dict = {},
-    contourf_kwargs: dict = {},
-    scatter_kwargs: dict = {},
+    contour_kwargs: dict = None,
+    contourf_kwargs: dict = None,
+    scatter_kwargs: dict = None,
 ):
+    if contour_kwargs is None:
+        contour_kwargs = {}
+    if contourf_kwargs is None:
+        contourf_kwargs = {}
+    if scatter_kwargs is None:
+        scatter_kwargs = {}
+
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 8))
 
@@ -366,9 +373,9 @@ def plot_densities(
     per_row: int = 4,
     figwidth: int = 24,
     return_ax: bool = False,
-    contour_kwargs: dict = {},
-    contourf_kwargs: dict = {},
-    scatter_kwargs: dict = {},
+    contour_kwargs: dict = None,
+    contourf_kwargs: dict = None,
+    scatter_kwargs: dict = None,
 ):
     n_rows = len(variables) // per_row
     if len(variables) % per_row > 0:
@@ -497,10 +504,15 @@ def plot_region(
     sep: str = "\n",
     truncation_sep: str = None,
     max_width: int = 40,
-    scatter_kwargs: dict = {},
-    label_kwargs: dict = {},
+    scatter_kwargs: dict = None,
+    label_kwargs: dict = None,
     show: bool = False,
 ):
+    if scatter_kwargs is None:
+        scatter_kwargs = {}
+    if label_kwargs is None:
+        label_kwargs = {}
+
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 8))
 
@@ -594,8 +606,8 @@ def plot_regions(
     sep: str = "\n",
     truncation_sep: str = None,
     max_width: int = 40,
-    scatter_kwargs: dict = {},
-    label_kwargs: dict = {},
+    scatter_kwargs: dict = None,
+    label_kwargs: dict = None,
     show: bool = False,
 ):
     if len(region_annotations) == 0:
@@ -737,12 +749,17 @@ def plot_annotation(
     truncation_sep: str = None,
     max_width: int = 40,
     ra_colors: dict = None,
-    scatter_kwargs: dict = {},
-    label_kwargs: dict = {},
+    scatter_kwargs: dict = None,
+    label_kwargs: dict = None,
     figwidth: int = 4,
     return_ax: bool = False,
     show: bool = False,
 ):
+    if scatter_kwargs is None:
+        scatter_kwargs = {}
+    if label_kwargs is None:
+        label_kwargs = {}
+
     if ax is None:
         fig, ax = plt.subplots(figsize=(figwidth, figwidth), dpi=150)
     else:
@@ -984,8 +1001,8 @@ def plot_annotations(
     truncation_sep: str = None,
     max_width: int = 40,
     variable_colors: dict = None,
-    scatter_kwargs: dict = {},
-    label_kwargs: dict = {},
+    scatter_kwargs: dict = None,
+    label_kwargs: dict = None,
     show: bool = False,
     ax_spacing: float = 0.03,
 ):
@@ -1070,11 +1087,16 @@ def layout_variable_colors(
 def plot_discretization(
     region_annotations: list[RegionAnnotation],
     cmap: str = "viridis",
-    hist_scatter_kwargs: dict = {},
-    scatter_kwargs: dict = {},
+    hist_scatter_kwargs: dict = None,
+    scatter_kwargs: dict = None,
     return_fig: bool = False,
     fig: matplotlib.figure.Figure = None,
 ):
+    if hist_scatter_kwargs is None:
+        hist_scatter_kwargs = {}
+    if scatter_kwargs is None:
+        scatter_kwargs = {}
+
     import matplotlib.gridspec as gridspec
 
     def _get_bin_edges_continuous(explanatory_variables: list[RegionAnnotation]):
@@ -1114,7 +1136,9 @@ def plot_discretization(
     merged_feature_pt_bins = _get_sample_bin_indices(region_annotations)
     merged_feature_bin_edges = _get_bin_edges_func(region_annotations)
 
-    def plot_distribution_bins(x, bin_edges, x_bins, bins, ax, cmap=None, hist_scatter_kwargs={}):
+    def plot_distribution_bins(x, bin_edges, x_bins, bins, ax, cmap=None, hist_scatter_kwargs=None):
+        if hist_scatter_kwargs is None:
+            hist_scatter_kwargs = {}
         d, bins, *_ = ax.hist(
             x, bins=bins, alpha=0.5, edgecolor="k", align="mid", zorder=5
         )
