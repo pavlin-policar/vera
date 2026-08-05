@@ -100,7 +100,9 @@ region_annotations = vera.an.generate_region_annotations(
 )
 ```
 
-The values must be boolean or 0/1; missing values mark absence, and a column with no positive samples is dropped. The column name is what appears on the plot, so a `CD3` column is annotated `CD3`. To annotate a column with something else, pass a mapping instead of a list:
+Indicator columns have to be of boolean dtype, and complete. Nothing is converted on the way in: a 0/1 column is rejected rather than read as a flag -- cast it with `.astype(bool)` if that is what it means -- and so is a column with missing values, since an indicator can only say that a sample is flagged or that it is not. A column with no positive samples is dropped.
+
+The column name is what appears on the plot, so a `CD3` column is annotated `CD3`. To annotate a column with something else, pass a mapping instead of a list:
 
 ```python
 region_annotations = vera.an.generate_region_annotations(

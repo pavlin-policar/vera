@@ -105,36 +105,28 @@ def _resolve_indicator_columns(
 
 def _indicator_values(name: Any, values: pd.Series) -> np.ndarray:
     """Validate a column of a data frame as indicator values."""
-    # Real numbers only: pandas counts complex as numeric, and casting it to
-    # float would drop the imaginary part behind a warning
+    # A categorical of booleans still answers to `is_bool_dtype`, and is a
+    # discrete variable
     dtype = values.dtype
-    is_binary_dtype = not isinstance(dtype, pd.CategoricalDtype) and (
-        pd.api.types.is_bool_dtype(dtype)
-        or pd.api.types.is_integer_dtype(dtype)
-        or pd.api.types.is_float_dtype(dtype)
-    )
-    if not is_binary_dtype:
+    if isinstance(dtype, pd.CategoricalDtype) or not pd.api.types.is_bool_dtype(dtype):
         raise ValueError(
-            f"Indicator column `{name}` has dtype `{dtype}`. Indicator columns "
-            f"must be boolean, or real-valued with values in {{0, 1}}."
+            f"Indicator column `{name}` has dtype `{dtype}`. An indicator "
+            f"column has to be boolean: cast a 0/1 column with "
+            f"`.astype(bool)`, and leave continuous and categorical columns "
+            f"out of `indicator_columns` to have them discretized or one-hot "
+            f"encoded."
         )
 
-    indicator_values = values.to_numpy(dtype=float, na_value=np.nan)
-
-    observed = np.unique(indicator_values[~np.isnan(indicator_values)])
-    offending = observed[~np.isin(observed, [0.0, 1.0])]
-    if offending.size > 0:
-        shown = ", ".join(str(v) for v in offending[:5])
-        if offending.size > 5:
-            shown += ", ..."
+    if values.isna().any():
         raise ValueError(
-            f"Indicator column `{name}` contains values other than 0 and 1: "
-            f"{shown}. Threshold the column, or leave it out of "
-            f"`indicator_columns` to have it discretized."
+            f"Indicator column `{name}` has missing values. An indicator says "
+            f"that a sample is flagged or that it is not, and reading a sample "
+            f"with no measurement as unflagged would be a claim the data does "
+            f"not make. Decide what the missing samples are (`.fillna(False)`) "
+            f"or drop them."
         )
 
-    # A sample with no measurement is not flagged by the indicator
-    return np.nan_to_num(indicator_values, nan=0.0)
+    return values.to_numpy(dtype=float)
 
 
 def _indicator_variable(name: Any, values: pd.Series, label: Any) -> IndicatorVariable:
@@ -152,12 +144,17 @@ def _indicator_variable(name: Any, values: pd.Series, label: Any) -> IndicatorVa
 def ingest_indicators(
     data: pd.Series | pd.DataFrame, labels: dict = None
 ) -> Union[IndicatorVariable, list[IndicatorVariable]]:
-    """Convert binary columns of a pandas DataFrame to VERA indicator variables.
+    """Convert boolean columns of a pandas DataFrame to VERA indicator variables.
 
     Each column becomes a single indicator describing its positive case, so a
     column recording whether a gene is expressed is annotated `CD3`, and the
-    samples that lack it are left undescribed. Values must be boolean or 0/1;
-    missing values mark absence.
+    samples that lack it are left undescribed.
+
+    Columns have to be of boolean dtype, and complete. Nothing is converted on
+    the way in: a 0/1 column is rejected rather than read as a flag, since only
+    the caller knows whether its values are a measurement or a coincidence, and
+    so is a column with missing values, which an indicator has no way to
+    express.
 
     Parameters
     ----------
@@ -206,7 +203,7 @@ def ingest(
     ----------
     data: pd.Series or pd.DataFrame
     indicator_columns: str or iterable or dict
-        The columns holding binary indicators, which are described by their
+        The columns holding boolean indicators, which are described by their
         positive case alone instead of being discretized or one-hot encoded.
         ``"all"`` selects every column, a collection of column names selects
         those columns, and a mapping selects its keys and annotates them with

@@ -114,8 +114,9 @@ class TestIngest(unittest.TestCase):
 class TestIngestIndicators(unittest.TestCase):
     def setUp(self) -> None:
         df = pd.DataFrame()
-        df["CD3"] = [1.0, 0.0, 1.0, 0.0, 1.0]
+        df["CD3"] = [True, False, True, False, True]
         df["CD4"] = [True, True, False, False, True]
+        df["binary"] = [1.0, 0.0, 1.0, 0.0, 1.0]
         df["cont1"] = [5, 2, 3, 1, 5]
         df["disc1"] = pd.Categorical(["r", "g", "b", "r", "b"])
         self.df = df
@@ -139,12 +140,22 @@ class TestIngestIndicators(unittest.TestCase):
         self.assertEqual("CD3", cd3.base_variable.name)
         np.testing.assert_equal(cd3.base_variable.values, cd3.values)
 
-    def test_missing_values_mark_absence(self):
-        series = pd.Series([1.0, np.nan, 0.0], name="CD3")
+    def test_columns_with_missing_values_are_rejected(self):
+        """An indicator says a sample is flagged or that it is not; reading an
+        unmeasured sample as unflagged would be a claim the data does not
+        make."""
+        series = pd.Series([True, None, False], dtype="boolean", name="CD3")
+
+        with self.assertRaises(ValueError):
+            pp.ingest_indicators(series)
+
+    def test_nullable_boolean_columns_are_accepted_when_complete(self):
+        series = pd.Series([True, False, True], dtype="boolean", name="CD3")
+
         result = pp.ingest_indicators(series)
 
         self.assertIsInstance(result, IndicatorVariable)
-        np.testing.assert_equal(result.values, [1, 0, 0])
+        np.testing.assert_equal(result.values, [1, 0, 1])
 
     def test_labels_override_the_column_name(self):
         result = pp.ingest_indicators(
@@ -161,19 +172,20 @@ class TestIngestIndicators(unittest.TestCase):
 
     def test_unnamed_columns_are_rejected(self):
         with self.assertRaises(ValueError):
-            pp.ingest_indicators(pd.Series([1.0, 0.0]))
+            pp.ingest_indicators(pd.Series([True, False]))
 
-    def test_non_binary_columns_are_rejected(self):
-        with self.assertRaises(ValueError):
-            pp.ingest_indicators(self.df[["cont1"]])
+    def test_non_boolean_columns_are_rejected(self):
+        """Only the caller knows whether a 0/1 column is a flag, so nothing is
+        converted on the way in."""
+        for column in ["binary", "cont1", "disc1"]:
+            with self.subTest(column=column):
+                with self.assertRaises(ValueError):
+                    pp.ingest_indicators(self.df[[column]])
 
-        with self.assertRaises(ValueError):
-            pp.ingest_indicators(self.df[["disc1"]])
-
-    def test_complex_columns_are_rejected(self):
-        """Pandas counts complex as numeric and casts it to float by dropping
-        the imaginary part, which would let `1 + 5j` pass as a flag."""
-        series = pd.Series([1 + 5j, 0 + 0j], name="CD3")
+    def test_categorical_columns_of_booleans_are_rejected(self):
+        """A categorical of booleans answers to `is_bool_dtype`, but it is a
+        discrete variable."""
+        series = pd.Series(pd.Categorical([True, False, True]), name="CD3")
 
         with self.assertRaises(ValueError):
             pp.ingest_indicators(series)
@@ -184,7 +196,13 @@ class TestIngestIndicators(unittest.TestCase):
         self.assertEqual(len(self.df.columns), len(result))
         types = [type(v) for v in result]
         self.assertEqual(
-            [IndicatorVariable, IndicatorVariable, ContinuousVariable, DiscreteVariable],
+            [
+                IndicatorVariable,
+                IndicatorVariable,
+                ContinuousVariable,
+                ContinuousVariable,
+                DiscreteVariable,
+            ],
             types,
         )
 
@@ -199,6 +217,12 @@ class TestIngestIndicators(unittest.TestCase):
         self.assertEqual("CD3 expressed", str(result[0]))
         self.assertIsInstance(result[1], ContinuousVariable)
 
+    def test_ingest_reports_the_offending_column(self):
+        with self.assertRaises(ValueError) as ctx:
+            pp.ingest(self.df, indicator_columns=["CD3", "cont1"])
+
+        self.assertIn("cont1", str(ctx.exception))
+
     def test_ingest_with_a_single_column_name_is_rejected(self):
         """Only `"all"` is meaningful as a string; a lone column name is a
         common mistake worth naming."""
@@ -211,6 +235,7 @@ class TestIngestIndicators(unittest.TestCase):
 
     def test_ingest_of_columns_already_carrying_a_variable_is_rejected(self):
         v = ContinuousVariable("CD8", np.array([1.0, 0.0, 1.0, 0.0, 1.0]))
+
         df = self.df.copy()
         df[v] = v.values
 
@@ -229,7 +254,7 @@ class TestIngestIndicators(unittest.TestCase):
 
     def test_constant_indicator_columns_are_dropped_without_complaint(self):
         df = self.df.copy()
-        df["CD8"] = 0.0
+        df["CD8"] = False
 
         result = pp.expand_df(df, indicator_columns=["CD3", "CD8"])
 
@@ -268,11 +293,11 @@ class TestIngestedToPandas(unittest.TestCase):
     def test_indicators_are_named_by_their_rule(self):
         """An indicator variable has no name of its own, so its rule names the
         column: several of them in one frame would otherwise collide."""
-        df = pd.DataFrame({"CD3": [1.0, 0.0, 1.0], "CD4": [0.0, 1.0, 1.0]})
+        df = pd.DataFrame({"CD3": [True, False, True], "CD4": [False, True, True]})
 
         reverted = pp.ingested_to_pandas(pp.ingest(df, indicator_columns="all"))
 
-        self.assertTrue(df.equals(reverted))
+        self.assertTrue(df.astype(float).equals(reverted))
 
     def test_derived_indicators_are_named_by_their_rule(self):
         variable = pp.ingest(pd.Series([1.0, 2.0, 3.0, 4.0], name="cont"))

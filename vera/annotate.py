@@ -108,14 +108,14 @@ def generate_region_annotations(
         sole criterion for indicator columns, which are inherently described by
         one region annotation each.
     indicator_columns : str or iterable or dict, default=None
-        Columns holding binary indicators. Such a column is described by its
+        Columns holding boolean indicators. Such a column is described by its
         positive case alone -- annotated with its own name, and silent about
         the samples it does not flag -- which is what a presence feature calls
-        for: a region labelled "gene is absent" says little. Values must be
-        boolean or 0/1; missing values mark absence. Pass ``"all"`` for a table
-        of nothing but indicators, a collection of column names to select them
-        out of a mixed table, or a mapping from column name to the text
-        annotating it.
+        for: a region labelled "gene is absent" says little. Columns have to be
+        of boolean dtype and complete; a 0/1 or categorical column is rejected
+        rather than converted. Pass ``"all"`` for a table of nothing but
+        indicators, a collection of column names to select them out of a mixed
+        table, or a mapping from column name to the text annotating it.
     random_state : Any, default=None
         Random state for reproducibility of sampling and of the k-means
         discretization of continuous variables.
