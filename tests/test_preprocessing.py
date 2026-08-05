@@ -375,10 +375,29 @@ class TestDiscretize(unittest.TestCase):
         # Construct dataframe using only the NaN columns
         nan_cols_df = pp.ingested_to_pandas(result)
 
-        # Ensure that the rows that had the NaNs haven't been assigned to any
-        # particular bin
+        # A row with no measurement falls in no bin, and says so in every one
+        # of them rather than reading as a row outside each bin
         nan_mask = data.isna()
-        self.assertEqual(np.sum(nan_cols_df[nan_mask].values), 0, "NaNs mapped to bin!")
+        self.assertTrue(
+            np.isnan(nan_cols_df[nan_mask].values).all(), "NaNs mapped to bin!"
+        )
+        self.assertFalse(np.isnan(nan_cols_df[~nan_mask].values).any())
+
+    def test_discretize_with_a_constant_variable_carrying_nans(self):
+        """A NaN is not a value the variable takes, so a constant variable that
+        has some does not look like it takes two."""
+        variable = pp.ingest(pd.Series([5.0, 5.0, np.nan], name="const"))
+
+        result = pp.discretize(variable)
+
+        self.assertEqual(1, len(result))
+        self.assertEqual("const = 5.0", str(result[0]))
+        np.testing.assert_equal(np.array([1.0, 1.0, np.nan]), result[0].values)
+
+    def test_discretize_with_only_nans(self):
+        variable = pp.ingest(pd.Series([np.nan, np.nan], name="empty"))
+
+        self.assertEqual([], pp.discretize(variable))
 
     def test_discretization_correctly_sets_up_base_variable(self):
         result = pp.discretize(self.cont1, n_bins=2)
@@ -436,10 +455,13 @@ class TestOneHotEncoding(unittest.TestCase):
         # Construct dataframe using only the NaN columns
         nan_cols_df = pp.ingested_to_pandas(result)
 
-        # Ensure that the rows that had the NaNs haven't been assigned to any
-        # particular bin
+        # A row with no category belongs to none of them, and says so in every
+        # one of them rather than reading as a row outside each category
         nan_mask = series.isna()
-        self.assertEqual(np.sum(nan_cols_df[nan_mask].values), 0, "NaNs mapped to bin!")
+        self.assertTrue(
+            np.isnan(nan_cols_df[nan_mask].values).all(), "NaNs mapped to bin!"
+        )
+        self.assertFalse(np.isnan(nan_cols_df[~nan_mask].values).any())
 
     def test_one_hot_encoding_correctly_sets_up_base_variable(self):
         result = pp.one_hot(self.disc2)

@@ -258,9 +258,10 @@ def ingested_to_pandas(variables: list[Variable]) -> pd.DataFrame:
 
 def __discretize_const(variable: ContinuousVariable) -> list[IndicatorVariable]:
     """Convert constant features into discrete equality rules"""
-    uniq_val = variable.values[0]
+    measured = ~np.isnan(variable.values)
+    uniq_val = variable.values[measured][0]
     rule = EqualityRule(uniq_val, value_name=variable.name)
-    const_vals = np.ones(variable.values.shape[0])
+    const_vals = np.where(measured, 1.0, np.nan)
     return [IndicatorVariable(variable, rule, const_vals)]
 
 
@@ -286,10 +287,10 @@ def __discretize_nonconst(
         warnings.simplefilter("ignore", category=ConvergenceWarning)
         x_discretized = discretizer.fit_transform(col_vals_non_nan.values[:, None])
 
-    # We discretize the non-NaN values, so ensure that the rows containing
-    # NaNs are re-inserted as zeros
+    # Only the measured values are discretized. A sample with no measurement
+    # falls in no bin, and is re-inserted as missing in every one of them
     df_discretized = pd.DataFrame(x_discretized, index=col_vals_non_nan.index)
-    df_discretized = df_discretized.reindex(col_vals.index, fill_value=0)
+    df_discretized = df_discretized.reindex(col_vals.index)
 
     # Prepare rules and variables
     bin_edges = discretizer.bin_edges_[0]
@@ -318,7 +319,15 @@ def discretize(
     if not isinstance(variable, ContinuousVariable):
         raise TypeError("Can only discretize continuous variables!")
 
-    if len(np.unique(variable.values)) == 1:
+    # Bins are derived from the measured values, and a NaN is not one of them:
+    # counted as a value of its own it makes a constant variable look like it
+    # takes two
+    measured_values = variable.values[~np.isnan(variable.values)]
+
+    if len(measured_values) == 0:
+        # Nothing to describe, and no value to name a rule after
+        return []
+    elif len(np.unique(measured_values)) == 1:
         disc_vars = __discretize_const(variable)
     else:
         disc_vars = __discretize_nonconst(variable, n_bins, random_state=random_state)
@@ -331,10 +340,15 @@ def one_hot(variable: DiscreteVariable) -> list[IndicatorVariable]:
     if not isinstance(variable, DiscreteVariable):
         raise TypeError("Can only one-hot-encode discrete variables!")
 
+    # A sample with no category belongs to none of them, and says so in every
+    # one of them rather than reading as a sample outside each category
+    missing = np.isnan(variable.values)
+
     one_hot_vars = []
     for idx, category in enumerate(variable.categories):
         rule = EqualityRule(category, value_name=variable.name)
         values = np.astype(variable.values == idx, float)
+        values[missing] = np.nan
         new_var = IndicatorVariable(variable, rule, values)
         one_hot_vars.append(new_var)
 
