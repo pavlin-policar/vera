@@ -80,7 +80,7 @@ vera.pl.plot_annotations(descriptive_explanations)
 
 ## Binary and presence features
 
-Before regions are extracted, every column is expanded into indicator variables: continuous columns are discretized into bins, categorical columns are one-hot encoded. For a binary feature -- a gene that is either expressed or not, a flag that is either set or not -- this yields two indicators, and the negative one is annotated as a region of its own. A region labelled "gene is absent" is rarely something you want on a plot.
+Before regions are extracted, every column is expanded into indicator variables: continuous columns are discretized into bins, categorical and boolean columns are one-hot encoded. For a binary feature -- a gene that is either expressed or not, a flag that is either set or not -- this yields two indicators, `gene is True` and `gene is False`, and the negative one is annotated as a region of its own. A region labelled "gene is absent" is rarely something you want on a plot.
 
 Name such columns in `indicator_columns` and they are used as they are, each described by its positive case alone. For a table of nothing but indicators -- a gene presence matrix, say -- pass `"all"`:
 
