@@ -104,8 +104,12 @@ class RegionAnnotation:
 
     @property
     def all_members(self) -> set[int]:
-        """Return the indices of all data points that fulfill the rule."""
-        return set(np.argwhere(self.descriptor.values).ravel())
+        """Return the indices of all data points that fulfill the rule.
+
+        A point the descriptor has no measurement for fulfills nothing: it is
+        not a member, and it is not counted against the rule either.
+        """
+        return set(np.flatnonzero(self.descriptor.values == 1))
 
     @property
     def contained_members(self) -> set[int]:

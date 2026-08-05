@@ -543,7 +543,8 @@ def plot_region(
         scatter_kwargs_.update(scatter_kwargs)
         if highlight_members:
             other_color = scatter_kwargs_["c"]
-            c = np.array([other_color, member_color])[region_annotation.descriptor.values.astype(int)]
+            is_member = (region_annotation.descriptor.values == 1).astype(int)
+            c = np.array([other_color, member_color])[is_member]
             scatter_kwargs_["c"] = c
             scatter_kwargs_["alpha"] = 1
 

@@ -117,16 +117,10 @@ def _indicator_values(name: Any, values: pd.Series) -> np.ndarray:
             f"encoded."
         )
 
-    if values.isna().any():
-        raise ValueError(
-            f"Indicator column `{name}` has missing values. An indicator says "
-            f"that a sample is flagged or that it is not, and reading a sample "
-            f"with no measurement as unflagged would be a claim the data does "
-            f"not make. Decide what the missing samples are (`.fillna(False)`) "
-            f"or drop them."
-        )
-
-    return values.to_numpy(dtype=float)
+    # Missing values stay missing: a sample the column has no measurement for
+    # is neither flagged nor unflagged, and takes no part in the variable's
+    # region or in the rates it is scored on
+    return values.to_numpy(dtype=float, na_value=np.nan)
 
 
 def _indicator_variable(name: Any, values: pd.Series, label: Any) -> IndicatorVariable:
@@ -150,11 +144,15 @@ def ingest_indicators(
     column recording whether a gene is expressed is annotated `CD3`, and the
     samples that lack it are left undescribed.
 
-    Columns have to be of boolean dtype, and complete. Nothing is converted on
-    the way in: a 0/1 column is rejected rather than read as a flag, since only
-    the caller knows whether its values are a measurement or a coincidence, and
-    so is a column with missing values, which an indicator has no way to
-    express.
+    Columns have to be of boolean dtype: a 0/1 column is rejected rather than
+    read as a flag, since only the caller knows whether its values are a
+    measurement or a coincidence of encoding.
+
+    Missing values are supported through pandas' nullable ``boolean`` dtype,
+    and are carried through as NaN. A sample the column has no measurement for
+    is not flagged and is not unflagged either: it takes no part in shaping the
+    variable's region, and it is left out of the rates the variable is scored
+    on rather than counted against it.
 
     Parameters
     ----------
@@ -367,7 +365,9 @@ def expand(
 
     # Filter out columns with zero occurences. This can happen for categorical
     # variables with categories that never actually occur in the data
-    var_groups = [[v for v in var_group if v.values.sum() > 0] for var_group in var_groups]
+    var_groups = [
+        [v for v in var_group if np.nansum(v.values) > 0] for var_group in var_groups
+    ]
     # If the filtering removed all the variables from a particular variable,
     # remove that group. In practice, this should never happen.
     var_groups = [var_group for var_group in var_groups if len(var_group) > 0]

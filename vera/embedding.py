@@ -53,7 +53,11 @@ class Embedding:
         if isinstance(values, numbers.Number):
             values = values * np.ones(self.X.shape[0])
 
-        kde = KDEpy.FFTKDE(kernel=kernel, bw=self.scale).fit(self.X, weights=values)
+        # A sample with no measurement carries no weight, so it shapes no
+        # region. Left as NaN it would poison the whole density estimate.
+        weights = np.nan_to_num(values, nan=0.0)
+
+        kde = KDEpy.FFTKDE(kernel=kernel, bw=self.scale).fit(self.X, weights=weights)
         kde_esimates = kde.evaluate(self._density_grid)
         return Density(self._density_grid, kde_esimates)
 
