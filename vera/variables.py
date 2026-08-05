@@ -39,13 +39,19 @@ def disjunction(values: list[np.ndarray]) -> np.ndarray:
     return np.where(included, 1.0, np.where(unknown, np.nan, 0.0))
 
 
-def _validate_format_label_args(max_descriptors, truncation_template):
+def _validate_format_label_args(max_descriptors, truncation_template, sep, truncation_sep):
     """Validation is shared by every descriptor type, so a call fails the same
     way whether or not the arguments end up being used."""
     if max_descriptors is not None and max_descriptors < 1:
         raise ValueError(
             f"`max_descriptors` must be a positive integer or None, got "
             f"{max_descriptors}."
+        )
+    if not isinstance(sep, str):
+        raise ValueError(f"`sep` must be a string, got {sep!r}.")
+    if truncation_sep is not None and not isinstance(truncation_sep, str):
+        raise ValueError(
+            f"`truncation_sep` must be a string or None, got {truncation_sep!r}."
         )
     try:
         marker = truncation_template.format(n=1)
@@ -113,13 +119,19 @@ class RegionDescriptor(metaclass=abc.ABCMeta):
         self,
         max_descriptors: int = None,
         truncation_template: str = "(+{n} more)",
+        sep: str = "\n",
+        truncation_sep: str = None,
     ) -> str:
         """The descriptor's display text.
 
         Equal to ``str(self)``; descriptors composed of multiple variables
-        truncate to the first `max_descriptors` of them.
+        join them with `sep` and truncate to the first `max_descriptors` of
+        them. A single-variable descriptor has nothing to join, but the
+        arguments are validated all the same.
         """
-        _validate_format_label_args(max_descriptors, truncation_template)
+        _validate_format_label_args(
+            max_descriptors, truncation_template, sep, truncation_sep
+        )
         return str(self)
 
     def ranked_by(
@@ -388,13 +400,15 @@ class IndicatorVariableGroup(RegionDescriptor):
         self,
         max_descriptors: int = None,
         truncation_template: str = "(+{n} more)",
+        sep: str = "\n",
+        truncation_sep: str = None,
     ) -> str:
-        """The group's display text, one variable per line, truncated to the
-        first `max_descriptors` variables.
+        """The group's display text: the variables joined with `sep`,
+        truncated to the first `max_descriptors` of them.
 
         Truncation is display-only: `values` and everything computed from the
         full variable set are unaffected. A truncated label always ends with a
-        marker line showing the number of hidden variables.
+        marker showing the number of hidden variables.
 
         Parameters
         ----------
@@ -406,16 +420,26 @@ class IndicatorVariableGroup(RegionDescriptor):
         truncation_template: str
             Template for the truncation marker; ``{n}`` is replaced with the
             number of hidden variables.
+        sep: str
+            Separator between variables. The default, one variable per line,
+            suits rule-style descriptors; ``", "`` reads better for groups of
+            bare names.
+        truncation_sep: str
+            Separator between the last displayed variable and the truncation
+            marker. None means `sep`; with ``sep=", "``, passing ``" "`` gives
+            ``... water (+4 more)`` rather than ``... water, (+4 more)``.
         """
-        _validate_format_label_args(max_descriptors, truncation_template)
-        if max_descriptors is None or max_descriptors >= len(self.variables) - 1:
-            return str(self)
-
-        lines = [str(v) for v in self.variables[:max_descriptors]]
-        lines.append(
-            truncation_template.format(n=len(self.variables) - max_descriptors)
+        _validate_format_label_args(
+            max_descriptors, truncation_template, sep, truncation_sep
         )
-        return "\n".join(lines)
+        if truncation_sep is None:
+            truncation_sep = sep
+        if max_descriptors is None or max_descriptors >= len(self.variables) - 1:
+            return sep.join(str(v) for v in self.variables)
+
+        label = sep.join(str(v) for v in self.variables[:max_descriptors])
+        marker = truncation_template.format(n=len(self.variables) - max_descriptors)
+        return label + truncation_sep + marker
 
     def __str__(self) -> str:
         return "\n".join(str(d) for d in self.variables)
