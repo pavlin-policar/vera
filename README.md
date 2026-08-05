@@ -100,7 +100,16 @@ region_annotations = vera.an.generate_region_annotations(
 )
 ```
 
-Indicator columns have to be of boolean dtype, and complete. Nothing is converted on the way in: a 0/1 column is rejected rather than read as a flag -- cast it with `.astype(bool)` if that is what it means -- and so is a column with missing values, since an indicator can only say that a sample is flagged or that it is not. A column with no positive samples is dropped.
+Indicator columns have to be of boolean dtype. Nothing is converted on the way in: a 0/1 column is rejected rather than read as a flag -- cast it with `.astype(bool)` if that is what it means. A column with no positive samples is dropped.
+
+Missing values are supported through pandas' nullable `boolean` dtype:
+
+```python
+presence = (expression > 0).astype("boolean")
+presence[expression.isna()] = pd.NA
+```
+
+A sample with no measurement is not flagged, and it is not unflagged either. It takes no part in shaping the variable's region, it is never reported as a member, and it is left out of the rates the variable is scored on rather than counted against it. Where several variables are annotated together, a sample belongs to the group if every variable flags it, and is excluded as soon as one does not -- whether or not the others measured it.
 
 The column name is what appears on the plot, so a `CD3` column is annotated `CD3`. To annotate a column with something else, pass a mapping instead of a list:
 

@@ -112,10 +112,12 @@ def generate_region_annotations(
         positive case alone -- annotated with its own name, and silent about
         the samples it does not flag -- which is what a presence feature calls
         for: a region labelled "gene is absent" says little. Columns have to be
-        of boolean dtype and complete; a 0/1 or categorical column is rejected
-        rather than converted. Pass ``"all"`` for a table of nothing but
-        indicators, a collection of column names to select them out of a mixed
-        table, or a mapping from column name to the text annotating it.
+        of boolean dtype; a 0/1 or categorical column is rejected rather than
+        converted. Missing values are supported through pandas' nullable
+        ``boolean`` dtype: a sample with no measurement shapes no region and is
+        left out of the variable's rates. Pass ``"all"`` for a table of nothing
+        but indicators, a collection of column names to select them out of a
+        mixed table, or a mapping from column name to the text annotating it.
     random_state : Any, default=None
         Random state for reproducibility of sampling and of the k-means
         discretization of continuous variables.

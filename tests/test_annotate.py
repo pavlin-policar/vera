@@ -163,6 +163,48 @@ class TestIndicatorColumns(unittest.TestCase):
         })
         self.assertIn("cluster_id = a", labels)
 
+    def test_unmeasured_samples_shape_no_region(self):
+        """A missing measurement is not a measurement of absence: the region is
+        built from the samples the column actually flags."""
+        measured = _indicator_df(self.n_samples, {"cluster_0": self.masks["cluster_0"]})
+
+        # The same column, with the second cluster's rows unmeasured rather
+        # than known to be unflagged
+        with_missing = pd.DataFrame({
+            "cluster_0": pd.array(self.masks["cluster_0"], dtype="boolean")
+        })
+        with_missing.loc[self.masks["cluster_1"], "cluster_0"] = pd.NA
+
+        kwargs = dict(indicator_columns="all", random_state=0)
+        from_measured = vera.an.generate_region_annotations(
+            measured, self.embedding, **kwargs
+        )
+        from_missing = vera.an.generate_region_annotations(
+            with_missing, self.embedding, **kwargs
+        )
+
+        self.assertEqual(1, len(from_missing))
+        self.assertEqual(
+            from_measured[0][0].all_members, from_missing[0][0].all_members
+        )
+        self.assertEqual(
+            from_measured[0][0].region.polygon, from_missing[0][0].region.polygon
+        )
+
+    def test_an_unmeasured_sample_is_not_a_member(self):
+        masks = dict(self.masks)
+        column = pd.array(masks["cluster_0"], dtype="boolean")
+        column[0] = pd.NA
+        features = pd.DataFrame({"cluster_0": column})
+
+        region_annotations = vera.an.generate_region_annotations(
+            features, self.embedding, indicator_columns="all", random_state=0
+        )
+
+        ra = region_annotations[0][0]
+        self.assertNotIn(0, ra.all_members)
+        self.assertIn(1, ra.all_members)
+
     def test_sampling_selects_indicator_rows(self):
         features = _indicator_df(self.n_samples, self.masks)
         sample_size = self.n_samples // 2

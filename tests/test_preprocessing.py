@@ -140,14 +140,25 @@ class TestIngestIndicators(unittest.TestCase):
         self.assertEqual("CD3", cd3.base_variable.name)
         np.testing.assert_equal(cd3.base_variable.values, cd3.values)
 
-    def test_columns_with_missing_values_are_rejected(self):
-        """An indicator says a sample is flagged or that it is not; reading an
-        unmeasured sample as unflagged would be a claim the data does not
+    def test_missing_values_are_carried_through(self):
+        """A sample the column has no measurement for is neither flagged nor
+        unflagged, and reading it as either would be a claim the data does not
         make."""
         series = pd.Series([True, None, False], dtype="boolean", name="CD3")
 
-        with self.assertRaises(ValueError):
-            pp.ingest_indicators(series)
+        result = pp.ingest_indicators(series)
+
+        np.testing.assert_equal(result.values, [1.0, np.nan, 0.0])
+
+    def test_an_indicator_of_only_missing_values_is_dropped(self):
+        df = pd.DataFrame({
+            "CD3": pd.Series([True, False, True], dtype="boolean"),
+            "CD8": pd.Series([None, None, None], dtype="boolean"),
+        })
+
+        result = pp.expand_df(df, indicator_columns="all")
+
+        self.assertEqual(["CD3"], [g[0].base_variable.name for g in result])
 
     def test_nullable_boolean_columns_are_accepted_when_complete(self):
         series = pd.Series([True, False, True], dtype="boolean", name="CD3")
