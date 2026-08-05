@@ -114,3 +114,29 @@ print(json.dumps(_run_descriptive_pipeline(features, embedding)))
 
         self.assertEqual(layouts[0], layouts[1])
         self.assertEqual(layouts[0], layouts[2])
+
+
+class TestContrastiveWithoutCandidates(unittest.TestCase):
+    """A contrastive panel sets a variable's regions against one another, so a
+    table of indicator variables -- each of which holds a single region -- has
+    nothing to contrast."""
+
+    def test_indicator_only_features_yield_no_panels(self):
+        import numpy as np
+        from tests.utils import generate_clusters
+
+        np.random.seed(0)
+        embedding, _ = generate_clusters([-4, 0, 4], [0.4] * 3, n_samples=100)
+        n_samples = embedding.shape[0]
+
+        features = pd.DataFrame()
+        for i in range(3):
+            mask = np.zeros(n_samples, dtype=bool)
+            mask[i * 100:(i + 1) * 100] = True
+            features[f"cluster_{i}"] = mask
+
+        region_annotations = vera.an.generate_region_annotations(
+            features, embedding, indicator_columns="all", random_state=0
+        )
+
+        self.assertEqual([], vera.explain.contrastive(region_annotations))

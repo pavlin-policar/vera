@@ -138,6 +138,10 @@ class EqualityRule(Rule):
         return self.value == other.value
 
     def __str__(self):
+        # A truth value reads as a statement about the variable, not as one of
+        # the values it was found to take
+        if isinstance(self.value, (bool, np.bool_)):
+            return f"{self.value_name} is {str(self.value)}"
         return f"{self.value_name} = {str(self.value)}"
 
     def __repr__(self):
@@ -161,6 +165,49 @@ class EqualityRule(Rule):
             return self.value < other.value
         else:
             raise NotImplementedError()
+
+
+class IndicatorRule(Rule):
+    """A rule matched by the samples that a binary column flags.
+
+    The label stands on its own, so a column recording whether a gene is
+    expressed is annotated `CD3` rather than `CD3 = True`. Two such rules never
+    merge: each describes a condition of its own, and there is no wider
+    condition that covers both.
+    """
+
+    def __init__(self, label: str):
+        self.label = label
+
+    def can_merge_with(self, other: Rule) -> bool:
+        return False
+
+    def merge_with(self, other: Rule) -> Rule:
+        raise IncompatibleRuleError(self, other)
+
+    def contains(self, other: Rule) -> bool:
+        if not isinstance(other, IndicatorRule):
+            return False
+        return self.label == other.label
+
+    def __str__(self):
+        return str(self.label)
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(label={self.label!r})"
+
+    def __eq__(self, other):
+        if not isinstance(other, IndicatorRule):
+            return False
+        return self.label == other.label
+
+    def __hash__(self):
+        return hash((self.__class__.__name__, self.label))
+
+    def __lt__(self, other: "IndicatorRule") -> bool:
+        if not isinstance(other, IndicatorRule):
+            raise NotImplementedError()
+        return self.label < other.label
 
 
 class OneOfRule(Rule):

@@ -1,6 +1,6 @@
 import warnings
 from collections import defaultdict
-from typing import Any, Union
+from typing import Any, Iterable, Union
 
 import numpy as np
 import pandas as pd
@@ -10,7 +10,7 @@ import vera.graph as g
 import vera.metrics as metrics
 from vera.embedding import Embedding
 from vera.region import Region
-from vera.rules import IntervalRule, EqualityRule
+from vera.rules import IntervalRule, EqualityRule, IndicatorRule
 from vera.variables import (
     Variable,
     DiscreteVariable,
@@ -46,6 +46,15 @@ def _pd_dtype_to_variable(col_name: Union[str, Variable], col_type, col_vals) ->
             categories=col_type.categories.tolist(),
             ordered=col_type.ordered,
         )
+    elif pd.api.types.is_bool_dtype(col_type):
+        # A boolean column takes two values and nothing in between, so it is
+        # described by them rather than by bins cut through a range
+        variable = DiscreteVariable(
+            col_name,
+            values=col_vals[1].to_numpy(dtype=float, na_value=np.nan),
+            categories=[False, True],
+            ordered=False,
+        )
     elif pd.api.types.is_numeric_dtype(col_type):
         variable = ContinuousVariable(col_name, values=col_vals[1].values)
     else:
@@ -56,14 +65,178 @@ def _pd_dtype_to_variable(col_name: Union[str, Variable], col_type, col_vals) ->
     return variable
 
 
-def ingest(data: pd.Series | pd.DataFrame) -> list[Variable]:
-    """Convert a pandas DataFrame to a list of VERA variables."""
+#: Value of ``indicator_columns`` selecting every column of the data.
+ALL_COLUMNS = "all"
+
+#: Ways of selecting the indicator columns of a data frame: ``"all"``, a
+#: collection of column names, or a mapping from column name to display label.
+IndicatorColumns = Union[str, Iterable, dict, None]
+
+
+def _resolve_indicator_columns(
+    data: pd.Series | pd.DataFrame, indicator_columns: IndicatorColumns
+) -> dict[Any, Any]:
+    """Map each column to be ingested as an indicator to its display label."""
+    columns = [data.name] if isinstance(data, pd.Series) else list(data.columns)
+
+    if indicator_columns is None:
+        labels = {}
+    elif isinstance(indicator_columns, str):
+        if indicator_columns != ALL_COLUMNS:
+            raise ValueError(
+                f"`indicator_columns` accepts `{ALL_COLUMNS!r}` or a collection "
+                f"of column names, got the string `{indicator_columns!r}`. A "
+                f"single column has to be wrapped in a list."
+            )
+        labels = {c: c for c in columns}
+    elif isinstance(indicator_columns, dict):
+        labels = dict(indicator_columns)
+    else:
+        labels = {c: c for c in indicator_columns}
+
+    missing = [c for c in labels if c not in columns]
+    if missing:
+        raise KeyError(
+            f"`indicator_columns` names columns that the data does not "
+            f"contain: {', '.join(map(repr, missing))}."
+        )
+
+    predefined = [c for c in labels if isinstance(c, Variable)]
+    if predefined:
+        raise ValueError(
+            f"`indicator_columns` names columns that already carry a variable: "
+            f"{', '.join(map(repr, predefined))}. A column named by a variable "
+            f"is ingested as that variable."
+        )
+
+    return labels
+
+
+def _indicator_values(name: Any, values: pd.Series) -> np.ndarray:
+    """Validate a column of a data frame as indicator values."""
+    # A categorical of booleans still answers to `is_bool_dtype`, and is a
+    # discrete variable
+    dtype = values.dtype
+    if isinstance(dtype, pd.CategoricalDtype) or not pd.api.types.is_bool_dtype(dtype):
+        raise ValueError(
+            f"Indicator column `{name}` has dtype `{dtype}`. An indicator "
+            f"column has to be boolean: cast a 0/1 column with "
+            f"`.astype(bool)`, and leave continuous and categorical columns "
+            f"out of `indicator_columns` to have them discretized or one-hot "
+            f"encoded."
+        )
+
+    # Missing values stay missing: a sample the column has no measurement for
+    # is neither flagged nor unflagged, and takes no part in the variable's
+    # region or in the rates it is scored on
+    return values.to_numpy(dtype=float, na_value=np.nan)
+
+
+def _indicator_variable(name: Any, values: pd.Series, label: Any) -> IndicatorVariable:
+    if label is None:
+        raise ValueError(
+            "An indicator variable is labelled by the name of its column, so "
+            "an unnamed column needs an explicit label."
+        )
+
+    indicator_values = _indicator_values(name, values)
+    base_variable = ContinuousVariable(name, values=indicator_values)
+    return IndicatorVariable(base_variable, IndicatorRule(label), indicator_values)
+
+
+def ingest_indicators(
+    data: pd.Series | pd.DataFrame, labels: dict = None
+) -> Union[IndicatorVariable, list[IndicatorVariable]]:
+    """Convert boolean columns of a pandas DataFrame to VERA indicator variables.
+
+    Each column becomes a single indicator describing its positive case, so a
+    column recording whether a gene is expressed is annotated `CD3`, and the
+    samples that lack it are left undescribed.
+
+    Columns have to be of boolean dtype: a 0/1 column is rejected rather than
+    read as a flag, since only the caller knows whether its values are a
+    measurement or a coincidence of encoding.
+
+    Missing values are supported through pandas' nullable ``boolean`` dtype,
+    and are carried through as NaN. A sample the column has no measurement for
+    is not flagged and is not unflagged either: it takes no part in shaping the
+    variable's region, and it is left out of the rates the variable is scored
+    on rather than counted against it.
+
+    Parameters
+    ----------
+    data: pd.Series or pd.DataFrame
+    labels: dict
+        The text annotating each column, keyed by column name. Columns absent
+        from the mapping are annotated with their name.
+
+    """
+    labels = dict(labels) if labels is not None else {}
+
     if isinstance(data, pd.Series):
+        columns = [data.name]
+    elif isinstance(data, pd.DataFrame):
+        columns = list(data.columns)
+    else:
+        raise TypeError(
+            f"Cannot ingest object of type `{data.__class__.__name__}`. Only "
+            f"pd.Series and pd.DataFrame are supported!"
+        )
+
+    unknown = [c for c in labels if c not in columns]
+    if unknown:
+        raise KeyError(
+            f"`labels` names columns that the data does not contain: "
+            f"{', '.join(map(repr, unknown))}."
+        )
+
+    if isinstance(data, pd.Series):
+        return _indicator_variable(data.name, data, labels.get(data.name, data.name))
+
+    return [
+        _indicator_variable(name, col_vals, labels.get(name, name))
+        for name, col_vals in data.items()
+    ]
+
+
+def ingest(
+    data: pd.Series | pd.DataFrame, indicator_columns: IndicatorColumns = None
+) -> Union[Variable, list[Variable]]:
+    """Convert a pandas DataFrame to a list of VERA variables.
+
+    A series is converted to a single variable.
+
+    Parameters
+    ----------
+    data: pd.Series or pd.DataFrame
+    indicator_columns: str or iterable or dict
+        The columns holding boolean indicators, which are described by their
+        positive case alone instead of being discretized or one-hot encoded.
+        ``"all"`` selects every column, a collection of column names selects
+        those columns, and a mapping selects its keys and annotates them with
+        its values. See :func:`ingest_indicators`.
+
+    """
+    labels = _resolve_indicator_columns(data, indicator_columns)
+
+    if isinstance(data, pd.Series):
+        if labels:
+            return ingest_indicators(data, labels=labels)
         return _pd_dtype_to_variable(data.name, data.dtype, (0, data))
     elif isinstance(data, pd.DataFrame):
-        return list(
-            _pd_dtype_to_variable(*p) for p in zip(data.columns, data.dtypes, data.items())
-        )
+        variables = []
+        for col_name, col_type, col_vals in zip(
+            data.columns, data.dtypes, data.items()
+        ):
+            if col_name in labels:
+                variables.append(
+                    _indicator_variable(col_name, col_vals[1], labels[col_name])
+                )
+            else:
+                variables.append(
+                    _pd_dtype_to_variable(col_name, col_type, col_vals)
+                )
+        return variables
     else:
         raise TypeError(
             f"Cannot ingest object of type `{data.__class__.__name__}`. Only "
@@ -77,7 +250,7 @@ def ingested_to_pandas(variables: list[Variable]) -> pd.DataFrame:
 
     for v in variables:
         if isinstance(v, IndicatorVariable):
-            df_new[v.name] = pd.Series(v.values)
+            df_new[str(v.rule)] = pd.Series(v.values)
         elif isinstance(v, DiscreteVariable):
             vals = np.full_like(v.values, fill_value=np.nan, dtype=object)
             mask = ~np.isnan(v.values)
@@ -94,9 +267,10 @@ def ingested_to_pandas(variables: list[Variable]) -> pd.DataFrame:
 
 def __discretize_const(variable: ContinuousVariable) -> list[IndicatorVariable]:
     """Convert constant features into discrete equality rules"""
-    uniq_val = variable.values[0]
+    measured = ~np.isnan(variable.values)
+    uniq_val = variable.values[measured][0]
     rule = EqualityRule(uniq_val, value_name=variable.name)
-    const_vals = np.ones(variable.values.shape[0])
+    const_vals = np.where(measured, 1.0, np.nan)
     return [IndicatorVariable(variable, rule, const_vals)]
 
 
@@ -122,10 +296,10 @@ def __discretize_nonconst(
         warnings.simplefilter("ignore", category=ConvergenceWarning)
         x_discretized = discretizer.fit_transform(col_vals_non_nan.values[:, None])
 
-    # We discretize the non-NaN values, so ensure that the rows containing
-    # NaNs are re-inserted as zeros
+    # Only the measured values are discretized. A sample with no measurement
+    # falls in no bin, and is re-inserted as missing in every one of them
     df_discretized = pd.DataFrame(x_discretized, index=col_vals_non_nan.index)
-    df_discretized = df_discretized.reindex(col_vals.index, fill_value=0)
+    df_discretized = df_discretized.reindex(col_vals.index)
 
     # Prepare rules and variables
     bin_edges = discretizer.bin_edges_[0]
@@ -154,7 +328,15 @@ def discretize(
     if not isinstance(variable, ContinuousVariable):
         raise TypeError("Can only discretize continuous variables!")
 
-    if len(np.unique(variable.values)) == 1:
+    # Bins are derived from the measured values, and a NaN is not one of them:
+    # counted as a value of its own it makes a constant variable look like it
+    # takes two
+    measured_values = variable.values[~np.isnan(variable.values)]
+
+    if len(measured_values) == 0:
+        # Nothing to describe, and no value to name a rule after
+        return []
+    elif len(np.unique(measured_values)) == 1:
         disc_vars = __discretize_const(variable)
     else:
         disc_vars = __discretize_nonconst(variable, n_bins, random_state=random_state)
@@ -167,10 +349,15 @@ def one_hot(variable: DiscreteVariable) -> list[IndicatorVariable]:
     if not isinstance(variable, DiscreteVariable):
         raise TypeError("Can only one-hot-encode discrete variables!")
 
+    # A sample with no category belongs to none of them, and says so in every
+    # one of them rather than reading as a sample outside each category
+    missing = np.isnan(variable.values)
+
     one_hot_vars = []
     for idx, category in enumerate(variable.categories):
         rule = EqualityRule(category, value_name=variable.name)
         values = np.astype(variable.values == idx, float)
+        values[missing] = np.nan
         new_var = IndicatorVariable(variable, rule, values)
         one_hot_vars.append(new_var)
 
@@ -201,7 +388,9 @@ def expand(
 
     # Filter out columns with zero occurences. This can happen for categorical
     # variables with categories that never actually occur in the data
-    var_groups = [[v for v in var_group if v.values.sum() > 0] for var_group in var_groups]
+    var_groups = [
+        [v for v in var_group if np.nansum(v.values) > 0] for var_group in var_groups
+    ]
     # If the filtering removed all the variables from a particular variable,
     # remove that group. In practice, this should never happen.
     var_groups = [var_group for var_group in var_groups if len(var_group) > 0]
@@ -213,13 +402,19 @@ def expand_df(
     df: pd.DataFrame,
     n_discretization_bins: int = 5,
     filter_constant_features: bool = True,
+    indicator_columns: IndicatorColumns = None,
     random_state: Any = 0,
 ) -> list[list[IndicatorVariable]]:
+    # The selection is validated against the full frame: a constant column is
+    # dropped, not reported as missing
+    labels = _resolve_indicator_columns(df, indicator_columns)
+
     # Filter out features with identical values
     if filter_constant_features:
         df = df.loc[:, df.nunique(axis=0) > 1]
+        labels = {c: l for c, l in labels.items() if c in df.columns}
 
-    variables = ingest(df)
+    variables = ingest(df, indicator_columns=labels)
 
     expanded = expand(
         variables,

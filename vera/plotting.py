@@ -543,7 +543,8 @@ def plot_region(
         scatter_kwargs_.update(scatter_kwargs)
         if highlight_members:
             other_color = scatter_kwargs_["c"]
-            c = np.array([other_color, member_color])[region_annotation.descriptor.values.astype(int)]
+            is_member = (region_annotation.descriptor.values == 1).astype(int)
+            c = np.array([other_color, member_color])[is_member]
             scatter_kwargs_["c"] = c
             scatter_kwargs_["alpha"] = 1
 
@@ -583,6 +584,9 @@ def plot_regions(
     label_kwargs: dict = {},
     show: bool = False,
 ):
+    if len(region_annotations) == 0:
+        raise ValueError("Nothing to plot: `region_annotations` is empty.")
+
     n_rows = len(region_annotations) // per_row
     if len(region_annotations) % per_row > 0:
         n_rows += 1
@@ -671,6 +675,9 @@ def plot_regions_with_subregions(
     cmap: str = "tab10",
     show: bool = False,
 ):
+    if len(region_annotations) == 0:
+        raise ValueError("Nothing to plot: `region_annotations` is empty.")
+
     n_rows = len(region_annotations) // per_row
     if len(region_annotations) % per_row > 0:
         n_rows += 1
@@ -956,6 +963,13 @@ def plot_annotations(
     show: bool = False,
     ax_spacing: float = 0.03,
 ):
+    if len(layouts) == 0:
+        raise ValueError(
+            "Nothing to plot: `layouts` is empty. An explanation mode returns "
+            "no panels when it has nothing to show -- `contrastive`, for one, "
+            "needs a variable holding more than a single region."
+        )
+
     n_rows = len(layouts) // per_row
     if len(layouts) % per_row > 0:
         n_rows += 1

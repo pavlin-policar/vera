@@ -97,6 +97,13 @@ def contrastive(
     if filter_layouts:
         candidate_panels = [panel for panel in candidate_panels if len(panel) > 1]
 
+    # A contrastive panel sets a variable's regions against one another, which
+    # a variable holding a single region cannot do. Where none holds more than
+    # one -- a table of indicator variables, say -- there is nothing to
+    # contrast.
+    if len(candidate_panels) == 0:
+        return []
+
     # Compute scores for each candidate panel
     score_fns, score_weights = list(zip(*ranking_funcs))
 

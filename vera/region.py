@@ -130,9 +130,11 @@ class Region:
         ----------
         embedding : Embedding
         member_mask : np.ndarray
-            Binary array indicating which points belong to this group.
+            Binary array indicating which points belong to this group. A NaN
+            marks a point with no measurement, which the region is not built
+            around.
         """
-        active_idx = np.flatnonzero(member_mask)
+        active_idx = np.flatnonzero(member_mask == 1)
 
         if len(active_idx) < 3:
             return cls(embedding, geom.MultiPolygon())

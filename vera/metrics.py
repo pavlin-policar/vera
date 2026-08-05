@@ -8,10 +8,17 @@ EPS = 1e-12
 
 
 def purity(ra) -> float:
+    """The fraction of the region's samples that the descriptor flags.
+
+    Samples the descriptor has no measurement for are left out of the fraction
+    entirely, rather than counted as unflagged: an unmeasured sample is not
+    evidence against the region.
+    """
     contained_vals = ra.descriptor.values[list(ra.region.contained_samples)]
-    if len(contained_vals) == 0:
+    measured = contained_vals[~np.isnan(contained_vals)]
+    if len(measured) == 0:
         return 0
-    return np.mean(contained_vals)
+    return np.mean(measured)
 
 
 def _score_purity(p: float, q: float) -> float:
@@ -60,7 +67,9 @@ def descriptor_scores(
 
     Scores are computed from raw rates: the in-region rate ``p`` (the fraction
     of the region's samples where the variable holds) and the background base
-    rate ``q`` (its fraction over all samples). Rates are deliberately not
+    rate ``q`` (its fraction over all samples). Both are taken over the samples
+    the variable was measured on, so a variable is neither rewarded nor
+    penalized for the samples it says nothing about. Rates are deliberately not
     shrunk toward a prior: every variable in a region shares the same region
     size, so a background-centered Beta-Binomial posterior mean rescales the
     `purity_gain` and `lift` scores by a region-wide constant and leaves their
@@ -102,11 +111,14 @@ def descriptor_scores(
     score_func = DESCRIPTOR_SCORING_METHODS[method]
 
     S = list(ra.region.contained_samples)
-    n = len(S)
     scores = {}
     for v in variables:
-        q = float(v.values.mean())
-        p = float(v.values[S].sum()) / n if n > 0 else 0.0
+        # Both rates are taken over the samples the variable was measured on
+        background = v.values[~np.isnan(v.values)]
+        q = float(background.mean()) if background.size > 0 else 0.0
+        in_region = v.values[S]
+        in_region = in_region[~np.isnan(in_region)]
+        p = float(in_region.mean()) if in_region.size > 0 else 0.0
         scores[v] = float(score_func(p, q))
     return scores
 

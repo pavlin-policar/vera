@@ -12,6 +12,33 @@ class MergeError(Exception):
     pass
 
 
+def conjunction(values: list[np.ndarray]) -> np.ndarray:
+    """Which samples every one of the indicators flags.
+
+    A sample is excluded as soon as one indicator does not flag it, whether or
+    not the others measured it. Where every indicator that did measure the
+    sample flags it, but at least one did not measure it, membership is
+    unknown: the sample could belong either way, and NaN says so.
+    """
+    stacked = np.vstack(values)
+    excluded = np.any(stacked == 0, axis=0)
+    unknown = np.any(np.isnan(stacked), axis=0)
+    return np.where(excluded, 0.0, np.where(unknown, np.nan, 1.0))
+
+
+def disjunction(values: list[np.ndarray]) -> np.ndarray:
+    """Which samples at least one of the indicators flags.
+
+    The mirror of :func:`conjunction`: one flag is enough to include a sample,
+    and membership is unknown only where nothing flags it and something failed
+    to measure it.
+    """
+    stacked = np.vstack(values)
+    included = np.any(stacked == 1, axis=0)
+    unknown = np.any(np.isnan(stacked), axis=0)
+    return np.where(included, 1.0, np.where(unknown, np.nan, 0.0))
+
+
 def _validate_format_label_args(max_descriptors, truncation_template):
     """Validation is shared by every descriptor type, so a call fails the same
     way whether or not the arguments end up being used."""
@@ -219,7 +246,7 @@ class IndicatorVariable(Variable, RegionDescriptor):
                     # Merge compatible indicators into a more general indicator
                     new_rule = self.rule.merge_with(other.rule)
                     # The values indicate if the sample belongs to ANY group
-                    new_values = np.max(np.vstack([self.values, other.values]), axis=0)
+                    new_values = disjunction([self.values, other.values])
                     return IndicatorVariable(self.base_variable, new_rule, new_values)
                 else:
                     # If the rules are not compatible, the descriptors can't be merged
@@ -300,7 +327,7 @@ class IndicatorVariableGroup(RegionDescriptor):
     def __init__(self, variables: list[IndicatorVariable]):
         self.variables = sorted(merge_indicator_variables(variables))
         # The merged values indicate which samples belong to ALL contained variables
-        merged_values = np.min(np.vstack([v.values for v in self.variables]), axis=0)
+        merged_values = conjunction([v.values for v in self.variables])
 
         super().__init__(values=merged_values)
 

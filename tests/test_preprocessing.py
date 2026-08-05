@@ -111,6 +111,212 @@ class TestIngest(unittest.TestCase):
         np.testing.assert_equal(result.values, series.values)
 
 
+class TestIngestBoolean(unittest.TestCase):
+    """A boolean column takes two values and nothing in between, so it is
+    described by them rather than by bins cut through a range."""
+
+    def test_boolean_columns_are_discrete(self):
+        df = pd.DataFrame({"flag": [True, False, True, False]})
+
+        variable = pp.ingest(df)[0]
+
+        self.assertIsInstance(variable, DiscreteVariable)
+        self.assertEqual((False, True), variable.categories)
+        self.assertFalse(variable.ordered)
+        np.testing.assert_equal([1.0, 0.0, 1.0, 0.0], variable.values)
+
+    def test_boolean_columns_expand_to_their_two_values(self):
+        df = pd.DataFrame({"flag": [True, False, True, False]})
+
+        result = pp.expand_df(df)
+
+        self.assertEqual(1, len(result))
+        self.assertEqual(["flag is False", "flag is True"], [str(v) for v in result[0]])
+
+    def test_missing_values_survive(self):
+        series = pd.Series([True, None, False], dtype="boolean", name="flag")
+
+        variable = pp.ingest(series)
+
+        self.assertIsInstance(variable, DiscreteVariable)
+        np.testing.assert_equal([1.0, np.nan, 0.0], variable.values)
+
+    def test_a_categorical_of_booleans_stays_categorical(self):
+        """`is_bool_dtype` answers True for a categorical of booleans, which is
+        a discrete variable by dtype already."""
+        series = pd.Series(pd.Categorical([True, False, True]), name="flag")
+
+        variable = pp.ingest(series)
+
+        self.assertIsInstance(variable, DiscreteVariable)
+        self.assertEqual((False, True), variable.categories)
+
+
+class TestIngestIndicators(unittest.TestCase):
+    def setUp(self) -> None:
+        df = pd.DataFrame()
+        df["CD3"] = [True, False, True, False, True]
+        df["CD4"] = [True, True, False, False, True]
+        df["binary"] = [1.0, 0.0, 1.0, 0.0, 1.0]
+        df["cont1"] = [5, 2, 3, 1, 5]
+        df["disc1"] = pd.Categorical(["r", "g", "b", "r", "b"])
+        self.df = df
+
+    def test_indicator_columns_are_labelled_by_their_name(self):
+        result = pp.ingest_indicators(self.df[["CD3", "CD4"]])
+
+        self.assertEqual(2, len(result))
+        self.assertTrue(all(isinstance(v, IndicatorVariable) for v in result))
+        self.assertEqual(["CD3", "CD4"], [str(v) for v in result])
+
+    def test_indicator_values_are_taken_from_the_column(self):
+        cd3, cd4 = pp.ingest_indicators(self.df[["CD3", "CD4"]])
+
+        np.testing.assert_equal(cd3.values, [1, 0, 1, 0, 1])
+        np.testing.assert_equal(cd4.values, [1, 1, 0, 0, 1])
+
+    def test_base_variable_carries_the_column_name(self):
+        cd3, _ = pp.ingest_indicators(self.df[["CD3", "CD4"]])
+
+        self.assertEqual("CD3", cd3.base_variable.name)
+        np.testing.assert_equal(cd3.base_variable.values, cd3.values)
+
+    def test_missing_values_are_carried_through(self):
+        """A sample the column has no measurement for is neither flagged nor
+        unflagged, and reading it as either would be a claim the data does not
+        make."""
+        series = pd.Series([True, None, False], dtype="boolean", name="CD3")
+
+        result = pp.ingest_indicators(series)
+
+        np.testing.assert_equal(result.values, [1.0, np.nan, 0.0])
+
+    def test_an_indicator_of_only_missing_values_is_dropped(self):
+        df = pd.DataFrame({
+            "CD3": pd.Series([True, False, True], dtype="boolean"),
+            "CD8": pd.Series([None, None, None], dtype="boolean"),
+        })
+
+        result = pp.expand_df(df, indicator_columns="all")
+
+        self.assertEqual(["CD3"], [g[0].base_variable.name for g in result])
+
+    def test_nullable_boolean_columns_are_accepted_when_complete(self):
+        series = pd.Series([True, False, True], dtype="boolean", name="CD3")
+
+        result = pp.ingest_indicators(series)
+
+        self.assertIsInstance(result, IndicatorVariable)
+        np.testing.assert_equal(result.values, [1, 0, 1])
+
+    def test_labels_override_the_column_name(self):
+        result = pp.ingest_indicators(
+            self.df[["CD3", "CD4"]], labels={"CD3": "CD3 expressed"}
+        )
+
+        self.assertEqual(["CD3 expressed", "CD4"], [str(v) for v in result])
+        # The variable is still identified by the column it came from
+        self.assertEqual("CD3", result[0].base_variable.name)
+
+    def test_labels_for_unknown_columns_are_rejected(self):
+        with self.assertRaises(KeyError):
+            pp.ingest_indicators(self.df[["CD3"]], labels={"CD8": "CD8"})
+
+    def test_unnamed_columns_are_rejected(self):
+        with self.assertRaises(ValueError):
+            pp.ingest_indicators(pd.Series([True, False]))
+
+    def test_non_boolean_columns_are_rejected(self):
+        """Only the caller knows whether a 0/1 column is a flag, so nothing is
+        converted on the way in."""
+        for column in ["binary", "cont1", "disc1"]:
+            with self.subTest(column=column):
+                with self.assertRaises(ValueError):
+                    pp.ingest_indicators(self.df[[column]])
+
+    def test_categorical_columns_of_booleans_are_rejected(self):
+        """A categorical of booleans answers to `is_bool_dtype`, but it is a
+        discrete variable."""
+        series = pd.Series(pd.Categorical([True, False, True]), name="CD3")
+
+        with self.assertRaises(ValueError):
+            pp.ingest_indicators(series)
+
+    def test_ingest_selects_indicator_columns(self):
+        result = pp.ingest(self.df, indicator_columns=["CD3", "CD4"])
+
+        self.assertEqual(len(self.df.columns), len(result))
+        types = [type(v) for v in result]
+        self.assertEqual(
+            [
+                IndicatorVariable,
+                IndicatorVariable,
+                ContinuousVariable,
+                ContinuousVariable,
+                DiscreteVariable,
+            ],
+            types,
+        )
+
+    def test_ingest_with_all_columns(self):
+        result = pp.ingest(self.df[["CD3", "CD4"]], indicator_columns="all")
+
+        self.assertTrue(all(isinstance(v, IndicatorVariable) for v in result))
+
+    def test_ingest_with_labels(self):
+        result = pp.ingest(self.df, indicator_columns={"CD3": "CD3 expressed"})
+
+        self.assertEqual("CD3 expressed", str(result[0]))
+        # CD4 is boolean too, but was not selected, so it is a variable taking
+        # two values rather than an indicator of one
+        self.assertIsInstance(result[1], DiscreteVariable)
+
+    def test_ingest_reports_the_offending_column(self):
+        with self.assertRaises(ValueError) as ctx:
+            pp.ingest(self.df, indicator_columns=["CD3", "cont1"])
+
+        self.assertIn("cont1", str(ctx.exception))
+
+    def test_ingest_with_a_single_column_name_is_rejected(self):
+        """Only `"all"` is meaningful as a string; a lone column name is a
+        common mistake worth naming."""
+        with self.assertRaises(ValueError):
+            pp.ingest(self.df, indicator_columns="CD3")
+
+    def test_ingest_with_unknown_columns_is_rejected(self):
+        with self.assertRaises(KeyError):
+            pp.ingest(self.df, indicator_columns=["CD8"])
+
+    def test_ingest_of_columns_already_carrying_a_variable_is_rejected(self):
+        v = ContinuousVariable("CD8", np.array([1.0, 0.0, 1.0, 0.0, 1.0]))
+
+        df = self.df.copy()
+        df[v] = v.values
+
+        with self.assertRaises(ValueError):
+            pp.ingest(df, indicator_columns=[v])
+
+    def test_expanded_indicators_form_groups_of_one(self):
+        result = pp.expand_df(self.df, indicator_columns=["CD3", "CD4"])
+
+        indicator_groups = [
+            group for group in result
+            if group[0].base_variable.name in ("CD3", "CD4")
+        ]
+        self.assertEqual(2, len(indicator_groups))
+        self.assertTrue(all(len(group) == 1 for group in indicator_groups))
+
+    def test_constant_indicator_columns_are_dropped_without_complaint(self):
+        df = self.df.copy()
+        df["CD8"] = False
+
+        result = pp.expand_df(df, indicator_columns=["CD3", "CD8"])
+
+        base_names = [group[0].base_variable.name for group in result]
+        self.assertNotIn("CD8", base_names)
+        self.assertIn("CD3", base_names)
+
+
 class TestIngestedToPandas(unittest.TestCase):
     def setUp(self) -> None:
         df = pd.DataFrame()
@@ -137,6 +343,24 @@ class TestIngestedToPandas(unittest.TestCase):
 
         reverted = pp.ingested_to_pandas(pp.ingest(df))
         self.assertTrue(df.equals(reverted))
+
+    def test_indicators_are_named_by_their_rule(self):
+        """An indicator variable has no name of its own, so its rule names the
+        column: several of them in one frame would otherwise collide."""
+        df = pd.DataFrame({"CD3": [True, False, True], "CD4": [False, True, True]})
+
+        reverted = pp.ingested_to_pandas(pp.ingest(df, indicator_columns="all"))
+
+        self.assertTrue(df.astype(float).equals(reverted))
+
+    def test_derived_indicators_are_named_by_their_rule(self):
+        variable = pp.ingest(pd.Series([1.0, 2.0, 3.0, 4.0], name="cont"))
+
+        reverted = pp.ingested_to_pandas(pp.discretize(variable, n_bins=2))
+
+        self.assertEqual(
+            ["cont < 2.50", "cont > 2.50"], list(reverted.columns)
+        )
 
 
 class TestDiscretize(unittest.TestCase):
@@ -194,10 +418,29 @@ class TestDiscretize(unittest.TestCase):
         # Construct dataframe using only the NaN columns
         nan_cols_df = pp.ingested_to_pandas(result)
 
-        # Ensure that the rows that had the NaNs haven't been assigned to any
-        # particular bin
+        # A row with no measurement falls in no bin, and says so in every one
+        # of them rather than reading as a row outside each bin
         nan_mask = data.isna()
-        self.assertEqual(np.sum(nan_cols_df[nan_mask].values), 0, "NaNs mapped to bin!")
+        self.assertTrue(
+            np.isnan(nan_cols_df[nan_mask].values).all(), "NaNs mapped to bin!"
+        )
+        self.assertFalse(np.isnan(nan_cols_df[~nan_mask].values).any())
+
+    def test_discretize_with_a_constant_variable_carrying_nans(self):
+        """A NaN is not a value the variable takes, so a constant variable that
+        has some does not look like it takes two."""
+        variable = pp.ingest(pd.Series([5.0, 5.0, np.nan], name="const"))
+
+        result = pp.discretize(variable)
+
+        self.assertEqual(1, len(result))
+        self.assertEqual("const = 5.0", str(result[0]))
+        np.testing.assert_equal(np.array([1.0, 1.0, np.nan]), result[0].values)
+
+    def test_discretize_with_only_nans(self):
+        variable = pp.ingest(pd.Series([np.nan, np.nan], name="empty"))
+
+        self.assertEqual([], pp.discretize(variable))
 
     def test_discretization_correctly_sets_up_base_variable(self):
         result = pp.discretize(self.cont1, n_bins=2)
@@ -255,10 +498,13 @@ class TestOneHotEncoding(unittest.TestCase):
         # Construct dataframe using only the NaN columns
         nan_cols_df = pp.ingested_to_pandas(result)
 
-        # Ensure that the rows that had the NaNs haven't been assigned to any
-        # particular bin
+        # A row with no category belongs to none of them, and says so in every
+        # one of them rather than reading as a row outside each category
         nan_mask = series.isna()
-        self.assertEqual(np.sum(nan_cols_df[nan_mask].values), 0, "NaNs mapped to bin!")
+        self.assertTrue(
+            np.isnan(nan_cols_df[nan_mask].values).all(), "NaNs mapped to bin!"
+        )
+        self.assertFalse(np.isnan(nan_cols_df[~nan_mask].values).any())
 
     def test_one_hot_encoding_correctly_sets_up_base_variable(self):
         result = pp.one_hot(self.disc2)

@@ -364,3 +364,37 @@ class TestPlottingLabelTruncation(unittest.TestCase):
         self.assertEqual(1, len(texts))
         self.assertIn("(+2 more)", texts[0])
         self.assertEqual(6, len(texts[0].split("\n")))
+
+
+class TestMissingValues(unittest.TestCase):
+    """A sample the variable has no measurement for is left out of the rates
+    rather than counted as unflagged."""
+
+    def test_purity_ignores_unmeasured_samples(self):
+        # Region holds the first 4 samples: 2 flagged, 1 not, 1 unmeasured
+        values = np.array([1.0, 1.0, 0.0, np.nan, 0.0, 0.0])
+        ra = make_region_annotation([make_indicator("a", values)], n_in_region=4)
+
+        self.assertAlmostEqual(2 / 3, metrics.purity(ra))
+
+    def test_purity_of_a_wholly_unmeasured_region_is_zero(self):
+        values = np.array([np.nan, np.nan, 1.0, 1.0])
+        ra = make_region_annotation([make_indicator("a", values)], n_in_region=2)
+
+        self.assertEqual(0, metrics.purity(ra))
+
+    def test_scores_are_taken_over_measured_samples(self):
+        values = np.array([1.0, 1.0, 0.0, np.nan, 0.0, 0.0])
+        v = make_indicator("a", values)
+        ra = make_region_annotation([v], n_in_region=4)
+
+        scores = metrics.descriptor_scores(ra, method="purity")
+
+        # 2 of the 3 measured samples in the region, not 2 of 4
+        self.assertAlmostEqual(2 / 3, scores[v])
+
+    def test_unmeasured_samples_are_not_members(self):
+        values = np.array([1.0, np.nan, 0.0, 1.0])
+        ra = make_region_annotation([make_indicator("a", values)], n_in_region=4)
+
+        self.assertEqual({0, 3}, ra.all_members)
