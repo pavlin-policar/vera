@@ -125,6 +125,8 @@ region_annotations = vera.an.generate_region_annotations(
 
 Each indicator forms a group of one, so `filter_uninformative` judges these variables on whether their region says anything: an indicator is dropped when its rule matches, or its region contains, at least `uninformative_max_sample_coverage` (default 0.95) of the data.
 
+Being a group of one also means there is nothing for `vera.explain.contrastive` to set against anything else, and it returns no panels for a table of nothing but indicators. Reach for `vera.explain.descriptive`, or `vera.pl.plot_regions` to see the regions one at a time.
+
 For an annotation that a label cannot express -- a threshold, a range, one of several categories -- build the variable yourself and use it as the column *name*. A column named by a `Variable` is passed through the expansion step unchanged, and its rule becomes the annotation:
 
 ```python
