@@ -278,6 +278,8 @@ _OKLAB_LAB = np.array([
     [1.9779984951, -2.4285922050, 0.4505937099],
     [0.0259040371, 0.7827717662, -0.8086757660],
 ])
+_OKLAB_LMS_INV = np.linalg.inv(_OKLAB_LMS)
+_OKLAB_LAB_INV = np.linalg.inv(_OKLAB_LAB)
 
 
 def rgb_to_oklab(rgb: np.ndarray) -> np.ndarray:
@@ -289,10 +291,15 @@ def rgb_to_oklab(rgb: np.ndarray) -> np.ndarray:
 
 def oklab_to_rgb(lab: np.ndarray) -> np.ndarray:
     """Convert Oklab colors back to sRGB, clipped to the displayable gamut."""
-    lms = (np.asarray(lab, dtype=float) @ np.linalg.inv(_OKLAB_LAB).T) ** 3
-    linear = lms @ np.linalg.inv(_OKLAB_LMS).T
+    lms = (np.asarray(lab, dtype=float) @ _OKLAB_LAB_INV.T) ** 3
+    linear = lms @ _OKLAB_LMS_INV.T
+    # An out-of-gamut color reaches here with a negative channel, and `where`
+    # evaluates both branches, so the exponent is fed the clamped value even
+    # though the linear branch is the one selected for it
     rgb = np.where(
-        linear <= 0.0031308, linear * 12.92, 1.055 * np.abs(linear) ** (1 / 2.4) - 0.055
+        linear <= 0.0031308,
+        linear * 12.92,
+        1.055 * np.maximum(linear, 0) ** (1 / 2.4) - 0.055,
     )
     return np.clip(rgb, 0, 1)
 
@@ -839,8 +846,17 @@ def plot_annotation(
         # How far each sample is colored towards its region annotation's color
         color_weights = np.zeros(embedding.shape[0])
 
+        # Samples covered by several region annotations take the color of the
+        # one whose descriptor they fulfill most completely. Equal fractions are
+        # settled on the annotations themselves rather than on their position in
+        # the list, so a panel shades the same however its annotations are
+        # ordered; the region bounds separate the parts of a split region, which
+        # share a descriptor and so compare equal on it.
+        def resolution_order(ra: RegionAnnotation):
+            return str(ra.descriptor), ra.region.polygon.bounds
+
         # Set sample colors inside regions
-        for region_annotation in region_annotations:
+        for region_annotation in sorted(region_annotations, key=resolution_order):
             if only_color_inside_members:
                 ra_weights = region_annotation.contained_member_fractions
             else:
@@ -849,10 +865,7 @@ def plot_annotation(
             if not graded_membership:
                 ra_weights = (ra_weights == 1).astype(float)
 
-            # Samples covered by several region annotations take the color of
-            # the one whose descriptor they fulfill most completely, which keeps
-            # the result independent of the order the annotations are drawn in
-            strongest = ra_weights >= color_weights
+            strongest = ra_weights > color_weights
             color_weights[strongest] = ra_weights[strongest]
             point_colors[strongest] = ra_colors[region_annotation]
 

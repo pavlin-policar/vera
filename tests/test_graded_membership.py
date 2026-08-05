@@ -240,6 +240,37 @@ class TestOverlappingAnnotations(unittest.TestCase):
         colors = scatter_colors([weak, strong], ra_colors=ra_colors)
         reversed_colors = scatter_colors([strong, weak], ra_colors=ra_colors)
 
+        # Sample 0 fulfills `weak` fully and `strong` by half, sample 1 the
+        # other way around, so each is claimed by a different annotation. Point
+        # colors are desaturated before being drawn, which leaves the hue.
+        def hue(color):
+            return mcolors.rgb_to_hsv(color)[0]
+
+        self.assertAlmostEqual(hue(ra_colors[weak]), hue(colors[0]), places=6)
+        self.assertAlmostEqual(hue(ra_colors[strong]), hue(colors[1]), places=6)
+        np.testing.assert_allclose(colors, reversed_colors)
+
+    def test_equal_membership_resolves_independently_of_order(self):
+        """Annotations a sample fulfills equally are settled on the annotations
+        themselves; resolving by list position would shade the same panel
+        differently depending on how its annotations happen to be ordered."""
+        halves = [
+            make_region_annotation(
+                [make_indicator(hit, [1, 1]), make_indicator(miss, [0, 1])],
+                n_in_region=2,
+            )
+            for hit, miss in [("a", "b"), ("c", "d")]
+        ]
+        ra_colors = {
+            ra: mcolors.to_rgb(c)
+            for ra, c in zip(halves, ["tab:blue", "tab:orange"])
+        }
+
+        colors = scatter_colors(halves, ra_colors=ra_colors)
+        reversed_colors = scatter_colors(halves[::-1], ra_colors=ra_colors)
+
+        # Sample 0 fulfills both annotations by exactly one half, sample 1 both
+        # in full — every sample is a tie
         np.testing.assert_allclose(colors, reversed_colors)
 
 
