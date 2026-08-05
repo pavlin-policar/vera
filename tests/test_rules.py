@@ -364,3 +364,16 @@ class TestIndicatorRule(unittest.TestCase):
 
     def test_ordering_is_by_label(self):
         self.assertLess(vera.rules.IndicatorRule("CD3"), vera.rules.IndicatorRule("CD4"))
+
+
+class TestEqualityRuleStringFormatting(unittest.TestCase):
+    def test_truth_values_read_as_a_statement(self):
+        r_true = vera.rules.EqualityRule(True, value_name="flag")
+        r_false = vera.rules.EqualityRule(False, value_name="flag")
+
+        self.assertEqual("flag is True", str(r_true))
+        self.assertEqual("flag is False", str(r_false))
+
+    def test_other_values_are_unaffected(self):
+        self.assertEqual("x = 1", str(vera.rules.EqualityRule(1, value_name="x")))
+        self.assertEqual("x = red", str(vera.rules.EqualityRule("red", value_name="x")))

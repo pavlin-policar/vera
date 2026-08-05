@@ -46,6 +46,15 @@ def _pd_dtype_to_variable(col_name: Union[str, Variable], col_type, col_vals) ->
             categories=col_type.categories.tolist(),
             ordered=col_type.ordered,
         )
+    elif pd.api.types.is_bool_dtype(col_type):
+        # A boolean column takes two values and nothing in between, so it is
+        # described by them rather than by bins cut through a range
+        variable = DiscreteVariable(
+            col_name,
+            values=col_vals[1].to_numpy(dtype=float, na_value=np.nan),
+            categories=[False, True],
+            ordered=False,
+        )
     elif pd.api.types.is_numeric_dtype(col_type):
         variable = ContinuousVariable(col_name, values=col_vals[1].values)
     else:

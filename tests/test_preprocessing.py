@@ -111,6 +111,47 @@ class TestIngest(unittest.TestCase):
         np.testing.assert_equal(result.values, series.values)
 
 
+class TestIngestBoolean(unittest.TestCase):
+    """A boolean column takes two values and nothing in between, so it is
+    described by them rather than by bins cut through a range."""
+
+    def test_boolean_columns_are_discrete(self):
+        df = pd.DataFrame({"flag": [True, False, True, False]})
+
+        variable = pp.ingest(df)[0]
+
+        self.assertIsInstance(variable, DiscreteVariable)
+        self.assertEqual((False, True), variable.categories)
+        self.assertFalse(variable.ordered)
+        np.testing.assert_equal([1.0, 0.0, 1.0, 0.0], variable.values)
+
+    def test_boolean_columns_expand_to_their_two_values(self):
+        df = pd.DataFrame({"flag": [True, False, True, False]})
+
+        result = pp.expand_df(df)
+
+        self.assertEqual(1, len(result))
+        self.assertEqual(["flag is False", "flag is True"], [str(v) for v in result[0]])
+
+    def test_missing_values_survive(self):
+        series = pd.Series([True, None, False], dtype="boolean", name="flag")
+
+        variable = pp.ingest(series)
+
+        self.assertIsInstance(variable, DiscreteVariable)
+        np.testing.assert_equal([1.0, np.nan, 0.0], variable.values)
+
+    def test_a_categorical_of_booleans_stays_categorical(self):
+        """`is_bool_dtype` answers True for a categorical of booleans, which is
+        a discrete variable by dtype already."""
+        series = pd.Series(pd.Categorical([True, False, True]), name="flag")
+
+        variable = pp.ingest(series)
+
+        self.assertIsInstance(variable, DiscreteVariable)
+        self.assertEqual((False, True), variable.categories)
+
+
 class TestIngestIndicators(unittest.TestCase):
     def setUp(self) -> None:
         df = pd.DataFrame()
@@ -226,7 +267,9 @@ class TestIngestIndicators(unittest.TestCase):
         result = pp.ingest(self.df, indicator_columns={"CD3": "CD3 expressed"})
 
         self.assertEqual("CD3 expressed", str(result[0]))
-        self.assertIsInstance(result[1], ContinuousVariable)
+        # CD4 is boolean too, but was not selected, so it is a variable taking
+        # two values rather than an indicator of one
+        self.assertIsInstance(result[1], DiscreteVariable)
 
     def test_ingest_reports_the_offending_column(self):
         with self.assertRaises(ValueError) as ctx:

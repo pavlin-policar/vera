@@ -138,6 +138,10 @@ class EqualityRule(Rule):
         return self.value == other.value
 
     def __str__(self):
+        # A truth value reads as a statement about the variable, not as one of
+        # the values it was found to take
+        if isinstance(self.value, (bool, np.bool_)):
+            return f"{self.value_name} is {str(self.value)}"
         return f"{self.value_name} = {str(self.value)}"
 
     def __repr__(self):
