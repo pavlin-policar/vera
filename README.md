@@ -105,11 +105,15 @@ Indicator columns have to be of boolean dtype. Nothing is converted on the way i
 Missing values are supported through pandas' nullable `boolean` dtype:
 
 ```python
+import pandas as pd
+
 presence = (expression > 0).astype("boolean")
 presence[expression.isna()] = pd.NA
 ```
 
 A sample with no measurement is not flagged, and it is not unflagged either. It takes no part in shaping the variable's region, it is never reported as a member, and it is left out of the rates the variable is scored on rather than counted against it. Where several variables are annotated together, a sample belongs to the group if every variable flags it, and is excluded as soon as one does not -- whether or not the others measured it.
+
+Continuous and categorical columns are treated the same way: a missing value falls in no bin and in no category, and says so in each of them.
 
 The column name is what appears on the plot, so a `CD3` column is annotated `CD3`. To annotate a column with something else, pass a mapping instead of a list:
 
