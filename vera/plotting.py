@@ -1,7 +1,7 @@
 import re
 import string
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from itertools import cycle, chain
 from tempfile import NamedTemporaryFile
 from textwrap import wrap
@@ -264,6 +264,86 @@ def get_cmap_colors(cmap: str):
         return cmap_obj.colors
     n = min(cmap_obj.N, 256)
     return [tuple(c) for c in cmap_obj(np.linspace(0, 1, n))]
+
+
+# Matrices of the Oklab transform, from Björn Ottosson's reference
+# implementation (https://bottosson.github.io/posts/oklab/)
+_OKLAB_LMS = np.array([
+    [0.4122214708, 0.5363325363, 0.0514459929],
+    [0.2119034982, 0.6806995451, 0.1073969566],
+    [0.0883024619, 0.2817188376, 0.6299787005],
+])
+_OKLAB_LAB = np.array([
+    [0.2104542553, 0.7936177850, -0.0040720468],
+    [1.9779984951, -2.4285922050, 0.4505937099],
+    [0.0259040371, 0.7827717662, -0.8086757660],
+])
+_OKLAB_LMS_INV = np.linalg.inv(_OKLAB_LMS)
+_OKLAB_LAB_INV = np.linalg.inv(_OKLAB_LAB)
+
+
+def rgb_to_oklab(rgb: np.ndarray) -> np.ndarray:
+    """Convert sRGB colors to Oklab, a perceptually uniform color space."""
+    rgb = np.asarray(rgb, dtype=float)
+    linear = np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
+    return np.cbrt(linear @ _OKLAB_LMS.T) @ _OKLAB_LAB.T
+
+
+def oklab_to_rgb(lab: np.ndarray) -> np.ndarray:
+    """Convert Oklab colors back to sRGB, clipped to the displayable gamut."""
+    lms = (np.asarray(lab, dtype=float) @ _OKLAB_LAB_INV.T) ** 3
+    linear = lms @ _OKLAB_LMS_INV.T
+    # An out-of-gamut color reaches here with a negative channel, and `where`
+    # evaluates both branches, so the exponent is fed the clamped value even
+    # though the linear branch is the one selected for it
+    rgb = np.where(
+        linear <= 0.0031308,
+        linear * 12.92,
+        1.055 * np.maximum(linear, 0) ** (1 / 2.4) - 0.055,
+    )
+    return np.clip(rgb, 0, 1)
+
+
+def _shade_linear(colors, weights, background):
+    return background + weights[:, None] * (colors - background)
+
+
+def _shade_gamma(colors, weights, background, gamma: float = 2.2):
+    return _shade_linear(colors, weights ** gamma, background)
+
+
+def _shade_reserve_full(colors, weights, background, partial_ceiling: float = 0.6):
+    """Partial membership is confined below `partial_ceiling` of the ramp, so
+    only samples fulfilling the whole descriptor reach the undiluted color."""
+    weights = np.where(weights < 1, weights * partial_ceiling, 1.0)
+    return _shade_linear(colors, weights, background)
+
+
+def _shade_quantized(colors, weights, background, cutoff: float = 0.5):
+    """Four bands — none, some, most, all — regardless of the group size, so
+    the number of distinguishable shades does not shrink as the group grows."""
+    banded = np.select(
+        [weights <= 0, weights < cutoff, weights < 1], [0.0, 1 / 3, 2 / 3], default=1.0
+    )
+    return _shade_linear(colors, banded, background)
+
+
+def _shade_perceptual(colors, weights, background):
+    """Interpolate in Oklab, so equal steps in membership are equal steps in
+    perceived color. In sRGB the ramp reaches an apparently full color early,
+    which overstates how much of a descriptor a sample fulfills."""
+    lab = rgb_to_oklab(colors)
+    lab_background = rgb_to_oklab(background)
+    return oklab_to_rgb(lab_background + weights[:, None] * (lab - lab_background))
+
+
+MEMBERSHIP_SHADING_METHODS = {
+    "linear": _shade_linear,
+    "gamma": _shade_gamma,
+    "reserve_full": _shade_reserve_full,
+    "quantized": _shade_quantized,
+    "perceptual": _shade_perceptual,
+}
 
 
 def get_cmap_hues(cmap: str):
@@ -741,6 +821,8 @@ def plot_annotation(
     indicate_purity: bool = False,
     indicate_membership: bool = False,
     only_color_inside_members: bool = True,
+    graded_membership: bool = True,
+    membership_shading: Union[str, Callable] = "perceptual",
     draw_labels: bool = True,
     optimize_labels: bool = True,
     max_descriptors: int = 5,
@@ -801,16 +883,50 @@ def plot_annotation(
     }
 
     # Setup sample colors
-    point_colors = np.array([mcolors.to_rgb("#aaaaaa")] * embedding.shape[0])
+    background_color = mcolors.to_rgb("#aaaaaa")
+    point_colors = np.array([background_color] * embedding.shape[0])
 
     if indicate_membership:
+        # How far each sample is colored towards its region annotation's color
+        color_weights = np.zeros(embedding.shape[0])
+
+        # Samples covered by several region annotations take the color of the
+        # one whose descriptor they fulfill most completely. Equal fractions are
+        # settled on the annotations themselves rather than on their position in
+        # the list, so a panel shades the same however its annotations are
+        # ordered; the region bounds separate the parts of a split region, which
+        # share a descriptor and so compare equal on it.
+        def resolution_order(ra: RegionAnnotation):
+            return str(ra.descriptor), ra.region.polygon.bounds
+
         # Set sample colors inside regions
-        for region_annotation in region_annotations:
+        for region_annotation in sorted(region_annotations, key=resolution_order):
             if only_color_inside_members:
-                group_indices = list(region_annotation.contained_members)
+                ra_weights = region_annotation.contained_member_fractions
             else:
-                group_indices = list(region_annotation.all_members)
-            point_colors[group_indices] = ra_colors[region_annotation]
+                ra_weights = region_annotation.all_member_fractions
+
+            if not graded_membership:
+                ra_weights = (ra_weights == 1).astype(float)
+
+            strongest = ra_weights > color_weights
+            color_weights[strongest] = ra_weights[strongest]
+            point_colors[strongest] = ra_colors[region_annotation]
+
+        # Shade each sample from the background towards its annotation's color
+        if callable(membership_shading):
+            shading_func = membership_shading
+        elif membership_shading in MEMBERSHIP_SHADING_METHODS:
+            shading_func = MEMBERSHIP_SHADING_METHODS[membership_shading]
+        else:
+            raise ValueError(
+                f"Unrecognized membership shading `{membership_shading}`. Must "
+                f"be a callable or one of "
+                f"{', '.join(MEMBERSHIP_SHADING_METHODS)}."
+            )
+        point_colors = shading_func(
+            point_colors, color_weights, np.asarray(background_color)
+        )
 
         # Desaturate colors slightly
         point_colors = mcolors.rgb_to_hsv(point_colors)
@@ -995,6 +1111,8 @@ def plot_annotations(
     indicate_purity: bool = False,
     indicate_membership: bool = True,
     only_color_inside_members: bool = True,
+    graded_membership: bool = True,
+    membership_shading: Union[str, Callable] = "perceptual",
     max_descriptors: int = 5,
     truncation_template: str = "(+{n} more)",
     sep: str = "\n",
@@ -1034,6 +1152,8 @@ def plot_annotations(
             indicate_purity=indicate_purity,
             indicate_membership=indicate_membership,
             only_color_inside_members=only_color_inside_members,
+            graded_membership=graded_membership,
+            membership_shading=membership_shading,
             max_descriptors=max_descriptors,
             truncation_template=truncation_template,
             sep=sep,
