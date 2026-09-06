@@ -570,8 +570,9 @@ def get_vector_between(
         Can be onen of "boundaries", "centroids", and "auto".
         The behavior for "auto" is as follows:
         - For intersecting polygons, the direction is determined by the
-          differences in their centroids. The distance for interseting polygons
-          is always 0.
+          differences in their centroids. The distance is negative: the extent
+          of the intersection along that direction, i.e. how deep the polygons
+          penetrate one another.
         - For disjoint polygons, the direction is determined along the line
           connecting the two closest points in both polygons. The distance is
           determined by the length of this line.
@@ -607,6 +608,18 @@ def get_vector_between(
 
         return vector, dist
 
+    def _between_overlapping(geom1, geom2):
+        # Overlapping polygons are zero apart by any boundary measure, which
+        # would leave two labels stacked on top of each other with nothing to
+        # push them apart. Report instead how deep they penetrate: the extent
+        # of their intersection along the centroid direction, as a negative
+        # distance, so that a repulsion weighted by `margin - dist` grows with
+        # the overlap.
+        vector, _ = _between_centroids(geom1, geom2)
+        x_min, y_min, x_max, y_max = geom1.intersection(geom2).bounds
+        depth = abs(vector[0]) * (x_max - x_min) + abs(vector[1]) * (y_max - y_min)
+        return vector, -depth
+
     match between:
         case "boundaries":
             return _between_boundaries(geom1, geom2)
@@ -614,7 +627,7 @@ def get_vector_between(
             return _between_centroids(geom1, geom2)
         case "auto":
             if geom1.intersects(geom2):
-                return _between_centroids(geom1, geom2)
+                return _between_overlapping(geom1, geom2)
             else:
                 return _between_boundaries(geom1, geom2)
 
