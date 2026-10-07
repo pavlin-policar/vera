@@ -1180,28 +1180,31 @@ def plot_annotations(
 def layout_variable_colors(
     layout: list[list[RegionAnnotation]],
     cmap="tab10",
-) -> dict[RegionAnnotation, str]:
-    all_region_annotations = set(chain.from_iterable(layout))
+) -> dict[RegionAnnotation, tuple[float, float, float]]:
+    """Assign one color per descriptor across all panels of a layout.
 
-    # We use the region descriptors rule as color key
-    region_annotation_keys = {ra: ra.descriptor for ra in all_region_annotations}
+    Region annotations sharing a descriptor share a color. Descriptors take
+    colors in order of first appearance, scanning panels and the annotations
+    within them in layout order, so the same layout always yields the same
+    colors. Region annotation and descriptor hashes derive from salted string
+    hashes, so any ordering that passes through a set would differ between
+    processes.
+    """
+    descriptors = list(dict.fromkeys(ra.descriptor for ra in chain.from_iterable(layout)))
 
     cmap_colors = get_cmap_colors(cmap)
-    if len(region_annotation_keys) > len(cmap_colors):
+    if len(descriptors) > len(cmap_colors):
         cmap_colors = glasbey.extend_palette(
-            cmap, palette_size=len(region_annotation_keys), colorblind_safe=True
+            cmap, palette_size=len(descriptors), colorblind_safe=True
         )
 
     descriptor_color_mapping = {
-        descriptor: mcolors.to_rgb(c)
-        for descriptor, c in zip(region_annotation_keys.values(), cmap_colors)
-    }
-    region_annotation_colors = {
-        ra: descriptor_color_mapping[region_annotation_keys[ra]]
-        for ra in all_region_annotations
+        descriptor: mcolors.to_rgb(c) for descriptor, c in zip(descriptors, cmap_colors)
     }
 
-    return region_annotation_colors
+    return {
+        ra: descriptor_color_mapping[ra.descriptor] for ra in chain.from_iterable(layout)
+    }
 
 
 def plot_discretization(
