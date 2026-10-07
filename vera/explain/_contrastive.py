@@ -1,4 +1,3 @@
-from functools import reduce
 from itertools import combinations
 
 import numpy as np
@@ -58,8 +57,11 @@ def merge_contrastive(
         edges.extend(connected_components)
 
     # Generate a graph from all edges and find which groups of region
-    # annotations should be merged together
-    all_ras_to_merge = reduce(lambda acc, x: set(x) | acc, edges, set())
+    # annotations should be merged together. Region annotation hashes derive
+    # from salted string hashes, so iterating a set of them would order the
+    # output differently in every process; nodes are kept in order of first
+    # appearance instead
+    all_ras_to_merge = list(dict.fromkeys(ra for edge in edges for ra in edge))
     graph = g.edgelist_to_graph(all_ras_to_merge, edges)
     graph = g.to_undirected(graph)
     connected_components = g.connected_components(graph)
@@ -73,8 +75,12 @@ def merge_contrastive(
     ]
 
     # We now have a list of merged RAs. We still need to add the unmerged RAs
-    unmerged_ras = set(all_region_annotations) - all_ras_to_merge
-    new_ras = merged_ras + list(unmerged_ras)
+    # in their input order
+    ras_to_merge = set(all_ras_to_merge)
+    unmerged_ras = [
+        ra for ra in dict.fromkeys(all_region_annotations) if ra not in ras_to_merge
+    ]
+    new_ras = merged_ras + unmerged_ras
 
     grouped_new_ras = group_by_descriptor(new_ras)
 

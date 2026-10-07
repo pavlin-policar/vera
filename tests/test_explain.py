@@ -116,6 +116,58 @@ print(json.dumps(_run_descriptive_pipeline(features, embedding)))
         self.assertEqual(layouts[0], layouts[2])
 
 
+class TestContrastiveLayoutDeterminism(unittest.TestCase):
+    """Region annotation hashes derive from salted string hashes, so iterating
+    a set of them yields a different order under every PYTHONHASHSEED. Salting
+    `RegionAnnotation.__hash__` reproduces that within one process, without
+    the cost of a subprocess per seed."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        features, embedding = load_iris()
+        # A copy of a column has the same regions as the original, so the two
+        # are merged; the remaining variables pass through unmerged
+        features["petal length copy"] = features["petal length (cm)"]
+        cls.region_annotations = vera.an.generate_region_annotations(
+            features,
+            embedding,
+            n_discretization_bins=5,
+            scale_factor=1,
+            sample_size=5000,
+            contour_level=0.25,
+            merge_min_sample_overlap=0.5,
+            random_state=0,
+        )
+
+    def _contrastive_under_hash_salt(self, salt):
+        from unittest import mock
+
+        from vera.region_annotation import RegionAnnotation
+
+        unsalted_hash = RegionAnnotation.__hash__
+        with mock.patch.object(
+            RegionAnnotation, "__hash__", lambda ra: hash((salt, unsalted_hash(ra)))
+        ):
+            layout = vera.explain.contrastive(
+                self.region_annotations, max_panels=None, filter_layouts=False
+            )
+        return [[repr(ra) for ra in panel] for panel in layout]
+
+    def test_merged_variables_are_contrasted(self):
+        layout = self._contrastive_under_hash_salt(0)
+
+        merged = [panel for panel in layout if "petal length copy" in panel[0]]
+        self.assertEqual(1, len(merged))
+        self.assertTrue(all("petal length (cm)" in ra for ra in merged[0]))
+
+    def test_identical_layouts_under_different_hash_salts(self):
+        layouts = [self._contrastive_under_hash_salt(salt) for salt in range(5)]
+
+        for salt, layout in enumerate(layouts[1:], start=1):
+            with self.subTest(salt=salt):
+                self.assertEqual(layouts[0], layout)
+
+
 class TestContrastiveWithoutCandidates(unittest.TestCase):
     """A contrastive panel sets a variable's regions against one another, so a
     table of indicator variables -- each of which holds a single region -- has
