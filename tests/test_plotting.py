@@ -60,6 +60,72 @@ class TestGetCmapColors(unittest.TestCase):
                 self.assertTrue(np.all((hues >= 0) & (hues <= 1)))
 
 
+class _StubAnnotation:
+    """A region annotation reduced to what `layout_variable_colors` reads.
+
+    The hash is set explicitly so a test can reproduce what differing string
+    hash salts do to real region annotations across processes: the same
+    layout, its objects hashing differently.
+    """
+
+    def __init__(self, descriptor, hash_value):
+        self.descriptor = descriptor
+        self.hash_value = hash_value
+
+    def __hash__(self):
+        return self.hash_value
+
+
+def _stub_layout(panels, hash_order):
+    """Build a layout of stubs from descriptor names, one hash per stub."""
+    hashes = iter(hash_order)
+    return [[_StubAnnotation(d, next(hashes)) for d in panel] for panel in panels]
+
+
+def _colors_by_position(layout, colors):
+    return [[colors[ra] for ra in panel] for panel in layout]
+
+
+class TestLayoutVariableColors(unittest.TestCase):
+    PANELS = [["c", "a"], ["b", "a", "d"]]
+
+    def test_colors_independent_of_hashes(self):
+        n = sum(len(panel) for panel in self.PANELS)
+        ascending = _stub_layout(self.PANELS, range(n))
+        descending = _stub_layout(self.PANELS, reversed(range(n)))
+
+        self.assertEqual(
+            _colors_by_position(ascending, vera.pl.layout_variable_colors(ascending)),
+            _colors_by_position(descending, vera.pl.layout_variable_colors(descending)),
+        )
+
+    def test_descriptors_colored_in_order_of_first_appearance(self):
+        layout = _stub_layout(self.PANELS, range(5))
+        colors = vera.pl.layout_variable_colors(layout, cmap="tab10")
+
+        palette = [mcolors.to_rgb(c) for c in get_cmap_colors("tab10")]
+        by_descriptor = {ra.descriptor: colors[ra] for panel in layout for ra in panel}
+        # Repeats of "a" neither take a second color nor shift later descriptors
+        self.assertEqual(
+            {"c": palette[0], "a": palette[1], "b": palette[2], "d": palette[3]},
+            by_descriptor,
+        )
+
+    def test_glasbey_extension_is_stable(self):
+        panels = [[f"d{i}" for i in range(7)], [f"d{i}" for i in range(7, 14)]]
+        ascending = _stub_layout(panels, range(14))
+        descending = _stub_layout(panels, reversed(range(14)))
+
+        colors = vera.pl.layout_variable_colors(ascending, cmap="tab10")
+        self.assertEqual(14, len(set(colors.values())))
+        self.assertEqual(
+            _colors_by_position(ascending, colors),
+            _colors_by_position(
+                descending, vera.pl.layout_variable_colors(descending, cmap="tab10")
+            ),
+        )
+
+
 class TestPlotAnnotationsSmoke(unittest.TestCase):
     """End-to-end render check: raw features through to a drawn figure."""
 
