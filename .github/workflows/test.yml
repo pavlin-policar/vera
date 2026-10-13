@@ -25,8 +25,9 @@ jobs:
         run: pytest tests/
 
   packaging:
-    # Build a wheel, install it, and import it from outside the repo to catch
-    # missing subpackages or undeclared dependencies
+    # Build a wheel and an sdist, install each into its own environment, and
+    # import it from outside the repo to catch missing subpackages or
+    # undeclared dependencies. The sdist is what conda-forge builds from.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,3 +42,8 @@ jobs:
         run: |
           pip install dist/*.whl
           cd /tmp && python -c "import vera"
+      - name: Install sdist and smoke-test import
+        run: |
+          python -m venv /tmp/sdist-env
+          /tmp/sdist-env/bin/pip install dist/*.tar.gz
+          cd /tmp && /tmp/sdist-env/bin/python -c "import vera"
