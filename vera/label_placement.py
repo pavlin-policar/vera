@@ -885,6 +885,17 @@ def get_label_bounding_boxes_on_ax(
     return label_bboxes
 
 
+def data_footprint(X: np.ndarray, radius: float) -> shapely.Geometry:
+    """The area the data points occupy: the union of discs of ``radius``
+    around them, simplified to a tolerance of half the radius.
+
+    Unlike a density contour, which is cut at a fraction of the peak density,
+    it covers small and sparse clusters as fully as dense ones.
+    """
+    discs = shapely.buffer(shapely.points(X), radius, quad_segs=4)
+    return shapely.union_all(discs).simplify(radius / 2)
+
+
 def evaluate_label_pos_quality(
     labels: list[shapely.Polygon],
     label_target_regions: list[shapely.Polygon],
@@ -894,12 +905,16 @@ def evaluate_label_pos_quality(
     label_label_margin: float = 0.02,
     bounds_margin: float = 0.03,
     score_crossings: bool = False,
+    data_region: shapely.Geometry = None,
 ):
     """Count the ways in which a label layout is poor. Lower is better.
 
     ``score_crossings`` adds a ``crossings`` entry counting leader lines that
-    cross. It is optional because callers weight the returned entries by name,
-    and an entry they do not know about has no weight to be given.
+    cross. ``data_region`` adds ``hard_label_data_intersects`` and
+    ``soft_label_data_intersects`` entries counting labels that cover the data
+    or come within ``label_region_margin`` of it. Both are optional because
+    callers weight the returned entries by name, and an entry they do not know
+    about has no weight to be given.
     """
     ax_bbox = np.array(get_ax_bounding_box(ax))
 
@@ -951,5 +966,14 @@ def evaluate_label_pos_quality(
     if score_crossings:
         starts, ends = leader_endpoints(labels, label_target_regions)
         quality["crossings"] = float(count_crossings(starts, ends))
+
+    if data_region is not None:
+        quality["hard_label_data_intersects"] = float(sum(
+            shapely.intersects(label, data_region) for label in labels
+        ))
+        quality["soft_label_data_intersects"] = float(sum(
+            shapely.intersects(label.buffer(label_region_margin), data_region)
+            for label in labels
+        ))
 
     return quality

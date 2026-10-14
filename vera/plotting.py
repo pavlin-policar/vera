@@ -36,6 +36,7 @@ from vera.label_placement import (
     add_bbox_padding,
     center_bbox_on_element,
     evaluate_label_pos_quality,
+    data_footprint,
     get_artist_bounding_boxes,
     bbox_to_polygon,
     convert_ax_to_data,
@@ -991,6 +992,8 @@ def plot_annotation(
             "soft_label_label_intersects": 2,
             "soft_label_region_intersects": 2,
             "crossings": 5,
+            "hard_label_data_intersects": 10,
+            "soft_label_data_intersects": 2,
         }
 
         ax_bbox = get_ax_bounding_box(ax)
@@ -1001,10 +1004,12 @@ def plot_annotation(
         ax_bbox = set_bbox_square_aspect(ax_bbox)
 
         if optimize_labels:
-            # Obtain a polygon that encompasses the embedding
-            embedding_density = embedding_obj.estimate_density(1, weighted=False)
-            embedding_region = Region.from_density(embedding_obj, embedding_density)
-            embedding_polygon = embedding_region.polygon
+            # The area the data occupy, which labels should keep clear of. A
+            # density contour would miss clusters far sparser than the
+            # densest one, and labels would then be placed over them. It is
+            # built from the sample positions alone, so sample weights, which
+            # can shrink a weighted density to nothing, do not affect it.
+            embedding_polygon = data_footprint(embedding, embedding_obj.scale / 2)
 
             results = {}
             # Labels need room around the data; try several axis paddings and
@@ -1029,7 +1034,7 @@ def plot_annotation(
                 def score_layout(labels):
                     quality = evaluate_label_pos_quality(
                         labels, label_target_regions, region_patches, ax,
-                        score_crossings=True,
+                        score_crossings=True, data_region=embedding_polygon,
                     )
                     return sum(penalty_weighing[k] * v for k, v in quality.items())
 
