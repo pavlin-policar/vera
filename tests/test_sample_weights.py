@@ -9,8 +9,9 @@ from tests.utils import generate_clusters
 
 
 class TestSampleWeights(unittest.TestCase):
-    """Sample weights multiply the KDE weights, so they reshape regions without
-    changing which samples a region's rule describes."""
+    """Sample weights multiply the KDE weights and densities are contoured
+    relative to the unweighted peak, so weights shrink or remove regions
+    without changing which samples a region's rule describes."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -41,13 +42,35 @@ class TestSampleWeights(unittest.TestCase):
         members = set().union(*(ra.contained_samples for ra in ra_group))
         return set(np.unique(self.cluster[list(members)]))
 
-    def test_uniform_weights_leave_regions_unchanged(self):
+    def test_unit_weights_leave_regions_unchanged(self):
         unweighted = self._regions()
-        weighted = self._regions(sample_weights=np.full(self.n_samples, 0.3))
+        weighted = self._regions(sample_weights=np.ones(self.n_samples))
         self.assertEqual(unweighted.keys(), weighted.keys())
         for key in unweighted:
             for ra1, ra2 in zip(unweighted[key], weighted[key]):
                 self.assertTrue(ra1.region.polygon.equals(ra2.region.polygon))
+
+    def test_uniform_weights_shrink_regions(self):
+        unweighted = self._regions()
+        weighted = self._regions(sample_weights=np.full(self.n_samples, 0.5))
+        self.assertEqual(unweighted.keys(), weighted.keys())
+        for key in unweighted:
+            p1 = unweighted[key][0].region.polygon
+            p2 = weighted[key][0].region.polygon
+            self.assertLess(p2.area, p1.area)
+            self.assertTrue(p1.buffer(1e-9).contains(p2))
+
+    def test_uniform_weights_below_contour_level_remove_regions(self):
+        weighted = self._regions(
+            sample_weights=np.full(self.n_samples, 0.2), contour_level=0.25
+        )
+        self.assertEqual(weighted, {})
+
+    def test_poorly_weighted_variable_loses_its_region(self):
+        weights = np.where(self.cluster == 1, 0.1, 1.0)
+        weighted = self._regions(sample_weights=weights)
+        self.assertNotIn("middle", weighted)
+        self.assertIn("outer", weighted)
 
     def test_zero_weight_removes_a_cluster_from_the_region(self):
         self.assertEqual(self._covered_clusters(self._regions()["outer"]), {0, 2})
@@ -79,6 +102,7 @@ class TestSampleWeights(unittest.TestCase):
             -np.ones(self.n_samples),
             np.full(self.n_samples, np.nan),
             np.zeros(self.n_samples),
+            np.full(self.n_samples, 1.5),
         ]:
             with self.assertRaises(ValueError):
                 self._regions(sample_weights=weights)

@@ -33,6 +33,8 @@ def _check_sample_weights(sample_weights, n_samples: int) -> np.ndarray:
         )
     if not np.all(np.isfinite(sample_weights)) or np.any(sample_weights < 0):
         raise ValueError("`sample_weights` must be finite and non-negative.")
+    if np.any(sample_weights > 1):
+        raise ValueError("`sample_weights` must not exceed one.")
     if not np.any(sample_weights > 0):
         raise ValueError("`sample_weights` must not all be zero.")
     return sample_weights
@@ -50,12 +52,15 @@ class Embedding:
     n_density_grid_points : int, default=100
         Number of grid points per axis on which densities are evaluated.
     sample_weights : np.ndarray, optional
-        Non-negative per-sample weights, e.g., derived from a sample-wise
-        distortion measure of the embedding. They multiply the indicator values
-        that act as KDE weights, so a down-weighted sample contributes less to
-        every density and therefore to the shape of every region. Since regions
-        are contoured relative to each density's maximum, only relative weights
-        matter. Region membership and the rates computed on it are unaffected.
+        Per-sample weights in [0, 1], e.g., derived from a sample-wise
+        distortion measure of the embedding. A weight is the fraction of the
+        sample's contribution that is kept: it multiplies the indicator values
+        that act as KDE weights. Each weighted density is scaled by the peak of
+        its unweighted counterpart, so the contour level applies to the
+        unweighted density. A variable whose samples are all down-weighted
+        therefore yields a smaller region, and none once its density stays
+        below the contour level. Region membership and the rates computed on it
+        are unaffected.
     """
 
     def __init__(
@@ -98,14 +103,25 @@ class Embedding:
         # A sample with no measurement carries no weight, so it shapes no
         # region. Left as NaN it would poison the whole density estimate.
         weights = np.nan_to_num(values, nan=0.0)
-        if self.sample_weights is not None:
-            weights = weights * self.sample_weights
-        if not np.any(weights > 0):
-            return Density(self._density_grid, np.zeros(self._density_grid.shape[0]))
+        density = self._kde(weights, kernel)
+        if self.sample_weights is None:
+            return Density(self._density_grid, density)
 
+        # KDEpy normalizes the weights, so the weighted density is rescaled by
+        # the fraction of the variable's weight that the sample weights keep
+        weighted = weights * self.sample_weights
+        weighted_density = self._kde(weighted, kernel)
+        if np.any(weighted > 0):
+            weighted_density *= weighted.sum() / weights.sum()
+        return Density(self._density_grid, weighted_density, peak=density.max())
+
+    def _kde(self, weights: np.ndarray, kernel: str) -> np.ndarray:
+        """Density of the weighted samples on the grid, integrating to one, or
+        zero everywhere if no sample carries weight."""
+        if not np.any(weights > 0):
+            return np.zeros(self._density_grid.shape[0])
         kde = KDEpy.FFTKDE(kernel=kernel, bw=self.scale).fit(self.X, weights=weights)
-        kde_esimates = kde.evaluate(self._density_grid)
-        return Density(self._density_grid, kde_esimates)
+        return kde.evaluate(self._density_grid)
 
     def __eq__(self, other):
         if not isinstance(other, Embedding):
