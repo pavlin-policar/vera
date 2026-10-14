@@ -22,6 +22,7 @@ from vera.label_placement import (
     evaluate_label_pos_quality,
     apply_force_directed_layout,
     optimize_label_positions,
+    data_footprint,
 )
 
 
@@ -236,6 +237,59 @@ class TestScoreCrossings(unittest.TestCase):
         with_ = self.quality(self.crossed, score_crossings=True)
 
         self.assertEqual(without, {k: v for k, v in with_.items() if k != "crossings"})
+
+
+class TestScoreDataOverlap(unittest.TestCase):
+    """Labels drawn over the data points were not penalized, so a layout that
+    covered the data could score as well as one that kept clear of it."""
+
+    def setUp(self):
+        self.fig, self.ax = plt.subplots()
+        self.ax.set_xlim(-10, 10)
+        self.ax.set_ylim(-10, 10)
+        self.targets = [box(0, -5)]
+        self.data = box(0, 0, w=4, h=4)
+
+    def tearDown(self):
+        plt.close("all")
+
+    def quality(self, labels, **kwargs):
+        return evaluate_label_pos_quality(
+            labels, self.targets, self.targets, self.ax, **kwargs
+        )
+
+    def test_absent_by_default(self):
+        quality = self.quality([box(0, 0)])
+        self.assertNotIn("hard_label_data_intersects", quality)
+        self.assertNotIn("soft_label_data_intersects", quality)
+
+    def test_counts_labels_over_the_data(self):
+        over = self.quality([box(0, 0)], data_region=self.data)
+        clear = self.quality([box(8, 8)], data_region=self.data)
+
+        self.assertEqual(1.0, over["hard_label_data_intersects"])
+        self.assertEqual(0.0, clear["hard_label_data_intersects"])
+        self.assertEqual(0.0, clear["soft_label_data_intersects"])
+
+    def test_margin_counts_as_soft_only(self):
+        # Just outside the data, within the 0.03-axes (0.6-unit) margin
+        near = self.quality([box(2.8, 0)], data_region=self.data)
+
+        self.assertEqual(0.0, near["hard_label_data_intersects"])
+        self.assertEqual(1.0, near["soft_label_data_intersects"])
+
+
+class TestDataFootprint(unittest.TestCase):
+    def test_covers_isolated_points(self):
+        # A dense cluster and one far-off point; a contour cut at a fraction
+        # of the peak density would leave the lone point out
+        rng = np.random.default_rng(0)
+        X = np.vstack([rng.normal(0, 0.1, size=(500, 2)), [[10.0, 10.0]]])
+
+        footprint = data_footprint(X, radius=0.2)
+
+        self.assertTrue(np.all(shapely.contains_xy(footprint, X[:, 0], X[:, 1])))
+        self.assertFalse(shapely.contains_xy(footprint, 5.0, 5.0))
 
 
 class TestUncrossBoxes(unittest.TestCase):
