@@ -1002,7 +1002,7 @@ def plot_annotation(
 
         if optimize_labels:
             # Obtain a polygon that encompasses the embedding
-            embedding_density = embedding_obj.estimate_density(1)
+            embedding_density = embedding_obj.estimate_density(1, weighted=False)
             embedding_region = Region.from_density(embedding_obj, embedding_density)
             embedding_polygon = embedding_region.polygon
 

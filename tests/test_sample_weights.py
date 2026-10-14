@@ -96,6 +96,15 @@ class TestSampleWeights(unittest.TestCase):
         # Cluster 2 sits at x = 4 and carries no weight
         self.assertTrue(np.all(embedding_x[list(members)] < 2))
 
+    def test_unweighted_density_ignores_sample_weights(self):
+        weights = np.where(self.cluster == 1, 0.1, 1.0)
+        weighted = Embedding(self.embedding, sample_weights=weights)
+        plain = Embedding(self.embedding)
+        np.testing.assert_allclose(
+            weighted.estimate_density(1, weighted=False).values_scaled,
+            plain.estimate_density(1).values_scaled,
+        )
+
     def test_invalid_weights_are_rejected(self):
         for weights in [
             np.ones(self.n_samples - 1),

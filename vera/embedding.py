@@ -93,7 +93,12 @@ class Embedding:
     def _density_grid(self):
         return KDEpy.utils.autogrid(self.X, self.scale * 3, self.n_density_grid_points)
 
-    def estimate_density(self, values: np.ndarray, kernel: str = "gaussian") -> "Density":
+    def estimate_density(
+        self, values: np.ndarray, kernel: str = "gaussian", weighted: bool = True
+    ) -> "Density":
+        """Density of the samples weighted by *values*, and by the sample
+        weights unless *weighted* is false, e.g., for the outline of the whole
+        embedding."""
         # Avoid circular imports
         from vera.region import Density
 
@@ -104,7 +109,7 @@ class Embedding:
         # region. Left as NaN it would poison the whole density estimate.
         weights = np.nan_to_num(values, nan=0.0)
         density = self._kde(weights, kernel)
-        if self.sample_weights is None:
+        if self.sample_weights is None or not weighted:
             return Density(self._density_grid, density)
 
         # KDEpy normalizes the weights, so the weighted density is rescaled by
