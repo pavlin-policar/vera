@@ -121,14 +121,15 @@ def generate_region_annotations(
         but indicators, a collection of column names to select them out of a
         mixed table, or a mapping from column name to the text annotating it.
     sample_weights : np.ndarray, default=None
-        Non-negative weight per sample, e.g., derived from a sample-wise
+        Weight in [0, 1] per sample, e.g., derived from a sample-wise
         distortion measure of the embedding, such as the fraction of a sample's
         nearest neighbors in the input space that remain its neighbors in the
         embedding. Each weight multiplies the sample's indicator values where
-        they act as KDE weights, so poorly embedded samples shape the regions
-        less. Only relative weights matter. Region membership, and hence purity
-        and coverage, is unaffected. Only supported with
-        ``region_method="kde"``.
+        they act as KDE weights, and each density is contoured relative to the
+        peak of its unweighted counterpart, so poorly embedded samples shape
+        the regions less, and a variable whose samples are all poorly embedded
+        yields smaller regions or none. Region membership, and hence purity and
+        coverage, is unaffected. Only supported with ``region_method="kde"``.
     random_state : Any, default=None
         Random state for reproducibility of sampling and of the k-means
         discretization of continuous variables.
