@@ -433,6 +433,7 @@ def extract_region_annotations(
     # KDE parameters
     kernel: str = "gaussian",
     contour_level: float = 0.25,
+    sample_weights: np.ndarray = None,
 ) -> list[RegionAnnotation]:
     """Extract region annotations for each indicator variable.
 
@@ -451,13 +452,30 @@ def extract_region_annotations(
         KDE kernel (only used when *method* is ``"kde"``).
     contour_level : float
         Density contour level (only used when *method* is ``"kde"``).
+    sample_weights : np.ndarray, optional
+        Non-negative per-sample weights multiplying the KDE weights; see
+        :class:`~vera.embedding.Embedding`. Only supported when *method* is
+        ``"kde"``, and only when *embedding* is an array; an
+        :class:`~vera.embedding.Embedding` carries its own weights.
     """
 
     # Create embedding instance which will be shared across all explanatory
     # variables. The shared instance is necessary to avoid slow recomputation of
     # adjacency matrices
+    if sample_weights is not None:
+        if region_method != "kde":
+            raise ValueError(
+                "`sample_weights` are only supported with region_method='kde'."
+            )
+        if isinstance(embedding, Embedding):
+            raise ValueError(
+                "Pass `sample_weights` to the `Embedding` instead."
+            )
+
     if not isinstance(embedding, Embedding):
-        embedding = Embedding(embedding, scale_factor=scale_factor)
+        embedding = Embedding(
+            embedding, scale_factor=scale_factor, sample_weights=sample_weights
+        )
 
     if region_method == "kde":
         def _generate_single(v):

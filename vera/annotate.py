@@ -6,6 +6,7 @@ from sklearn.utils import check_random_state
 from tqdm import tqdm
 
 import vera.preprocessing as pp
+from vera.embedding import _check_sample_weights
 from vera.region_annotation import RegionAnnotation
 from vera.variables import Variable
 
@@ -57,6 +58,7 @@ def generate_region_annotations(
     filter_uninformative: bool = True,
     uninformative_max_sample_coverage: float = 0.95,
     indicator_columns: pp.IndicatorColumns = None,
+    sample_weights: np.ndarray = None,
     random_state: Any = None,
 ) -> list[list[RegionAnnotation]]:
     """
@@ -118,6 +120,15 @@ def generate_region_annotations(
         left out of the variable's rates. Pass ``"all"`` for a table of nothing
         but indicators, a collection of column names to select them out of a
         mixed table, or a mapping from column name to the text annotating it.
+    sample_weights : np.ndarray, default=None
+        Non-negative weight per sample, e.g., derived from a sample-wise
+        distortion measure of the embedding, such as the fraction of a sample's
+        nearest neighbors in the input space that remain its neighbors in the
+        embedding. Each weight multiplies the sample's indicator values where
+        they act as KDE weights, so poorly embedded samples shape the regions
+        less. Only relative weights matter. Region membership, and hence purity
+        and coverage, is unaffected. Only supported with
+        ``region_method="kde"``.
     random_state : Any, default=None
         Random state for reproducibility of sampling and of the k-means
         discretization of continuous variables.
@@ -129,6 +140,9 @@ def generate_region_annotations(
         :class:`RegionAnnotation` objects describing the regions associated with
         one variable or variable group.
     """
+    if sample_weights is not None:
+        sample_weights = _check_sample_weights(sample_weights, features.shape[0])
+
     # Sample the data if necessary. Running on large data sets can be very slow
     random_state = check_random_state(random_state)
     if sample_size is not None and features.shape[0] > sample_size:
@@ -145,6 +159,8 @@ def generate_region_annotations(
         ]
         features = features.iloc[sample_idx].set_axis(columns, axis="columns")
         embedding = embedding[sample_idx]
+        if sample_weights is not None:
+            sample_weights = np.asarray(sample_weights)[sample_idx]
 
     # Convert the data frame to VERA feature objects
     variables = pp.expand_df(
@@ -163,6 +179,7 @@ def generate_region_annotations(
         region_method=region_method,
         kernel=kernel,
         contour_level=contour_level,
+        sample_weights=sample_weights,
     )
 
     # Perform iterative merging on every single region annotation group

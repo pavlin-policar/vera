@@ -1,0 +1,102 @@
+import unittest
+
+import numpy as np
+import pandas as pd
+
+import vera
+from vera.embedding import Embedding
+from tests.utils import generate_clusters
+
+
+class TestSampleWeights(unittest.TestCase):
+    """Sample weights multiply the KDE weights, so they reshape regions without
+    changing which samples a region's rule describes."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        np.random.seed(0)
+        cls.embedding, clusters = generate_clusters(
+            [-4, 0, 4], [0.4, 0.4, 0.4], n_samples=100
+        )
+        cls.cluster = clusters["cluster"].to_numpy().astype(int)
+        cls.n_samples = cls.embedding.shape[0]
+        # One indicator spans the two outer clusters, another the middle one
+        cls.features = pd.DataFrame({
+            "outer": cls.cluster != 1,
+            "middle": cls.cluster == 1,
+        })
+
+    def _regions(self, **kwargs):
+        ras = vera.an.generate_region_annotations(
+            self.features,
+            self.embedding,
+            indicator_columns="all",
+            filter_uninformative=False,
+            random_state=0,
+            **kwargs,
+        )
+        return {str(ra_group[0].descriptor): ra_group for ra_group in ras}
+
+    def _covered_clusters(self, ra_group):
+        members = set().union(*(ra.contained_samples for ra in ra_group))
+        return set(np.unique(self.cluster[list(members)]))
+
+    def test_uniform_weights_leave_regions_unchanged(self):
+        unweighted = self._regions()
+        weighted = self._regions(sample_weights=np.full(self.n_samples, 0.3))
+        self.assertEqual(unweighted.keys(), weighted.keys())
+        for key in unweighted:
+            for ra1, ra2 in zip(unweighted[key], weighted[key]):
+                self.assertTrue(ra1.region.polygon.equals(ra2.region.polygon))
+
+    def test_zero_weight_removes_a_cluster_from_the_region(self):
+        self.assertEqual(self._covered_clusters(self._regions()["outer"]), {0, 2})
+
+        weights = np.where(self.cluster == 2, 0.0, 1.0)
+        weighted = self._regions(sample_weights=weights)
+        self.assertEqual(self._covered_clusters(weighted["outer"]), {0})
+
+    def test_variable_with_no_weight_yields_no_region(self):
+        weights = np.where(self.cluster == 1, 0.0, 1.0)
+        weighted = self._regions(sample_weights=weights)
+        self.assertNotIn("middle", weighted)
+        self.assertIn("outer", weighted)
+
+    def test_weights_follow_subsampling(self):
+        weights = np.where(self.cluster == 2, 0.0, 1.0)
+        weighted = self._regions(
+            sample_weights=weights, sample_size=self.n_samples // 2
+        )
+        ra_group = weighted["outer"]
+        embedding_x = ra_group[0].region.embedding.X[:, 0]
+        members = set().union(*(ra.contained_samples for ra in ra_group))
+        # Cluster 2 sits at x = 4 and carries no weight
+        self.assertTrue(np.all(embedding_x[list(members)] < 2))
+
+    def test_invalid_weights_are_rejected(self):
+        for weights in [
+            np.ones(self.n_samples - 1),
+            -np.ones(self.n_samples),
+            np.full(self.n_samples, np.nan),
+            np.zeros(self.n_samples),
+        ]:
+            with self.assertRaises(ValueError):
+                self._regions(sample_weights=weights)
+
+    def test_rangeset_rejects_weights(self):
+        with self.assertRaises(ValueError):
+            self._regions(
+                sample_weights=np.ones(self.n_samples), region_method="rangeset"
+            )
+
+    def test_embedding_rejects_weights_twice(self):
+        embedding = Embedding(self.embedding, sample_weights=np.ones(self.n_samples))
+        variables = vera.pp.expand_df(self.features, indicator_columns="all")
+        with self.assertRaises(ValueError):
+            vera.pp.extract_region_annotations(
+                variables, embedding, sample_weights=np.ones(self.n_samples)
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()
