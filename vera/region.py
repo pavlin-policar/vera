@@ -21,8 +21,11 @@ def _max_edge_length(polygon: geom.Polygon) -> float:
 class Density:
     def __init__(self, grid: np.ndarray, values: np.ndarray):
         self.grid = grid
-        self.values = values / values.sum()
-        self.values_scaled = values / values.max()
+        # A density with no mass, e.g., of a variable whose samples all carry
+        # zero sample weight, stays zero and yields no region
+        total, peak = values.sum(), values.max()
+        self.values = values / total if total > 0 else values
+        self.values_scaled = values / peak if peak > 0 else values
 
     def _get_xyz(
         self, scaled: bool = False
