@@ -85,6 +85,26 @@ class TestSampleWeights(unittest.TestCase):
         self.assertNotIn("middle", weighted)
         self.assertIn("outer", weighted)
 
+    def test_weights_do_not_make_a_variable_informative(self):
+        # Half of every cluster, so the region spans nearly the whole
+        # embedding, about 90% of the samples
+        rng = np.random.RandomState(0)
+        features = self.features.assign(scattered=rng.rand(self.n_samples) < 0.5)
+        weights = np.where(self.cluster == 2, 0.05, 1.0)
+
+        def regions(**kwargs):
+            ras = vera.an.generate_region_annotations(
+                features, self.embedding, indicator_columns="all",
+                uninformative_max_sample_coverage=0.85, random_state=0, **kwargs,
+            )
+            return {str(ra_group[0].descriptor) for ra_group in ras}
+
+        self.assertNotIn("scattered", regions())
+        self.assertNotIn("scattered", regions(sample_weights=weights))
+        self.assertIn(
+            "scattered", regions(sample_weights=weights, filter_uninformative=False)
+        )
+
     def test_weights_follow_subsampling(self):
         weights = np.where(self.cluster == 2, 0.0, 1.0)
         weighted = self._regions(

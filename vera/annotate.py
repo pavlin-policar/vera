@@ -172,31 +172,46 @@ def generate_region_annotations(
         random_state=random_state,
     )
 
-    # Generate explanatory region annotations from each of the derived features
-    region_annotations = pp.extract_region_annotations(
-        variables,
-        embedding,
-        scale_factor=scale_factor,
-        region_method=region_method,
-        kernel=kernel,
-        contour_level=contour_level,
-        sample_weights=sample_weights,
-    )
-
-    # Perform iterative merging on every single region annotation group
-    region_annotations = [
-        pp.merge_overfragmented(
-            ra_group, min_sample_overlap=merge_min_sample_overlap
+    def _annotate(weights):
+        # Generate explanatory region annotations from each derived feature,
+        # then merge over-fragmented regions within each annotation group
+        ra_groups = pp.extract_region_annotations(
+            variables,
+            embedding,
+            scale_factor=scale_factor,
+            region_method=region_method,
+            kernel=kernel,
+            contour_level=contour_level,
+            sample_weights=weights,
         )
-        for ra_group in tqdm(region_annotations)
-    ]
+        return [
+            pp.merge_overfragmented(
+                ra_group, min_sample_overlap=merge_min_sample_overlap
+            )
+            for ra_group in tqdm(ra_groups)
+        ]
+
+    region_annotations = _annotate(sample_weights)
 
     # Filter out annotation groups whose variable describes nothing
     if filter_uninformative:
+        def _uninformative(ra_groups):
+            return {
+                ra_group[0].descriptor.base_variable
+                for ra_group in ra_groups
+                if _is_uninformative(ra_group, uninformative_max_sample_coverage)
+            }
+
+        uninformative = _uninformative(region_annotations)
+        # Sample weights only shrink regions, which can bring a region spanning
+        # nearly all the data under the coverage limit. Variables are also
+        # judged on their unweighted regions, so weighting never adds one.
+        if sample_weights is not None:
+            uninformative |= _uninformative(_annotate(None))
         region_annotations = [
             ra_group
             for ra_group in region_annotations
-            if not _is_uninformative(ra_group, uninformative_max_sample_coverage)
+            if ra_group[0].descriptor.base_variable not in uninformative
         ]
 
     return region_annotations
