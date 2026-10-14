@@ -156,3 +156,13 @@ class TestPlotAnnotationsSmoke(unittest.TestCase):
 
                 fig.canvas.draw()
                 self.assertEqual(len(self.layout), len(ax))
+
+    def test_leader_kwargs_style_leader_lines(self):
+        # Leader lines are the only Line2D artists plot_annotation draws
+        def leader_widths(**kwargs):
+            fig, ax = plt.subplots()
+            vera.pl.plot_annotation(self.layout[0], ax=ax, **kwargs)
+            return {line.get_linewidth() for line in ax.get_lines()}
+
+        self.assertEqual({1.5}, leader_widths())
+        self.assertEqual({0.5}, leader_widths(leader_kwargs={"lw": 0.5}))

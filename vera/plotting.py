@@ -834,6 +834,7 @@ def plot_annotation(
     ra_colors: dict = None,
     scatter_kwargs: dict = None,
     label_kwargs: dict = None,
+    leader_kwargs: dict = None,
     figwidth: int = 4,
     return_ax: bool = False,
     show: bool = False,
@@ -842,6 +843,8 @@ def plot_annotation(
         scatter_kwargs = {}
     if label_kwargs is None:
         label_kwargs = {}
+    if leader_kwargs is None:
+        leader_kwargs = {}
 
     if ax is None:
         fig, ax = plt.subplots(figsize=(figwidth, figwidth), dpi=150)
@@ -1092,9 +1095,7 @@ def plot_annotation(
             )
             ax.plot(
                 *np.hstack([start.xy, end.xy]),
-                color=lbl_data["color"],
-                lw=1.5,
-                zorder=10,
+                **{"color": lbl_data["color"], "lw": 1.5, "zorder": 10, **leader_kwargs},
             )
 
     ax.set(xticks=[], yticks=[])
@@ -1125,6 +1126,7 @@ def plot_annotations(
     variable_colors: dict = None,
     scatter_kwargs: dict = None,
     label_kwargs: dict = None,
+    leader_kwargs: dict = None,
     show: bool = False,
     ax_spacing: float = 0.03,
 ):
@@ -1166,6 +1168,7 @@ def plot_annotations(
             ra_colors=variable_colors,
             scatter_kwargs=scatter_kwargs,
             label_kwargs=label_kwargs,
+            leader_kwargs=leader_kwargs,
         )
 
     enumerate_plots(ax[:idx + 1])
