@@ -570,8 +570,9 @@ def get_vector_between(
         Can be onen of "boundaries", "centroids", and "auto".
         The behavior for "auto" is as follows:
         - For intersecting polygons, the direction is determined by the
-          differences in their centroids. The distance for interseting polygons
-          is always 0.
+          differences in their centroids. The distance is negative: the extent
+          of the intersection along that direction, i.e. how deep the polygons
+          penetrate one another.
         - For disjoint polygons, the direction is determined along the line
           connecting the two closest points in both polygons. The distance is
           determined by the length of this line.
@@ -607,6 +608,18 @@ def get_vector_between(
 
         return vector, dist
 
+    def _between_overlapping(geom1, geom2):
+        # Overlapping polygons are zero apart by any boundary measure, which
+        # would leave two labels stacked on top of each other with nothing to
+        # push them apart. Report instead how deep they penetrate: the extent
+        # of their intersection along the centroid direction, as a negative
+        # distance, so that a repulsion weighted by `margin - dist` grows with
+        # the overlap.
+        vector, _ = _between_centroids(geom1, geom2)
+        x_min, y_min, x_max, y_max = geom1.intersection(geom2).bounds
+        depth = abs(vector[0]) * (x_max - x_min) + abs(vector[1]) * (y_max - y_min)
+        return vector, -depth
+
     match between:
         case "boundaries":
             return _between_boundaries(geom1, geom2)
@@ -614,7 +627,7 @@ def get_vector_between(
             return _between_centroids(geom1, geom2)
         case "auto":
             if geom1.intersects(geom2):
-                return _between_centroids(geom1, geom2)
+                return _between_overlapping(geom1, geom2)
             else:
                 return _between_boundaries(geom1, geom2)
 
@@ -872,6 +885,17 @@ def get_label_bounding_boxes_on_ax(
     return label_bboxes
 
 
+def data_footprint(X: np.ndarray, radius: float) -> shapely.Geometry:
+    """The area the data points occupy: the union of discs of ``radius``
+    around them, simplified to a tolerance of half the radius.
+
+    Unlike a density contour, which is cut at a fraction of the peak density,
+    it covers small and sparse clusters as fully as dense ones.
+    """
+    discs = shapely.buffer(shapely.points(X), radius, quad_segs=4)
+    return shapely.union_all(discs).simplify(radius / 2)
+
+
 def evaluate_label_pos_quality(
     labels: list[shapely.Polygon],
     label_target_regions: list[shapely.Polygon],
@@ -881,12 +905,16 @@ def evaluate_label_pos_quality(
     label_label_margin: float = 0.02,
     bounds_margin: float = 0.03,
     score_crossings: bool = False,
+    data_region: shapely.Geometry = None,
 ):
     """Count the ways in which a label layout is poor. Lower is better.
 
     ``score_crossings`` adds a ``crossings`` entry counting leader lines that
-    cross. It is optional because callers weight the returned entries by name,
-    and an entry they do not know about has no weight to be given.
+    cross. ``data_region`` adds ``hard_label_data_intersects`` and
+    ``soft_label_data_intersects`` entries counting labels that cover the data
+    or come within ``label_region_margin`` of it. Both are optional because
+    callers weight the returned entries by name, and an entry they do not know
+    about has no weight to be given.
     """
     ax_bbox = np.array(get_ax_bounding_box(ax))
 
@@ -938,5 +966,14 @@ def evaluate_label_pos_quality(
     if score_crossings:
         starts, ends = leader_endpoints(labels, label_target_regions)
         quality["crossings"] = float(count_crossings(starts, ends))
+
+    if data_region is not None:
+        quality["hard_label_data_intersects"] = float(sum(
+            shapely.intersects(label, data_region) for label in labels
+        ))
+        quality["soft_label_data_intersects"] = float(sum(
+            shapely.intersects(label.buffer(label_region_margin), data_region)
+            for label in labels
+        ))
 
     return quality

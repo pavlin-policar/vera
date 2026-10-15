@@ -406,7 +406,7 @@ class TestPlottingLabelTruncation(unittest.TestCase):
         ]
         self.ra = make_region_annotation(self.variables, 20)
 
-    def test_default_cap_is_five(self):
+    def test_cap_of_five_marks_the_rest(self):
         label = _format_descriptor(self.ra.descriptor, max_descriptors=5)
         lines = label.split("\n")
         self.assertEqual(6, len(lines))
@@ -416,9 +416,18 @@ class TestPlottingLabelTruncation(unittest.TestCase):
         label = _format_descriptor(self.ra.descriptor)
         self.assertEqual(str(self.ra.descriptor), label)
 
-    def test_plot_annotation_renders_truncated_label(self):
+    def test_plot_annotation_shows_full_label_by_default(self):
         handles, _, fig, ax = plot_annotation(
             [self.ra], optimize_labels=False, return_ax=True
+        )
+        texts = [h.get_text() for h in handles]
+        self.assertEqual(1, len(texts))
+        self.assertNotIn("more)", texts[0])
+        self.assertEqual(7, len(texts[0].split("\n")))
+
+    def test_plot_annotation_renders_truncated_label(self):
+        handles, _, fig, ax = plot_annotation(
+            [self.ra], optimize_labels=False, return_ax=True, max_descriptors=5
         )
         texts = [h.get_text() for h in handles]
         self.assertEqual(1, len(texts))
@@ -462,6 +471,7 @@ class TestPlottingLabelTruncation(unittest.TestCase):
             [self.ra],
             optimize_labels=False,
             return_ax=True,
+            max_descriptors=5,
             sep=", ",
             truncation_sep=" ",
             max_width=30,

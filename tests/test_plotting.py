@@ -156,3 +156,28 @@ class TestPlotAnnotationsSmoke(unittest.TestCase):
 
                 fig.canvas.draw()
                 self.assertEqual(len(self.layout), len(ax))
+
+    def test_leader_kwargs_style_leader_lines(self):
+        # Leader lines are the only Line2D artists plot_annotation draws
+        def leader_widths(**kwargs):
+            fig, ax = plt.subplots()
+            vera.pl.plot_annotation(self.layout[0], ax=ax, **kwargs)
+            return {line.get_linewidth() for line in ax.get_lines()}
+
+        self.assertEqual({1.5}, leader_widths())
+        self.assertEqual({0.5}, leader_widths(leader_kwargs={"lw": 0.5}))
+
+    def test_axis_limits_fix_the_frame(self):
+        # Without limits the frame depends on the padding the layout chose;
+        # given limits are kept exactly, so several panels can share a frame
+        fig, ax = plt.subplots()
+        vera.pl.plot_annotation(self.layout[0], ax=ax)
+        x_min, x_max = ax.get_xlim()
+        y_min, y_max = ax.get_ylim()
+        limits = (x_min - 1, y_min - 2, x_max + 3, y_max + 4)
+
+        fig, ax = plt.subplots()
+        vera.pl.plot_annotation(self.layout[0], ax=ax, axis_limits=limits)
+
+        (x_min, x_max), (y_min, y_max) = ax.get_xlim(), ax.get_ylim()
+        np.testing.assert_allclose(limits, (x_min, y_min, x_max, y_max))

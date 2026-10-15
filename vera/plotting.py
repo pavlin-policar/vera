@@ -36,6 +36,7 @@ from vera.label_placement import (
     add_bbox_padding,
     center_bbox_on_element,
     evaluate_label_pos_quality,
+    data_footprint,
     get_artist_bounding_boxes,
     bbox_to_polygon,
     convert_ax_to_data,
@@ -579,7 +580,7 @@ def plot_region(
     highlight_members=True,
     member_color="tab:red",
     indicate_purity: bool = False,
-    max_descriptors: int = 5,
+    max_descriptors: int = None,
     truncation_template: str = "(+{n} more)",
     sep: str = "\n",
     truncation_sep: str = None,
@@ -681,7 +682,7 @@ def plot_regions(
     highlight_members=True,
     member_color="tab:red",
     indicate_purity: bool = False,
-    max_descriptors: int = 5,
+    max_descriptors: int = None,
     truncation_template: str = "(+{n} more)",
     sep: str = "\n",
     truncation_sep: str = None,
@@ -825,7 +826,7 @@ def plot_annotation(
     membership_shading: Union[str, Callable] = "perceptual",
     draw_labels: bool = True,
     optimize_labels: bool = True,
-    max_descriptors: int = 5,
+    max_descriptors: int = None,
     truncation_template: str = "(+{n} more)",
     sep: str = "\n",
     truncation_sep: str = None,
@@ -833,6 +834,8 @@ def plot_annotation(
     ra_colors: dict = None,
     scatter_kwargs: dict = None,
     label_kwargs: dict = None,
+    leader_kwargs: dict = None,
+    axis_limits: tuple = None,
     figwidth: int = 4,
     return_ax: bool = False,
     show: bool = False,
@@ -841,6 +844,8 @@ def plot_annotation(
         scatter_kwargs = {}
     if label_kwargs is None:
         label_kwargs = {}
+    if leader_kwargs is None:
+        leader_kwargs = {}
 
     if ax is None:
         fig, ax = plt.subplots(figsize=(figwidth, figwidth), dpi=150)
@@ -991,6 +996,8 @@ def plot_annotation(
             "soft_label_label_intersects": 2,
             "soft_label_region_intersects": 2,
             "crossings": 5,
+            "hard_label_data_intersects": 10,
+            "soft_label_data_intersects": 2,
         }
 
         ax_bbox = get_ax_bounding_box(ax)
@@ -1000,18 +1007,29 @@ def plot_annotation(
 
         ax_bbox = set_bbox_square_aspect(ax_bbox)
 
+        # Labels need room around the data. Without fixed `axis_limits`
+        # (x_min, y_min, x_max, y_max), several axis paddings are tried and the
+        # layout that scores best is kept; fixed limits let several panels
+        # share one frame.
+        if axis_limits is not None:
+            frames = {None: tuple(axis_limits)}
+        elif optimize_labels:
+            frames = {
+                padding: add_bbox_padding(ax_bbox, padding=(padding, padding))
+                for padding in [0.1, 0.25, 0.5, 0.75, 1]
+            }
+        else:
+            frames = {0.25: add_bbox_padding(ax_bbox, padding=(0.25, 0.25))}
+
         if optimize_labels:
-            # Obtain a polygon that encompasses the embedding
-            embedding_density = embedding_obj.estimate_density(1)
-            embedding_region = Region.from_density(embedding_obj, embedding_density)
-            embedding_polygon = embedding_region.polygon
+            # The area the data occupy, which labels should keep clear of. A
+            # density contour would miss clusters far sparser than the
+            # densest one, and labels would then be placed over them.
+            embedding_polygon = data_footprint(embedding, embedding_obj.scale / 2)
 
             results = {}
-            # for padding in [0.1, 0.25, 0.5, 0.75, 1]:
-            for padding in [0.25]:
-                # Apply new padding to axis
-                ax_bbox_i = add_bbox_padding(ax_bbox, padding=(padding, padding))
-                set_ax_bounding_box(ax, ax_bbox_i)
+            for padding, frame in frames.items():
+                set_ax_bounding_box(ax, frame)
 
                 # Get label bounding boxes
                 label_bboxes = get_label_bounding_boxes_on_ax(
@@ -1028,7 +1046,7 @@ def plot_annotation(
                 def score_layout(labels):
                     quality = evaluate_label_pos_quality(
                         labels, label_target_regions, region_patches, ax,
-                        score_crossings=True,
+                        score_crossings=True, data_region=embedding_polygon,
                     )
                     return sum(penalty_weighing[k] * v for k, v in quality.items())
 
@@ -1058,12 +1076,11 @@ def plot_annotation(
             best_label_history = results[best_padding]["label_history"]
 
         else:
-            best_padding = 0.25
+            best_padding = next(iter(frames))
             best_label_positions = initial_label_positions
             best_label_history = [initial_label_positions]
 
-        ax_bbox = add_bbox_padding(ax_bbox, padding=(best_padding, best_padding))
-        set_ax_bounding_box(ax, ax_bbox)
+        set_ax_bounding_box(ax, frames[best_padding])
 
         label_handles = []
         for lbl_data, label_text_pos in zip(label_data, best_label_positions):
@@ -1088,9 +1105,7 @@ def plot_annotation(
             )
             ax.plot(
                 *np.hstack([start.xy, end.xy]),
-                color=lbl_data["color"],
-                lw=1.5,
-                zorder=10,
+                **{"color": lbl_data["color"], "lw": 1.5, "zorder": 10, **leader_kwargs},
             )
 
     ax.set(xticks=[], yticks=[])
@@ -1113,7 +1128,7 @@ def plot_annotations(
     only_color_inside_members: bool = True,
     graded_membership: bool = True,
     membership_shading: Union[str, Callable] = "perceptual",
-    max_descriptors: int = 5,
+    max_descriptors: int = None,
     truncation_template: str = "(+{n} more)",
     sep: str = "\n",
     truncation_sep: str = None,
@@ -1121,6 +1136,8 @@ def plot_annotations(
     variable_colors: dict = None,
     scatter_kwargs: dict = None,
     label_kwargs: dict = None,
+    leader_kwargs: dict = None,
+    axis_limits: tuple = None,
     show: bool = False,
     ax_spacing: float = 0.03,
 ):
@@ -1162,6 +1179,8 @@ def plot_annotations(
             ra_colors=variable_colors,
             scatter_kwargs=scatter_kwargs,
             label_kwargs=label_kwargs,
+            leader_kwargs=leader_kwargs,
+            axis_limits=axis_limits,
         )
 
     enumerate_plots(ax[:idx + 1])
