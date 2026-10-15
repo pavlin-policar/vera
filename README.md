@@ -38,13 +38,19 @@ VERA is particularly useful in workflows where:
 
 ## Installation
 
-`vera` can be easily installed through pip using
+`vera` is published as `vera-explain` on [PyPI](https://pypi.org/project/vera-explain/) and [conda-forge](https://anaconda.org/conda-forge/vera-explain). Install it with pip
 
 ```
 pip install vera-explain
 ```
 
-[PyPI package](https://pypi.org/project/vera-explain/0.1.0/)
+or with conda
+
+```
+conda install -c conda-forge vera-explain
+```
+
+The conda-forge package requires Python 3.11 or newer; the PyPI package also supports Python 3.10.
 
 ## A hello world example
 
