@@ -835,6 +835,7 @@ def plot_annotation(
     scatter_kwargs: dict = None,
     label_kwargs: dict = None,
     leader_kwargs: dict = None,
+    axis_limits: tuple = None,
     figwidth: int = 4,
     return_ax: bool = False,
     show: bool = False,
@@ -1006,6 +1007,20 @@ def plot_annotation(
 
         ax_bbox = set_bbox_square_aspect(ax_bbox)
 
+        # Labels need room around the data. Without fixed `axis_limits`
+        # (x_min, y_min, x_max, y_max), several axis paddings are tried and the
+        # layout that scores best is kept; fixed limits let several panels
+        # share one frame.
+        if axis_limits is not None:
+            frames = {None: tuple(axis_limits)}
+        elif optimize_labels:
+            frames = {
+                padding: add_bbox_padding(ax_bbox, padding=(padding, padding))
+                for padding in [0.1, 0.25, 0.5, 0.75, 1]
+            }
+        else:
+            frames = {0.25: add_bbox_padding(ax_bbox, padding=(0.25, 0.25))}
+
         if optimize_labels:
             # The area the data occupy, which labels should keep clear of. A
             # density contour would miss clusters far sparser than the
@@ -1013,12 +1028,8 @@ def plot_annotation(
             embedding_polygon = data_footprint(embedding, embedding_obj.scale / 2)
 
             results = {}
-            # Labels need room around the data; try several axis paddings and
-            # keep the layout that scores best
-            for padding in [0.1, 0.25, 0.5, 0.75, 1]:
-                # Apply new padding to axis
-                ax_bbox_i = add_bbox_padding(ax_bbox, padding=(padding, padding))
-                set_ax_bounding_box(ax, ax_bbox_i)
+            for padding, frame in frames.items():
+                set_ax_bounding_box(ax, frame)
 
                 # Get label bounding boxes
                 label_bboxes = get_label_bounding_boxes_on_ax(
@@ -1065,12 +1076,11 @@ def plot_annotation(
             best_label_history = results[best_padding]["label_history"]
 
         else:
-            best_padding = 0.25
+            best_padding = next(iter(frames))
             best_label_positions = initial_label_positions
             best_label_history = [initial_label_positions]
 
-        ax_bbox = add_bbox_padding(ax_bbox, padding=(best_padding, best_padding))
-        set_ax_bounding_box(ax, ax_bbox)
+        set_ax_bounding_box(ax, frames[best_padding])
 
         label_handles = []
         for lbl_data, label_text_pos in zip(label_data, best_label_positions):
@@ -1127,6 +1137,7 @@ def plot_annotations(
     scatter_kwargs: dict = None,
     label_kwargs: dict = None,
     leader_kwargs: dict = None,
+    axis_limits: tuple = None,
     show: bool = False,
     ax_spacing: float = 0.03,
 ):
@@ -1169,6 +1180,7 @@ def plot_annotations(
             scatter_kwargs=scatter_kwargs,
             label_kwargs=label_kwargs,
             leader_kwargs=leader_kwargs,
+            axis_limits=axis_limits,
         )
 
     enumerate_plots(ax[:idx + 1])
