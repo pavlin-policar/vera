@@ -38,11 +38,10 @@ def leader_attachment_boundary(label: shapely.Polygon, extent: float = LEADER_EX
     """The part of a label's outline a leader line may attach to.
 
     Each edge of the outline is trimmed to its middle ``extent``, keeping the
-    attachment away from the corners. A text bounding box is mostly whitespace
-    at the corners, so a leader ending there reads as pointing past the label.
-    For a label shaped by its lines (see :func:`label_line_shape`) the edges
-    are those of the lines, so a leader ends on a line rather than in the
-    space beside a shorter one.
+    attachment away from the corners, which are mostly whitespace, so that a
+    leader ending there reads as pointing past the label. A label's outline
+    follows its lines (see :func:`label_line_shape`), so a leader ends on a
+    line rather than in the space beside a shorter one.
     """
     coords = np.asarray(label.exterior.coords)
     segments = []
@@ -864,52 +863,45 @@ def get_label_bounding_boxes_on_ax(
     label_strs: list[str],
     label_positions: list[tuple[float, float]],
     label_kwargs: dict = None,
-    shape: str = "box",
 ) -> list[shapely.Polygon]:
     """Determine label outlines after rendered on the given axis.
 
     This function renders the label on the axis, measures it, and removes it
-    from the axis.
+    from the axis. A label's outline is the union of the boxes of its lines
+    (see :func:`label_outline`).
 
     This is useful since labels can have very different sizes based on the axis
     size, dpi, and various font settings, e.g., font family, font size, etc.
-
-    ``shape`` is ``"box"`` for the bounding box of the label's text, or
-    ``"lines"`` for the union of the boxes of its lines (see
-    :func:`label_line_shape`).
     """
     if label_kwargs is None:
         label_kwargs = {}
 
     label_bboxes = []
     for label, label_pos in zip(label_strs, label_positions):
-        # Render the label on the current axis, get its bounding box,
-        # convert that to a polygon, then remove the rendered label
+        # Render the label on the current axis, measure its outline, then
+        # remove the rendered label
         handle = ax.text(*label_pos, label, **label_kwargs)
-        label_bboxes.append(label_outline(handle, ax, shape))
+        label_bboxes.append(label_outline(handle, ax))
         handle.remove()
 
     return label_bboxes
 
 
-def label_outline(handle: matplotlib.text.Text, ax: matplotlib.axes.Axes, shape: str = "box") -> shapely.Polygon:
-    """The outline of a rendered label, in data coordinates: its bounding box
-    for ``shape="box"``, or the union of its lines' boxes for
-    ``shape="lines"``."""
+def label_outline(handle: matplotlib.text.Text, ax: matplotlib.axes.Axes) -> shapely.Polygon:
+    """The outline of a rendered label, in data coordinates: the union of the
+    boxes of its lines (see :func:`label_line_shape`)."""
     bbox = bbox_to_polygon(get_artist_bounding_box(handle, ax))
-    if shape == "box":
+    lines = handle.get_text().split("\n")
+    if len(lines) <= 1:
         return bbox
-    if shape == "lines":
-        lines = handle.get_text().split("\n")
-        widths = []
-        for line in lines:
-            # Each line is measured alone, with the label's font properties
-            probe = ax.text(0, 0, line or " ", fontproperties=handle.get_fontproperties())
-            x0, _, x1, _ = get_artist_bounding_box(probe, ax)
-            probe.remove()
-            widths.append(x1 - x0)
-        return label_line_shape(bbox, widths)
-    raise ValueError(f"Unrecognized label shape `{shape}`. Must be one of `box`, `lines`.")
+    widths = []
+    for line in lines:
+        # Each line is measured alone, with the label's font properties
+        probe = ax.text(0, 0, line or " ", fontproperties=handle.get_fontproperties())
+        x0, _, x1, _ = get_artist_bounding_box(probe, ax)
+        probe.remove()
+        widths.append(x1 - x0)
+    return label_line_shape(bbox, widths)
 
 
 def label_line_shape(bbox: shapely.Polygon, line_widths: list[float]) -> shapely.Polygon:
@@ -918,8 +910,9 @@ def label_line_shape(bbox: shapely.Polygon, line_widths: list[float]) -> shapely
     Each line is a box as wide as the line (at most the label's width),
     centred horizontally, with an equal share of the label's height, since
     matplotlib spaces the lines of a text evenly. One long line then widens
-    only its own row, and the space beside the shorter lines stays free for
-    other labels and leader lines.
+    only its own row: the space beside the shorter lines stays free for other
+    labels and leader lines, and is not counted as covered when the layout is
+    scored.
     """
     x0, y0, x1, y1 = bbox.bounds
     if len(line_widths) <= 1:

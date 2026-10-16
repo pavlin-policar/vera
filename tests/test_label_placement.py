@@ -535,22 +535,18 @@ class TestLabelOutline(unittest.TestCase):
     def tearDown(self):
         plt.close(self.fig)
 
-    def test_box_is_the_bounding_box(self):
-        handle = self.ax.text(0.5, 0.5, "a long first line\nshort", ha="center", va="center")
-        outline = label_outline(handle, self.ax, "box")
-        self.assertAlmostEqual(outline.area, shapely.box(*outline.bounds).area)
+    def bbox_of(self, handle):
+        return shapely.box(*label_placement.get_artist_bounding_box(handle, self.ax))
 
-    def test_lines_free_the_space_beside_a_short_line(self):
+    def test_frees_the_space_beside_a_short_line(self):
         handle = self.ax.text(0.5, 0.5, "a long first line\nshort", ha="center", va="center")
-        box_outline = label_outline(handle, self.ax, "box")
-        lines_outline = label_outline(handle, self.ax, "lines")
-        self.assertLess(lines_outline.area, 0.9 * box_outline.area)
-        np.testing.assert_allclose(box_outline.bounds, lines_outline.bounds, atol=1e-3)
+        outline = label_outline(handle, self.ax)
+        self.assertLess(outline.area, 0.9 * self.bbox_of(handle).area)
+        np.testing.assert_allclose(self.bbox_of(handle).bounds, outline.bounds, atol=1e-3)
 
-    def test_unknown_shape(self):
-        handle = self.ax.text(0.5, 0.5, "label")
-        with self.assertRaises(ValueError):
-            label_outline(handle, self.ax, "circle")
+    def test_single_line_is_its_bounding_box(self):
+        handle = self.ax.text(0.5, 0.5, "one line", ha="center", va="center")
+        self.assertTrue(label_outline(handle, self.ax).equals(self.bbox_of(handle)))
 
 
 class TestLeaderAttachmentOnLineShapes(unittest.TestCase):
