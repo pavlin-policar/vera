@@ -167,6 +167,17 @@ class TestPlotAnnotationsSmoke(unittest.TestCase):
         self.assertEqual({1.5}, leader_widths())
         self.assertEqual({0.5}, leader_widths(leader_kwargs={"lw": 0.5}))
 
+    def test_line_shaped_labels(self):
+        fig, ax = plt.subplots()
+        vera.pl.plot_annotation(self.layout[0], ax=ax, label_shape="lines")
+        fig.canvas.draw()
+        self.assertEqual(len(self.layout[0]), len(ax.get_lines()))
+
+    def test_unknown_label_shape(self):
+        fig, ax = plt.subplots()
+        with self.assertRaises(ValueError):
+            vera.pl.plot_annotation(self.layout[0], ax=ax, label_shape="circle")
+
     def test_axis_limits_fix_the_frame(self):
         # Without limits the frame depends on the padding the layout chose;
         # given limits are kept exactly, so several panels can share a frame

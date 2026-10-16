@@ -23,6 +23,8 @@ from vera.label_placement import (
     apply_force_directed_layout,
     optimize_label_positions,
     data_footprint,
+    label_line_shape,
+    label_outline,
 )
 
 
@@ -490,3 +492,86 @@ class TestLeaderGeometry(unittest.TestCase):
         starts, ends = leader_endpoints(labels, targets)
 
         self.assertEqual(1, count_crossings(starts, ends))
+
+
+class TestLabelLineShape(unittest.TestCase):
+    """A label shaped by its lines: one box per line, centred, together as
+    tall as the label."""
+
+    def setUp(self):
+        self.bbox = shapely.box(0, 0, 10, 3)
+
+    def test_each_row_is_as_wide_as_its_line(self):
+        shape = label_line_shape(self.bbox, [10, 4, 6])
+        for y, width in [(2.5, 10), (1.5, 4), (0.5, 6)]:
+            with self.subTest(y=y):
+                row = shape.intersection(shapely.box(-1, y - 0.1, 11, y + 0.1))
+                x_min, _, x_max, _ = row.bounds
+                self.assertAlmostEqual(width, x_max - x_min)
+                self.assertAlmostEqual(5, (x_min + x_max) / 2)
+
+    def test_area_is_the_sum_of_the_rows(self):
+        self.assertAlmostEqual(10 + 4 + 6, label_line_shape(self.bbox, [10, 4, 6]).area)
+
+    def test_bounds_match_the_bounding_box(self):
+        """The text is placed at the centre of its outline's bounds, which
+        must therefore be the centre of its bounding box."""
+        np.testing.assert_allclose(self.bbox.bounds, label_line_shape(self.bbox, [10, 4, 6]).bounds)
+
+    def test_a_single_line_is_its_bounding_box(self):
+        self.assertTrue(label_line_shape(self.bbox, [7]).equals(self.bbox))
+
+    def test_lines_never_overhang_the_bounding_box(self):
+        shape = label_line_shape(self.bbox, [12, 4])
+        self.assertTrue(self.bbox.buffer(1e-9).contains(shape))
+
+
+class TestLabelOutline(unittest.TestCase):
+    def setUp(self):
+        self.fig, self.ax = plt.subplots(figsize=(4, 4))
+        self.ax.set_xlim(0, 1)
+        self.ax.set_ylim(0, 1)
+
+    def tearDown(self):
+        plt.close(self.fig)
+
+    def test_box_is_the_bounding_box(self):
+        handle = self.ax.text(0.5, 0.5, "a long first line\nshort", ha="center", va="center")
+        outline = label_outline(handle, self.ax, "box")
+        self.assertAlmostEqual(outline.area, shapely.box(*outline.bounds).area)
+
+    def test_lines_free_the_space_beside_a_short_line(self):
+        handle = self.ax.text(0.5, 0.5, "a long first line\nshort", ha="center", va="center")
+        box_outline = label_outline(handle, self.ax, "box")
+        lines_outline = label_outline(handle, self.ax, "lines")
+        self.assertLess(lines_outline.area, 0.9 * box_outline.area)
+        np.testing.assert_allclose(box_outline.bounds, lines_outline.bounds, atol=1e-3)
+
+    def test_unknown_shape(self):
+        handle = self.ax.text(0.5, 0.5, "label")
+        with self.assertRaises(ValueError):
+            label_outline(handle, self.ax, "circle")
+
+
+class TestLeaderAttachmentOnLineShapes(unittest.TestCase):
+    """Leaders attach to the edges of a label's lines, not to the box around
+    them."""
+
+    def setUp(self):
+        # A long line on top of a short one
+        self.label = label_line_shape(shapely.box(0, 0, 10, 2), [10, 4])
+
+    def test_attachment_lies_on_the_outline(self):
+        boundary = leader_attachment_boundary(self.label)
+        self.assertTrue(self.label.boundary.buffer(1e-9).contains(boundary))
+
+    def test_leader_does_not_start_in_the_space_beside_the_short_line(self):
+        """Below and to the right, the bounding box attaches its leader in the
+        empty corner beside the short line, off the text; the line shape
+        attaches it to the outline of the lines."""
+        region = shapely.Point(9, -3).buffer(0.5)
+        box_starts, _ = leader_endpoints([shapely.box(*self.label.bounds)], [region])
+        line_starts, _ = leader_endpoints([self.label], [region])
+
+        self.assertGreater(self.label.distance(shapely.Point(box_starts[0])), 0.5)
+        self.assertAlmostEqual(0, self.label.boundary.distance(shapely.Point(line_starts[0])))

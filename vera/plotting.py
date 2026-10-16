@@ -37,10 +37,9 @@ from vera.label_placement import (
     center_bbox_on_element,
     evaluate_label_pos_quality,
     data_footprint,
-    get_artist_bounding_boxes,
-    bbox_to_polygon,
     convert_ax_to_data,
     get_label_bounding_boxes_on_ax,
+    label_outline,
 )
 from vera.region import Density, Region
 from vera.region_annotation import RegionAnnotation
@@ -836,10 +835,21 @@ def plot_annotation(
     label_kwargs: dict = None,
     leader_kwargs: dict = None,
     axis_limits: tuple = None,
+    label_shape: str = "box",
     figwidth: int = 4,
     return_ax: bool = False,
     show: bool = False,
 ):
+    """Plot a layout of region annotations with their labels.
+
+    ``label_shape`` is the shape label placement gives a label: ``"box"``, the
+    bounding box of its text, or ``"lines"``, the union of the boxes of its
+    lines. With ``"lines"``, a label with one long line among shorter ones
+    keeps the space beside the shorter lines free for other labels and leader
+    lines, and its leader attaches to the edge of a line.
+    """
+    if label_shape not in ("box", "lines"):
+        raise ValueError(f"Unrecognized label shape `{label_shape}`. Must be one of `box`, `lines`.")
     if scatter_kwargs is None:
         scatter_kwargs = {}
     if label_kwargs is None:
@@ -1037,6 +1047,7 @@ def plot_annotation(
                     [lbl["text"] for lbl in label_data],
                     initial_label_positions,
                     label_kwargs_,
+                    shape=label_shape,
                 )
 
                 # Where are the labels supposed to point to?
@@ -1093,14 +1104,12 @@ def plot_annotation(
                 )
             )
 
-        # Plot line from region to the label bounding box
-        label_bbs = [
-            bbox_to_polygon(bbox) for bbox in get_artist_bounding_boxes(label_handles, ax)
-        ]
-        for lbl_data, label in zip(label_data, label_bbs):
+        # Plot line from region to the label's outline, as placed
+        label_outlines = [label_outline(handle, ax, label_shape) for handle in label_handles]
+        for lbl_data, label in zip(label_data, label_outlines):
             label_padding = convert_ax_to_data(ax, 0.01)
             start, end = shapely.ops.nearest_points(
-                leader_attachment_boundary(label.buffer(label_padding)),
+                leader_attachment_boundary(label.buffer(label_padding, join_style="mitre")),
                 lbl_data["pos_region"].boundary,
             )
             ax.plot(
@@ -1138,6 +1147,7 @@ def plot_annotations(
     label_kwargs: dict = None,
     leader_kwargs: dict = None,
     axis_limits: tuple = None,
+    label_shape: str = "box",
     show: bool = False,
     ax_spacing: float = 0.03,
 ):
@@ -1181,6 +1191,7 @@ def plot_annotations(
             label_kwargs=label_kwargs,
             leader_kwargs=leader_kwargs,
             axis_limits=axis_limits,
+            label_shape=label_shape,
         )
 
     enumerate_plots(ax[:idx + 1])
