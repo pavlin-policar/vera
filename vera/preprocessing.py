@@ -274,49 +274,106 @@ def __discretize_const(variable: ContinuousVariable) -> list[IndicatorVariable]:
     return [IndicatorVariable(variable, rule, const_vals)]
 
 
+def _decimals(x: float, max_decimals: int = 15) -> int:
+    """The fewest decimal places that write `x` exactly."""
+    for d in range(max_decimals + 1):
+        if np.isclose(round(x, d), x, rtol=1e-12, atol=0):
+            return d
+    return max_decimals
+
+
+def _round_edge(edge: float, lo: float, hi: float) -> float:
+    """The roundest number `t` with `lo < t <= hi`.
+
+    A bin edge `t` sends the samples `x >= t` to the bin above it, so any `t`
+    in the gap between the largest value below the edge and the smallest
+    value at or above it splits the samples exactly as `edge` does. Steps of
+    1, 5, and 2 times a power of ten are tried from coarse to fine, and of the
+    multiples of the first step that lands in the gap, the one closest to
+    `edge` is taken.
+    """
+    magnitude = max(abs(lo), abs(hi))
+    k = int(np.floor(np.log10(magnitude))) + 1
+    # Once the step is finer than the gap, a multiple lands in it; only float
+    # round-off can get past that, and then the edge stays as it was
+    while 10.0 ** (k - 1) >= (hi - lo) / 100:
+        for mantissa, exponent in ((1, k), (5, k - 1), (2, k - 1)):
+            step = mantissa * 10.0 ** exponent
+            ms = np.arange(np.floor(lo / step), np.floor(hi / step) + 2)
+            candidates = np.round(ms * step, max(0, -exponent))
+            candidates = candidates[(candidates > lo) & (candidates <= hi)]
+            if len(candidates):
+                return float(candidates[np.argmin(np.abs(candidates - edge))])
+        k -= 1
+    return float(edge)
+
+
+def _edge_precision(edges: np.ndarray, value_range: float, tol: float = 0.1) -> int:
+    """The decimal places to write a variable's bin edges with.
+
+    Enough to write every edge exactly, but no more than it takes to keep the
+    rounding error within `tol` of the narrowest bin, measured between the
+    inner edges (or across the range of the values, when there is only one).
+    """
+    widths = np.diff(edges) if len(edges) > 1 else np.array([value_range])
+    widths = widths[widths > 0]
+    if len(widths) == 0:
+        return max(_decimals(e) for e in edges)
+    width_precision = max(0, int(np.ceil(np.log10(0.5 / (tol * widths.min())))))
+    return min(max(_decimals(e) for e in edges), width_precision)
+
+
 def __discretize_nonconst(
     variable: ContinuousVariable, n_bins: int, random_state: Any = 0
 ) -> list[IndicatorVariable]:
-    """Discretize non-constant continuous variables."""
+    """Discretize non-constant continuous variables.
+
+    Bins are half-open, `lower <= x < upper`. k-means places the edges, and
+    each inner edge is then moved to the roundest number that splits the
+    samples the same way, so the labels read `x < 4` rather than `x < 4.52`.
+    """
     from sklearn.preprocessing import KBinsDiscretizer
     from sklearn.exceptions import ConvergenceWarning
 
     col_vals = pd.Series(variable.values)
     col_vals_non_nan = col_vals.dropna()
+    x = col_vals_non_nan.values
 
     n_bins = np.minimum(n_bins, col_vals_non_nan.nunique())
 
     discretizer = KBinsDiscretizer(
         n_bins=n_bins,
         strategy="kmeans",
-        encode="onehot-dense",
+        encode="ordinal",
         random_state=random_state,
     )
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=ConvergenceWarning)
-        x_discretized = discretizer.fit_transform(col_vals_non_nan.values[:, None])
+        discretizer.fit(x[:, None])
 
-    # Only the measured values are discretized. A sample with no measurement
-    # falls in no bin, and is re-inserted as missing in every one of them
+    inner_edges = np.array([
+        _round_edge(edge, lo=x[x < edge].max(), hi=x[x >= edge].min())
+        for edge in discretizer.bin_edges_[0][1:-1]
+    ])
+    precision = _edge_precision(inner_edges, value_range=x.max() - x.min())
+
+    # Bins are assigned from the rounded edges, which are what the rules
+    # state. Only the measured values are discretized. A sample with no
+    # measurement falls in no bin, and is re-inserted as missing in every one
+    bin_idx = np.searchsorted(inner_edges, x, side="right")
+    x_discretized = (bin_idx[:, None] == np.arange(len(inner_edges) + 1)).astype(float)
     df_discretized = pd.DataFrame(x_discretized, index=col_vals_non_nan.index)
     df_discretized = df_discretized.reindex(col_vals.index)
 
-    # Prepare rules and variables
-    bin_edges = discretizer.bin_edges_[0]
-
     # Ensure open intervals
-    bin_edges = np.array(bin_edges)
-    bin_edges[0], bin_edges[-1] = -np.inf, np.inf
+    bin_edges = np.concatenate([[-np.inf], inner_edges, [np.inf]])
 
     derived_vars = []
     for idx, (lower, upper) in enumerate(zip(bin_edges, bin_edges[1:])):
-        rule = IntervalRule(lower, upper, value_name=variable.name)
+        rule = IntervalRule(lower, upper, value_name=variable.name, precision=precision)
         values = df_discretized.loc[:, idx].values
         v = IndicatorVariable(variable, rule, values)
         derived_vars.append(v)
-
-    assert len(derived_vars) == len(df_discretized.columns), \
-        "The number of derived features do not match discretization output!"
 
     return derived_vars
 
