@@ -37,10 +37,9 @@ from vera.label_placement import (
     center_bbox_on_element,
     evaluate_label_pos_quality,
     data_footprint,
-    get_artist_bounding_boxes,
-    bbox_to_polygon,
     convert_ax_to_data,
     get_label_bounding_boxes_on_ax,
+    label_outline,
 )
 from vera.region import Density, Region
 from vera.region_annotation import RegionAnnotation
@@ -1093,14 +1092,12 @@ def plot_annotation(
                 )
             )
 
-        # Plot line from region to the label bounding box
-        label_bbs = [
-            bbox_to_polygon(bbox) for bbox in get_artist_bounding_boxes(label_handles, ax)
-        ]
-        for lbl_data, label in zip(label_data, label_bbs):
+        # Plot line from region to the label's outline, as placed
+        label_outlines = [label_outline(handle, ax) for handle in label_handles]
+        for lbl_data, label in zip(label_data, label_outlines):
             label_padding = convert_ax_to_data(ax, 0.01)
             start, end = shapely.ops.nearest_points(
-                leader_attachment_boundary(label.buffer(label_padding)),
+                leader_attachment_boundary(label.buffer(label_padding, join_style="mitre")),
                 lbl_data["pos_region"].boundary,
             )
             ax.plot(
