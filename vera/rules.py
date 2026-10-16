@@ -77,19 +77,21 @@ class IntervalRule(Rule):
         return other.lower >= self.lower and other.upper <= self.upper
 
     def __str__(self):
+        # The interval is half-open, `lower <= x < upper`, which is how
+        # `discretize` assigns samples to bins
         def _format_num(x):
             if self.precision < 0:
-                return str(round(x, self.precision))
+                return f"{round(x, self.precision):.0f}"
             else:
                 return f"{x:.{self.precision}f}"
 
-        # Special handling for `x > 5`. Easier to read
+        # Special handling for `x ≥ 5`. Easier to read
         if np.isfinite(self.lower) and not np.isfinite(self.upper):
-            return f"{self.value_name} > {_format_num(self.lower)}"
+            return f"{self.value_name} ≥ {_format_num(self.lower)}"
 
         s = ""
         if np.isfinite(self.lower):
-            s += f"{_format_num(self.lower)} < "
+            s += f"{_format_num(self.lower)} ≤ "
         s += str(self.value_name)
         if np.isfinite(self.upper):
             s += f" < {_format_num(self.upper)}"

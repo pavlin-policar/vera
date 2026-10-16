@@ -302,27 +302,36 @@ class TestIntervalRuleStringFormatting(unittest.TestCase):
         r2 = vera.rules.IntervalRule(1, 2, precision=1)
         r3 = vera.rules.IntervalRule(2, 4, precision=2)
 
-        self.assertEqual(str(r1), "0 < x < 1")
-        self.assertEqual(str(r2), "1.0 < x < 2.0")
-        self.assertEqual(str(r3), "2.00 < x < 4.00")
+        self.assertEqual(str(r1), "0 ≤ x < 1")
+        self.assertEqual(str(r2), "1.0 ≤ x < 2.0")
+        self.assertEqual(str(r3), "2.00 ≤ x < 4.00")
 
     def test_none(self):
         r1 = vera.rules.IntervalRule(12123, 13023, precision=0)
         r2 = vera.rules.IntervalRule(13024, 13348, precision=0)
         r3 = vera.rules.IntervalRule(13349, 14012, precision=0)
 
-        self.assertEqual(str(r1), "12123 < x < 13023")
-        self.assertEqual(str(r2), "13024 < x < 13348")
-        self.assertEqual(str(r3), "13349 < x < 14012")
+        self.assertEqual(str(r1), "12123 ≤ x < 13023")
+        self.assertEqual(str(r2), "13024 ≤ x < 13348")
+        self.assertEqual(str(r3), "13349 ≤ x < 14012")
 
     def test_rounding(self):
         r1 = vera.rules.IntervalRule(12123, 13023, precision=-3)
         r2 = vera.rules.IntervalRule(13024, 13348, precision=-3)
         r3 = vera.rules.IntervalRule(13349, 14012, precision=-3)
 
-        self.assertEqual(str(r1), "12000 < x < 13000")
-        self.assertEqual(str(r2), "13000 < x < 13000")
-        self.assertEqual(str(r3), "13000 < x < 14000")
+        self.assertEqual(str(r1), "12000 ≤ x < 13000")
+        self.assertEqual(str(r2), "13000 ≤ x < 13000")
+        self.assertEqual(str(r3), "13000 ≤ x < 14000")
+
+
+    def test_open_ended_intervals(self):
+        self.assertEqual("x < 5", str(vera.rules.IntervalRule(upper=5, precision=0)))
+        self.assertEqual("x ≥ 5", str(vera.rules.IntervalRule(lower=5, precision=0)))
+
+    def test_rounding_to_tens_of_floats_drops_the_decimal_point(self):
+        r = vera.rules.IntervalRule(12123.4, 13023.9, precision=-3)
+        self.assertEqual("12000 ≤ x < 13000", str(r))
 
 
 class TestIndicatorRule(unittest.TestCase):

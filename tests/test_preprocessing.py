@@ -359,7 +359,7 @@ class TestIngestedToPandas(unittest.TestCase):
         reverted = pp.ingested_to_pandas(pp.discretize(variable, n_bins=2))
 
         self.assertEqual(
-            ["cont < 2.50", "cont > 2.50"], list(reverted.columns)
+            ["cont < 3", "cont ≥ 3"], list(reverted.columns)
         )
 
 
@@ -449,6 +449,88 @@ class TestDiscretize(unittest.TestCase):
         self.assertTrue(all(isinstance(v, IndicatorVariable) for v in result))
         self.assertTrue(all(isinstance(v.base_variable, ContinuousVariable) for v in result))
         self.assertTrue(all(v.base_variable is self.cont1 for v in result))
+
+
+class TestDiscretizationEdges(unittest.TestCase):
+    """k-means places the bin edges, which are then moved to round numbers
+    without moving any sample to another bin."""
+
+    def test_round_edge_takes_the_roundest_number_in_the_gap(self):
+        self.assertEqual(3, pp._round_edge(2.5, lo=2, hi=3))
+        self.assertEqual(50, pp._round_edge(47.3, lo=10, hi=90))
+        self.assertEqual(0, pp._round_edge(-1.2, lo=-5, hi=3))
+        self.assertEqual(1.3, pp._round_edge(1.25, lo=1.2, hi=1.3))
+        self.assertEqual(4.52, pp._round_edge(4.5213, lo=4.51, hi=4.53))
+
+    def test_round_edge_prefers_the_multiple_closest_to_the_edge(self):
+        # No multiple of five lies in the gap, but both 6 and 8 are multiples
+        # of two
+        self.assertEqual(6, pp._round_edge(6.2, lo=5, hi=9.9))
+        self.assertEqual(8, pp._round_edge(8.1, lo=5, hi=9.9))
+
+    def test_bins_match_kmeans(self):
+        from sklearn.preprocessing import KBinsDiscretizer
+
+        rng = np.random.default_rng(0)
+        for scale in [1e-3, 1, 1e4]:
+            x = rng.lognormal(size=500) * scale
+            variable = pp.ingest(pd.Series(x, name="x"))
+
+            result = pp.discretize(variable, n_bins=5)
+
+            kmeans = KBinsDiscretizer(
+                n_bins=5, strategy="kmeans", encode="ordinal", random_state=0,
+            )
+            expected = kmeans.fit_transform(x[:, None])[:, 0]
+            actual = np.argmax(np.column_stack([v.values for v in result]), axis=1)
+            np.testing.assert_equal(expected, actual)
+
+    def test_rules_describe_their_bins(self):
+        rng = np.random.default_rng(1)
+        x = rng.normal(size=300) * 7.3 + 21
+        variable = pp.ingest(pd.Series(x, name="x"))
+
+        for v in pp.discretize(variable, n_bins=5):
+            in_rule = (x >= v.rule.lower) & (x < v.rule.upper)
+            np.testing.assert_equal(in_rule.astype(float), v.values)
+
+    def test_samples_on_an_edge_fall_in_the_bin_above(self):
+        variable = pp.ingest(pd.Series([1.0, 2.0, 3.0, 4.0], name="cont"))
+
+        lower, upper = pp.discretize(variable, n_bins=2)
+
+        self.assertEqual(3, upper.rule.lower)
+        np.testing.assert_equal([1, 1, 0, 0], lower.values)
+        np.testing.assert_equal([0, 0, 1, 1], upper.values)
+
+    def test_integer_data_has_integer_edges(self):
+        rng = np.random.default_rng(2)
+        ages = pd.Series(rng.integers(18, 90, size=400), name="age")
+
+        result = pp.discretize(pp.ingest(ages), n_bins=5)
+
+        for v in result:
+            self.assertEqual(0, v.rule.precision)
+        for v in result[1:]:
+            self.assertEqual(round(v.rule.lower), v.rule.lower)
+
+    def test_precision_is_shared_across_a_variables_bins(self):
+        rng = np.random.default_rng(3)
+        variable = pp.ingest(pd.Series(rng.normal(size=300), name="x"))
+
+        result = pp.discretize(variable, n_bins=5)
+
+        self.assertEqual(1, len({v.rule.precision for v in result}))
+
+    def test_small_scale_data_keeps_its_bins_distinguishable(self):
+        rng = np.random.default_rng(4)
+        x = rng.normal(size=500) * 0.01 + 0.1
+        variable = pp.ingest(pd.Series(x, name="x"))
+
+        labels = [str(v) for v in pp.discretize(variable, n_bins=5)]
+        edges = [label.split(" < ")[-1] for label in labels[:-1]]
+
+        self.assertEqual(len(edges), len(set(edges)), labels)
 
 
 class TestOneHotEncoding(unittest.TestCase):
