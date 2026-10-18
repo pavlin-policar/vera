@@ -3,7 +3,6 @@ import logging
 from typing import Callable
 
 import matplotlib
-import matplotlib.artist
 import matplotlib.text
 import matplotlib.transforms
 import numpy as np
@@ -860,147 +859,49 @@ def optimize_label_positions(
     return best_labels, history
 
 
-_ALIGNMENT_FRACTIONS = {"left": 0.0, "center": 0.5, "right": 1.0}
-
-
-class Label(matplotlib.artist.Artist):
-    """A multi-line text label drawn as one `Text` per line, so that each line
-    can carry its own style.
-
-    The lines are placed where matplotlib places the lines of the same text
-    drawn as a single multi-line `Text` in the label's shared style: a hidden
-    layout text holds the whole label, and each line is drawn on its baseline,
-    aligned within the block as `ma` (by default `ha`) aligns it. The layout is
-    redone whenever the label is drawn or measured, so it holds at any output
-    dpi. A label whose lines share one style is therefore drawn exactly as a
-    single `Text` would be; a line in another style keeps its place and is
-    aligned by its own width. Line keyword arguments should change a line's
-    style, not its size.
-
-    It provides the part of the `Text` interface that label placement uses.
-    """
-
-    def __init__(
-        self,
-        ax: matplotlib.axes.Axes,
-        xy: tuple[float, float],
-        lines: list[str],
-        line_kwargs: list[dict] = None,
-        **kwargs,
-    ):
-        super().__init__()
-        if line_kwargs is None:
-            line_kwargs = [{}] * len(lines)
-        if len(line_kwargs) != len(lines):
-            raise ValueError(
-                f"Got {len(line_kwargs)} sets of line keyword arguments for "
-                f"{len(lines)} lines."
-            )
-
-        # The defaults of `Axes.text`
-        kwargs = {"clip_on": False, **kwargs}
-        ha = kwargs.pop("ha", kwargs.pop("horizontalalignment", "left"))
-        va = kwargs.pop("va", kwargs.pop("verticalalignment", "baseline"))
-        self._ma = kwargs.pop("ma", kwargs.pop("multialignment", None)) or ha
-        self._text_transform = kwargs.pop("transform", ax.transData)
-        self._xy = tuple(xy)
-
-        def text(s, **text_kwargs):
-            t = matplotlib.text.Text(*xy, s, **text_kwargs, transform=self._text_transform)
-            # As `Axes.text` sets up its texts
-            t.set_figure(ax.figure)
-            t.axes = ax
-            t.set_clip_path(ax.patch)
-            return t
-
-        self._layout_text = text("\n".join(lines), ha=ha, va=va, ma=self._ma, **kwargs)
-        # Single lines have no line spacing
-        kwargs.pop("linespacing", None)
-        self.texts = [
-            text(line, ha=self._ma, va="baseline", **{**kwargs, **line_kwargs_})
-            for line, line_kwargs_ in zip(lines, line_kwargs)
-        ]
-
-        self.set_zorder(self._layout_text.get_zorder())
-        ax.add_artist(self)
-
-    def _layout(self, renderer) -> None:
-        """Place each line where the layout text has it, in display
-        coordinates of `renderer`."""
-        # Each entry of `Text._get_layout`'s line list holds the line, its
-        # metrics starting with its width, and the display offset of its
-        # baseline's left end from the text's position: as a pair since
-        # matplotlib 3.11, as two separate coordinates before
-        _, line_layouts, *_ = self._layout_text._get_layout(renderer)
-        for text, (_, metrics, *offset) in zip(self.texts, line_layouts):
-            x, y = offset[0] if len(offset) == 1 else offset
-            # Anchor the line at the point `ma` aligns it by, so a line in
-            # another style stays aligned with the rest
-            x += metrics[0] * _ALIGNMENT_FRACTIONS[self._ma]
-            text.set_transform(
-                self._text_transform + matplotlib.transforms.Affine2D().translate(x, y)
-            )
-
-    def _renderer(self, renderer):
-        return renderer if renderer is not None else get_renderer(self.figure)
-
-    @matplotlib.artist.allow_rasterization
-    def draw(self, renderer) -> None:
-        if not self.get_visible():
-            return
-        self._layout(renderer)
-        for text in self.texts:
-            text.draw(renderer)
-        self.stale = False
-
-    def _boxes(self, renderer, box) -> list[matplotlib.transforms.Bbox]:
-        renderer = self._renderer(renderer)
-        self._layout(renderer)
-        texts = [self._layout_text, *(t for t in self.texts if t.get_text())]
-        return [b for b in (box(t, renderer) for t in texts) if b is not None]
-
-    def get_window_extent(self, renderer=None) -> matplotlib.transforms.Bbox:
-        """The box around the label, in display coordinates: that of the
-        layout text, grown to take in lines wider in their own style."""
-        boxes = self._boxes(renderer, lambda t, r: t.get_window_extent(r))
-        return matplotlib.transforms.Bbox.union(boxes)
-
-    def get_tightbbox(self, renderer=None) -> matplotlib.transforms.Bbox:
-        boxes = self._boxes(renderer, lambda t, r: t.get_tightbbox(r))
-        return matplotlib.transforms.Bbox.union(boxes) if boxes else None
-
-    def get_text(self) -> str:
-        return "\n".join(t.get_text() for t in self.texts)
-
-    def get_position(self) -> tuple[float, float]:
-        return self._xy
-
-    def set_position(self, xy: tuple[float, float]) -> None:
-        self._xy = tuple(xy)
-        for text in [self._layout_text, *self.texts]:
-            text.set_position(xy)
-        self.stale = True
-
-    def get_fontproperties(self):
-        return self._layout_text.get_fontproperties()
-
-
 def draw_label(
     ax: matplotlib.axes.Axes,
     xy: tuple[float, float],
     label,
     **kwargs,
-) -> Label:
-    """Draw `label` at `xy` with the `Text` keyword arguments `kwargs`.
+) -> list[matplotlib.text.Text]:
+    """Draw `label` at `xy` as one `Text` per line, so that lines can be
+    styled individually; `kwargs` are the `Text` keyword arguments.
 
     `label` is either a string, whose lines share one style, or a sequence of
     ``(line, line_kwargs)`` pairs, whose keyword arguments override `kwargs`
-    for that line alone.
+    for that line alone. Lines are `linespacing` (default 1.2) font sizes
+    apart, which is close to matplotlib's own spacing, and each is aligned on
+    `xy` by `ha`; `va` places the block as a whole. Line keyword arguments
+    should change a line's style, not its size.
     """
     if isinstance(label, str):
-        return Label(ax, xy, label.split("\n"), **kwargs)
-    lines, line_kwargs = zip(*label) if len(label) else ((), ())
-    return Label(ax, xy, list(lines), list(line_kwargs), **kwargs)
+        label = [(line, {}) for line in label.split("\n")]
+
+    kwargs = dict(kwargs)
+    kwargs.pop("ma", None)
+    kwargs.pop("multialignment", None)
+    va = kwargs.pop("va", kwargs.pop("verticalalignment", "center"))
+    linespacing = kwargs.pop("linespacing", 1.2)
+    transform = kwargs.pop("transform", ax.transData)
+
+    texts = [
+        ax.text(*xy, line, va="center_baseline", **{**kwargs, **line_kwargs})
+        for line, line_kwargs in label
+    ]
+    if not texts:
+        return texts
+
+    # Offsets in points hold at any output dpi
+    step = linespacing * texts[0].get_fontsize()
+    half_height = len(texts) * step / 2
+    centre = {"top": -half_height, "bottom": half_height}.get(va, 0.0)
+    for i, text in enumerate(texts):
+        dy = centre + ((len(texts) - 1) / 2 - i) * step
+        text.set_transform(
+            matplotlib.transforms.offset_copy(transform, fig=ax.figure, y=dy, units="points")
+        )
+    return texts
 
 
 def get_label_bounding_boxes_on_ax(
@@ -1025,25 +926,26 @@ def get_label_bounding_boxes_on_ax(
     for label, label_pos in zip(labels, label_positions):
         # Render the label on the current axis, measure its outline, then
         # remove the rendered label
-        handle = draw_label(ax, label_pos, label, **label_kwargs)
-        label_bboxes.append(label_outline(handle, ax))
-        handle.remove()
+        texts = draw_label(ax, label_pos, label, **label_kwargs)
+        label_bboxes.append(label_outline(texts, ax))
+        for text in texts:
+            text.remove()
 
     return label_bboxes
 
 
 def label_outline(handle, ax: matplotlib.axes.Axes) -> shapely.Polygon:
-    """The outline of a rendered label, a `Text` or a :class:`Label`, in data
-    coordinates: the union of the boxes of its lines (see
-    :func:`label_line_shape`)."""
-    bbox = bbox_to_polygon(get_artist_bounding_box(handle, ax))
-    if isinstance(handle, Label):
-        widths = []
-        for text in handle.texts:
-            x0, _, x1, _ = get_artist_bounding_box(text, ax) if text.get_text() else (0, 0, 0, 0)
-            widths.append(x1 - x0)
-        return label_line_shape(bbox, widths)
+    """The outline of a rendered label, in data coordinates: the union of the
+    boxes of its lines (see :func:`label_line_shape`). The label is a
+    multi-line `Text` or the per-line `Text`s of :func:`draw_label`."""
+    if not isinstance(handle, matplotlib.text.Text):
+        boxes = [get_artist_bounding_box(t, ax) if t.get_text() else None for t in handle]
+        drawn = np.vstack([b for b in boxes if b is not None])
+        bbox = np.hstack([drawn[:, :2].min(axis=0), drawn[:, 2:].max(axis=0)])
+        widths = [0.0 if b is None else b[2] - b[0] for b in boxes]
+        return label_line_shape(bbox_to_polygon(bbox), widths)
 
+    bbox = bbox_to_polygon(get_artist_bounding_box(handle, ax))
     lines = handle.get_text().split("\n")
     if len(lines) <= 1:
         return bbox

@@ -177,7 +177,7 @@ class TestBackgroundLabels(BackgroundEnrichmentTestBase):
         handles, _, fig, ax = plot_annotation(
             [self.enriched(self.v_c)], optimize_labels=False, return_ax=True
         )
-        styles = [(t.get_text(), t.get_fontstyle()) for t in handles[0].texts]
+        styles = [(t.get_text(), t.get_fontstyle()) for t in handles[0]]
         self.assertEqual(
             [("a = high", "normal"), ("b = high", "normal"), ("c = high", "italic")],
             styles,
@@ -190,14 +190,14 @@ class TestBackgroundLabels(BackgroundEnrichmentTestBase):
             return_ax=True,
             background_label_kwargs={},
         )
-        self.assertEqual({"normal"}, {t.get_fontstyle() for t in handles[0].texts})
+        self.assertEqual({"normal"}, {t.get_fontstyle() for t in handles[0]})
 
     def test_undistinguished_background_is_shown_in_score_order_and_one_style(self):
         enriched = self.enriched(self.v_c)
         handles, _, fig, ax = plot_annotation(
             [enriched], optimize_labels=False, return_ax=True, distinguish_background=False
         )
-        styles = [(t.get_text(), t.get_fontstyle()) for t in handles[0].texts]
+        styles = [(t.get_text(), t.get_fontstyle()) for t in handles[0]]
         self.assertEqual(
             [("a = high", "normal"), ("c = high", "normal"), ("b = high", "normal")],
             styles,
@@ -212,14 +212,12 @@ class TestBackgroundLabels(BackgroundEnrichmentTestBase):
 
     def test_plot_region_distinguishes_background_by_default(self):
         ax = self.plot_region(self.enriched(self.v_c))
-        label = next(a for a in ax.get_children() if hasattr(a, "texts"))
-        self.assertEqual(["normal", "normal", "italic"], [t.get_fontstyle() for t in label.texts])
+        self.assertEqual(["normal", "normal", "italic"], [t.get_fontstyle() for t in ax.texts])
 
     def test_plot_region_can_show_background_like_the_rest(self):
         ax = self.plot_region(self.enriched(self.v_c), distinguish_background=False)
-        label = next(a for a in ax.get_children() if hasattr(a, "texts"))
-        self.assertEqual("a = high\nc = high\nb = high", label.get_text())
-        self.assertEqual({"normal"}, {t.get_fontstyle() for t in label.texts})
+        self.assertEqual(["a = high", "c = high", "b = high"], [t.get_text() for t in ax.texts])
+        self.assertEqual({"normal"}, {t.get_fontstyle() for t in ax.texts})
 
 
 if __name__ == "__main__":
