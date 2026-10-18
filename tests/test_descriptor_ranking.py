@@ -420,7 +420,7 @@ class TestPlottingLabelTruncation(unittest.TestCase):
         handles, _, fig, ax = plot_annotation(
             [self.ra], optimize_labels=False, return_ax=True
         )
-        texts = ["\n".join(t.get_text() for t in h) for h in handles]
+        texts = [h.get_text() for h in handles]
         self.assertEqual(1, len(texts))
         self.assertNotIn("more)", texts[0])
         self.assertEqual(7, len(texts[0].split("\n")))
@@ -429,7 +429,7 @@ class TestPlottingLabelTruncation(unittest.TestCase):
         handles, _, fig, ax = plot_annotation(
             [self.ra], optimize_labels=False, return_ax=True, max_descriptors=5
         )
-        texts = ["\n".join(t.get_text() for t in h) for h in handles]
+        texts = [h.get_text() for h in handles]
         self.assertEqual(1, len(texts))
         self.assertIn("(+2 more)", texts[0])
         self.assertEqual(6, len(texts[0].split("\n")))
@@ -476,7 +476,7 @@ class TestPlottingLabelTruncation(unittest.TestCase):
             truncation_sep=" ",
             max_width=30,
         )
-        texts = ["\n".join(t.get_text() for t in h) for h in handles]
+        texts = [h.get_text() for h in handles]
         self.assertEqual(1, len(texts))
         lines = texts[0].split("\n")
         self.assertGreater(len(lines), 1)
@@ -665,5 +665,5 @@ class TestSharedFeatureTieBreak(unittest.TestCase):
 
     def test_plot_annotation_draws_the_shared_feature_first(self):
         handles, _, fig, ax = plot_annotation(self.panel(), optimize_labels=False, return_ax=True, max_descriptors=1)
-        texts = ["\n".join(t.get_text() for t in h) for h in handles]
+        texts = [h.get_text() for h in handles]
         self.assertTrue(any(t.startswith(str(self.pos[2])) for t in texts), texts)

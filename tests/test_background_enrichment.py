@@ -9,6 +9,7 @@ from shapely import geometry as geom
 
 from vera.embedding import Embedding
 from vera.explain._descriptive import enrich_with_background
+from vera.label_placement import Label
 from vera.plotting import _format_descriptor, _format_descriptor_lines, plot_annotation, plot_region
 from vera.region import Region
 from vera.region_annotation import RegionAnnotation
@@ -176,7 +177,7 @@ class TestBackgroundLabels(BackgroundEnrichmentTestBase):
         handles, _, fig, ax = plot_annotation(
             [self.enriched(self.v_c)], optimize_labels=False, return_ax=True
         )
-        styles = [(t.get_text(), t.get_fontstyle()) for t in handles[0]]
+        styles = [(t.get_text(), t.get_fontstyle()) for t in handles[0].texts]
         self.assertEqual(
             [("a = high", "normal"), ("b = high", "normal"), ("c = high", "italic")],
             styles,
@@ -189,14 +190,14 @@ class TestBackgroundLabels(BackgroundEnrichmentTestBase):
             return_ax=True,
             background_label_kwargs={},
         )
-        self.assertEqual({"normal"}, {t.get_fontstyle() for t in handles[0]})
+        self.assertEqual({"normal"}, {t.get_fontstyle() for t in handles[0].texts})
 
     def test_undistinguished_background_is_shown_in_score_order_and_one_style(self):
         enriched = self.enriched(self.v_c)
         handles, _, fig, ax = plot_annotation(
             [enriched], optimize_labels=False, return_ax=True, distinguish_background=False
         )
-        styles = [(t.get_text(), t.get_fontstyle()) for t in handles[0]]
+        styles = [(t.get_text(), t.get_fontstyle()) for t in handles[0].texts]
         self.assertEqual(
             [("a = high", "normal"), ("c = high", "normal"), ("b = high", "normal")],
             styles,
@@ -205,12 +206,14 @@ class TestBackgroundLabels(BackgroundEnrichmentTestBase):
 
     def test_plot_region_distinguishes_background_by_default(self):
         ax = plot_region(self.enriched(self.v_c), draw_label=True)
-        self.assertEqual(["normal", "normal", "italic"], [t.get_fontstyle() for t in ax.texts])
+        (label,) = [a for a in ax.artists if isinstance(a, Label)]
+        self.assertEqual(["normal", "normal", "italic"], [t.get_fontstyle() for t in label.texts])
 
     def test_plot_region_can_show_background_like_the_rest(self):
         ax = plot_region(self.enriched(self.v_c), draw_label=True, distinguish_background=False)
-        self.assertEqual(["a = high", "c = high", "b = high"], [t.get_text() for t in ax.texts])
-        self.assertEqual({"normal"}, {t.get_fontstyle() for t in ax.texts})
+        (label,) = [a for a in ax.artists if isinstance(a, Label)]
+        self.assertEqual("a = high\nc = high\nb = high", label.get_text())
+        self.assertEqual({"normal"}, {t.get_fontstyle() for t in label.texts})
 
 
 if __name__ == "__main__":
