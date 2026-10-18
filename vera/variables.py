@@ -68,7 +68,16 @@ def _validate_format_label_args(max_descriptors, truncation_template, sep, trunc
 
 
 class RegionDescriptor(metaclass=abc.ABCMeta):
-    """Abstract interface that provides a textual description of regions."""
+    """Abstract interface that provides a textual description of regions.
+
+    `background_variables` holds the constituent variables that background
+    enrichment (`explain.descriptive`) added as context to the region's core
+    description. They take part in `values` like any other member; plotting
+    shows them after the core members and in their own style. Merging
+    descriptors does not carry the marking over.
+    """
+    background_variables: frozenset = frozenset()
+
     def __init__(self, values: np.ndarray):
         self.values = values
 
@@ -162,6 +171,15 @@ class RegionDescriptor(metaclass=abc.ABCMeta):
     ) -> "RegionDescriptor":
         """This descriptor with its constituent variables of equal score
         ordered by descending `preference`.
+
+        A descriptor without constituent parts has nothing to reorder and
+        returns itself.
+        """
+        return self
+
+    def with_background_last(self) -> "RegionDescriptor":
+        """This descriptor with its background variables moved after the
+        others, each part keeping its order.
 
         A descriptor without constituent parts has nothing to reorder and
         returns itself.
@@ -443,7 +461,7 @@ class IndicatorVariableGroup(RegionDescriptor):
         Only a group ranked by `ranked_by` knows its scores; any other group
         is returned unchanged. Scores are equal when they agree to within
         floating-point tolerance, so variables of different score are never
-        reordered.
+        reordered; nor are a background variable and a core one.
         """
         # Groups unpickled from before scores were stored lack the attribute
         if getattr(self, "scores", None) is None:
@@ -451,14 +469,34 @@ class IndicatorVariableGroup(RegionDescriptor):
 
         # Consecutive runs of equal score, each compared with its first
         # member so that a run cannot creep across slowly decreasing scores
+        background = self.background_variables
         runs = []
         for v in self.variables:
-            if runs and _equal_scores(self.scores[v], self.scores[runs[-1][0]]):
+            if (
+                runs
+                and _equal_scores(self.scores[v], self.scores[runs[-1][0]])
+                and (v in background) == (runs[-1][0] in background)
+            ):
                 runs[-1].append(v)
             else:
                 runs.append([v])
         ordered = [
             v for run in runs for v in sorted(sorted(run), key=preference, reverse=True)
+        ]
+        if ordered == self.variables:
+            return self
+
+        ordered_group = copy.copy(self)
+        ordered_group.variables = ordered
+        return ordered_group
+
+    def with_background_last(self) -> "IndicatorVariableGroup":
+        """A copy of the group with its background variables moved after the
+        others, each part keeping its order; the group itself when nothing
+        moves."""
+        background = self.background_variables
+        ordered = [v for v in self.variables if v not in background] + [
+            v for v in self.variables if v in background
         ]
         if ordered == self.variables:
             return self

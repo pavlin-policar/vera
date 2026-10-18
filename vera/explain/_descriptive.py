@@ -81,10 +81,23 @@ def enrich_with_background(
             to_add.append(background_ra.descriptor)
 
     # If we found any background descriptors to add to the region annotation,
-    # create a new region annotation with all available descriptors
+    # create a new region annotation with all available descriptors, marking
+    # the added ones. They are identified by base variable, since merging may
+    # combine several background indicators of one base variable into a new
+    # indicator, and no background base variable is shared with the core
     if len(to_add) > 0:
+        core = region_annotation.descriptor
+        core_base_vars = {
+            v.base_variable
+            for v in getattr(core, "variables", [core])
+            if v not in core.background_variables
+        }
+        descriptor = RegionDescriptor.merge([core, *to_add])
+        descriptor.background_variables = frozenset(
+            v for v in descriptor.variables if v.base_variable not in core_base_vars
+        )
         region_annotation = RegionAnnotation(
-            descriptor=RegionDescriptor.merge([region_annotation.descriptor, *to_add]),
+            descriptor=descriptor,
             region=region_annotation.region,
             source_region_annotations=region_annotation.source_region_annotations,
         )
