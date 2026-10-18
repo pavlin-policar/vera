@@ -157,6 +157,17 @@ class RegionDescriptor(metaclass=abc.ABCMeta):
         """
         return self
 
+    def with_ties_ordered_by(
+        self, preference: Callable[["IndicatorVariable"], float]
+    ) -> "RegionDescriptor":
+        """This descriptor with its constituent variables of equal score
+        ordered by descending `preference`.
+
+        A descriptor without constituent parts has nothing to reorder and
+        returns itself.
+        """
+        return self
+
 
 class Variable(metaclass=abc.ABCMeta):
     repr_attrs = ["name"]
@@ -339,6 +350,14 @@ def merge_indicator_variables(variables: list[IndicatorVariable]) -> list[Indica
     return merged_variables
 
 
+def _equal_scores(a: float, b: float) -> bool:
+    """Whether two descriptor scores are equal up to floating-point error;
+    the -inf that stands in for a NaN score equals only itself."""
+    if a == b:
+        return True
+    return bool(np.isfinite(a) and np.isfinite(b) and np.isclose(a, b, rtol=1e-9, atol=0))
+
+
 class IndicatorVariableGroup(RegionDescriptor):
     """A group of potentially unrelated indicator variables.
 
@@ -348,6 +367,9 @@ class IndicatorVariableGroup(RegionDescriptor):
     """
     def __init__(self, variables: list[IndicatorVariable]):
         self.variables = sorted(merge_indicator_variables(variables))
+        # The score of each variable, set by `ranked_by`; None for a group
+        # in its own (alphabetical) order
+        self.scores = None
         # The merged values indicate which samples belong to ALL contained variables
         merged_values = conjunction([v.values for v in self.variables])
 
@@ -409,7 +431,41 @@ class IndicatorVariableGroup(RegionDescriptor):
 
         ranked_group = copy.copy(self)
         ranked_group.variables = ranked
+        ranked_group.scores = {v: sort_key(v) for v in ranked}
         return ranked_group
+
+    def with_ties_ordered_by(
+        self, preference: Callable[["IndicatorVariable"], float]
+    ) -> "IndicatorVariableGroup":
+        """A copy of the group in which variables of equal score are ordered
+        by descending `preference`, then by their natural order.
+
+        Only a group ranked by `ranked_by` knows its scores; any other group
+        is returned unchanged. Scores are equal when they agree to within
+        floating-point tolerance, so variables of different score are never
+        reordered.
+        """
+        # Groups unpickled from before scores were stored lack the attribute
+        if getattr(self, "scores", None) is None:
+            return self
+
+        # Consecutive runs of equal score, each compared with its first
+        # member so that a run cannot creep across slowly decreasing scores
+        runs = []
+        for v in self.variables:
+            if runs and _equal_scores(self.scores[v], self.scores[runs[-1][0]]):
+                runs[-1].append(v)
+            else:
+                runs.append([v])
+        ordered = [
+            v for run in runs for v in sorted(sorted(run), key=preference, reverse=True)
+        ]
+        if ordered == self.variables:
+            return self
+
+        ordered_group = copy.copy(self)
+        ordered_group.variables = ordered
+        return ordered_group
 
     def format_label(
         self,

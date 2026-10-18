@@ -509,6 +509,37 @@ def _format_descriptor(
     return "\n".join(s_lines)
 
 
+def _order_ties_by_shared_features(
+    descriptors: list[RegionDescriptor], max_descriptors: int = None
+) -> list[RegionDescriptor]:
+    """The descriptors of one panel, each with its variables of equal score
+    ordered by the number of the panel's other labels that show the same base
+    variable, most first, so that among equally characteristic descriptors a
+    label repeats the features its neighbours are described by.
+
+    The features a label shows are taken from the score ranking, in a single
+    pass, so the result does not depend on the order of `descriptors`. Like
+    truncation, the reordering is display-only: the region annotations keep
+    their descriptors.
+    """
+    def shown(descriptor):
+        variables = getattr(descriptor, "variables", [descriptor])
+        # `format_label` shows the whole group when the marker would stand in
+        # for a single variable
+        if max_descriptors is not None and len(variables) > max_descriptors + 1:
+            variables = variables[:max_descriptors]
+        return {v.base_variable for v in variables}
+
+    shown_features = [shown(d) for d in descriptors]
+    ordered = []
+    for i, descriptor in enumerate(descriptors):
+        others = shown_features[:i] + shown_features[i + 1:]
+        ordered.append(descriptor.with_ties_ordered_by(
+            lambda v, others=others: sum(v.base_variable in s for s in others)
+        ))
+    return ordered
+
+
 def _plot_region(
     region_annotation: RegionAnnotation,
     ax: matplotlib.axes.Axes,
@@ -946,9 +977,12 @@ def plot_annotation(
 
     if draw_labels:
         label_data = []
-        for region_annotation in region_annotations:
+        descriptors = _order_ties_by_shared_features(
+            [ra.descriptor for ra in region_annotations], max_descriptors
+        )
+        for region_annotation, descriptor in zip(region_annotations, descriptors):
             label_str = _format_descriptor(
-                region_annotation.descriptor,
+                descriptor,
                 max_descriptors=max_descriptors,
                 truncation_template=truncation_template,
                 sep=sep,
