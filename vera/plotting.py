@@ -40,10 +40,11 @@ from vera.label_placement import (
     convert_ax_to_data,
     get_label_bounding_boxes_on_ax,
     label_outline,
+    draw_label,
 )
 from vera.region import Density, Region
 from vera.region_annotation import RegionAnnotation
-from vera.variables import RegionDescriptor
+from vera.variables import RegionDescriptor, _validate_format_label_args
 
 
 class GoogleAPIUnreachable(Warning):
@@ -490,6 +491,71 @@ def plot_densities(
         return fig, ax
 
 
+DEFAULT_BACKGROUND_LABEL_KWARGS = {"fontstyle": "italic"}
+
+
+def _format_descriptor_lines(
+    descriptor: RegionDescriptor,
+    max_descriptors: int = None,
+    truncation_template: str = "(+{n} more)",
+    sep: str = "\n",
+    truncation_sep: str = None,
+    max_width: int = 40,
+) -> list[tuple[str, bool]]:
+    """The descriptor's label as lines wrapped to `max_width`, each paired
+    with whether it shows background variables.
+
+    Background variables follow the others and start a line of their own
+    whatever `sep` is, so that no line mixes the two. Truncation keeps the
+    first `max_descriptors` variables in that order, so it hides background
+    variables first; the marker is not background, unless it shares a line
+    with background variables.
+    """
+    descriptor = descriptor.with_background_last()
+    background = descriptor.background_variables
+
+    # (variables text, whether background, text following it)
+    if not background:
+        blocks = [(descriptor.format_label(
+            max_descriptors=max_descriptors,
+            truncation_template=truncation_template,
+            sep=sep,
+            truncation_sep=truncation_sep,
+        ), False, "")]
+    else:
+        _validate_format_label_args(
+            max_descriptors, truncation_template, sep, truncation_sep
+        )
+        if truncation_sep is None:
+            truncation_sep = sep
+        variables = descriptor.variables
+        n_hidden = 0
+        # As in `format_label`, a marker never stands in for a single variable
+        if max_descriptors is not None and max_descriptors < len(variables) - 1:
+            n_hidden = len(variables) - max_descriptors
+            variables = variables[:max_descriptors]
+        blocks = [
+            (sep.join(str(v) for v in part), is_background, "")
+            for part, is_background in [
+                ([v for v in variables if v not in background], False),
+                ([v for v in variables if v in background], True),
+            ]
+            if part
+        ]
+        if n_hidden:
+            text, is_background, _ = blocks[-1]
+            marker = truncation_sep + truncation_template.format(n=n_hidden)
+            blocks[-1] = (text, is_background, marker)
+
+    lines = []
+    for text, is_background, suffix in blocks:
+        n_variable_lines = text.count("\n") + 1
+        for i, line in enumerate((text + suffix).split("\n")):
+            flag = is_background and i < n_variable_lines
+            lines.extend((wrapped, flag) for wrapped in wrap(line, width=max_width) or [""])
+    return lines
+
+
 def _format_descriptor(
     descriptor: RegionDescriptor,
     max_descriptors: int = None,
@@ -497,16 +563,29 @@ def _format_descriptor(
     sep: str = "\n",
     truncation_sep: str = None,
     max_width: int = 40,
-):
-    label_str = descriptor.format_label(
+) -> str:
+    lines = _format_descriptor_lines(
+        descriptor,
         max_descriptors=max_descriptors,
         truncation_template=truncation_template,
         sep=sep,
         truncation_sep=truncation_sep,
+        max_width=max_width,
     )
-    s_lines = label_str.split("\n")
-    s_lines = ["\n".join(wrap(l, width=max_width)) for l in s_lines]
-    return "\n".join(s_lines)
+    return "\n".join(line for line, _ in lines)
+
+
+def _styled_label(
+    lines: list[tuple[str, bool]], background_label_kwargs: dict = None
+) -> list[tuple[str, dict]]:
+    """Label lines in the form `draw_label` takes, with background lines in
+    `background_label_kwargs` (None for `DEFAULT_BACKGROUND_LABEL_KWARGS`)."""
+    if background_label_kwargs is None:
+        background_label_kwargs = DEFAULT_BACKGROUND_LABEL_KWARGS
+    return [
+        (line, background_label_kwargs if is_background else {})
+        for line, is_background in lines
+    ]
 
 
 def _order_ties_by_shared_features(
@@ -617,6 +696,7 @@ def plot_region(
     max_width: int = 40,
     scatter_kwargs: dict = None,
     label_kwargs: dict = None,
+    background_label_kwargs: dict = None,
     show: bool = False,
 ):
     if scatter_kwargs is None:
@@ -639,7 +719,7 @@ def plot_region(
     )
 
     if draw_label:
-        label_str = _format_descriptor(
+        label_lines = _format_descriptor_lines(
             region_annotation.descriptor,
             max_descriptors=max_descriptors,
             truncation_template=truncation_template,
@@ -661,7 +741,9 @@ def plot_region(
         label_kwargs_.update(label_kwargs)
         x, y = largest_polygon.centroid.coords[0]
 
-        label = ax.text(x, y, label_str, **label_kwargs_)
+        label = draw_label(
+            ax, (x, y), _styled_label(label_lines, background_label_kwargs), **label_kwargs_
+        )
         # label.set_bbox(dict(facecolor="white", alpha=0.75, edgecolor="white"))
 
     # Plot embedding scatter plot
@@ -719,6 +801,7 @@ def plot_regions(
     max_width: int = 40,
     scatter_kwargs: dict = None,
     label_kwargs: dict = None,
+    background_label_kwargs: dict = None,
     show: bool = False,
 ):
     if len(region_annotations) == 0:
@@ -755,6 +838,7 @@ def plot_regions(
             max_width=max_width,
             scatter_kwargs=scatter_kwargs,
             label_kwargs=label_kwargs,
+            background_label_kwargs=background_label_kwargs,
         )
 
     enumerate_plots(ax[:idx + 1])
@@ -864,6 +948,7 @@ def plot_annotation(
     ra_colors: dict = None,
     scatter_kwargs: dict = None,
     label_kwargs: dict = None,
+    background_label_kwargs: dict = None,
     leader_kwargs: dict = None,
     axis_limits: tuple = None,
     figwidth: int = 4,
@@ -978,10 +1063,11 @@ def plot_annotation(
     if draw_labels:
         label_data = []
         descriptors = _order_ties_by_shared_features(
-            [ra.descriptor for ra in region_annotations], max_descriptors
+            [ra.descriptor.with_background_last() for ra in region_annotations],
+            max_descriptors,
         )
         for region_annotation, descriptor in zip(region_annotations, descriptors):
-            label_str = _format_descriptor(
+            label_lines = _format_descriptor_lines(
                 descriptor,
                 max_descriptors=max_descriptors,
                 truncation_template=truncation_template,
@@ -995,7 +1081,7 @@ def plot_annotation(
             x, y = largest_polygon.centroid.coords[0]
 
             label_data.append({
-                "text": label_str,
+                "text": _styled_label(label_lines, background_label_kwargs),
                 "pos": [x, y],
                 "pos_region": largest_polygon,
                 "color": ra_colors[region_annotation]
@@ -1118,8 +1204,9 @@ def plot_annotation(
         label_handles = []
         for lbl_data, label_text_pos in zip(label_data, best_label_positions):
             label_handles.append(
-                ax.text(
-                    *label_text_pos,
+                draw_label(
+                    ax,
+                    label_text_pos,
                     lbl_data["text"],
                     color=lbl_data["color"],
                     **label_kwargs_,
@@ -1167,6 +1254,7 @@ def plot_annotations(
     variable_colors: dict = None,
     scatter_kwargs: dict = None,
     label_kwargs: dict = None,
+    background_label_kwargs: dict = None,
     leader_kwargs: dict = None,
     axis_limits: tuple = None,
     show: bool = False,
@@ -1210,6 +1298,7 @@ def plot_annotations(
             ra_colors=variable_colors,
             scatter_kwargs=scatter_kwargs,
             label_kwargs=label_kwargs,
+            background_label_kwargs=background_label_kwargs,
             leader_kwargs=leader_kwargs,
             axis_limits=axis_limits,
         )

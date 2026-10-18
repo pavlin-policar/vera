@@ -9,6 +9,7 @@ from shapely import geometry as geom
 
 from vera.embedding import Embedding
 from vera.explain._descriptive import enrich_with_background
+from vera.plotting import _format_descriptor, _format_descriptor_lines, plot_annotation
 from vera.region import Region
 from vera.region_annotation import RegionAnnotation
 from vera.variables import IndicatorVariableGroup
@@ -31,6 +32,7 @@ class BackgroundEnrichmentTestBase(unittest.TestCase):
         # whether they enrich the core. c scores the same as a
         self.v_c = make_indicator("c", make_values(self.n, 10, 10, 0))
         self.v_e = make_indicator("e", make_values(self.n, 10, 10, 25))
+        self.v_f = make_indicator("f", make_values(self.n, 10, 10, 28))
 
     def region(self, start: int, stop: int) -> Region:
         """The region holding samples `start` to `stop - 1`."""
@@ -114,6 +116,80 @@ class TestBackgroundOrdering(BackgroundEnrichmentTestBase):
         self.assertEqual([self.v_a, self.v_b, self.v_c], partitioned.variables)
         ordered = self.enriched().with_ties_ordered_by(lambda v: v is self.v_c)
         self.assertEqual([self.v_a, self.v_c, self.v_b], ordered.variables)
+
+
+class TestBackgroundLabels(BackgroundEnrichmentTestBase):
+    def enriched(self, *background_variables):
+        background = [
+            RegionAnnotation(self.region(0, 30), v) for v in background_variables
+        ]
+        return enrich_with_background(self.core(), background)
+
+    def test_background_lines_follow_the_core_and_are_flagged(self):
+        lines = _format_descriptor_lines(self.enriched(self.v_c).descriptor)
+        self.assertEqual(
+            [("a = high", False), ("b = high", False), ("c = high", True)], lines
+        )
+
+    def test_unenriched_label_is_unflagged_and_unchanged(self):
+        descriptor = self.core().descriptor
+        lines = _format_descriptor_lines(descriptor)
+        self.assertEqual([(line, False) for line in str(descriptor).split("\n")], lines)
+
+    def test_truncation_hides_background_first_behind_a_plain_marker(self):
+        descriptor = self.enriched(self.v_c, self.v_e).descriptor
+        lines = _format_descriptor_lines(descriptor, max_descriptors=2)
+        self.assertEqual(
+            [("a = high", False), ("b = high", False), ("(+2 more)", False)], lines
+        )
+
+    def test_background_starts_its_own_line_in_a_joined_label(self):
+        descriptor = self.enriched(self.v_c, self.v_e).descriptor
+        lines = _format_descriptor_lines(descriptor, sep=", ")
+        self.assertEqual(
+            [("a = high, b = high", False), ("c = high, e = high", True)], lines
+        )
+
+    def test_marker_sharing_a_background_line_is_flagged_with_it(self):
+        descriptor = self.enriched(self.v_c, self.v_e, self.v_f).descriptor
+        lines = _format_descriptor_lines(
+            descriptor, max_descriptors=3, sep=", ", truncation_sep=" "
+        )
+        self.assertEqual(
+            [("a = high, b = high", False), ("c = high (+2 more)", True)], lines
+        )
+
+    def test_wrapped_background_lines_stay_flagged(self):
+        lines = _format_descriptor_lines(
+            self.enriched(self.v_c, self.v_e).descriptor, sep=", ", max_width=10
+        )
+        self.assertEqual(
+            [("a = high,", False), ("b = high", False), ("c = high,", True), ("e = high", True)],
+            lines,
+        )
+
+    def test_plain_label_text_matches_the_lines(self):
+        descriptor = self.enriched(self.v_c).descriptor
+        self.assertEqual("a = high\nb = high\nc = high", _format_descriptor(descriptor))
+
+    def test_plot_annotation_draws_background_in_italics(self):
+        handles, _, fig, ax = plot_annotation(
+            [self.enriched(self.v_c)], optimize_labels=False, return_ax=True
+        )
+        styles = [(t.get_text(), t.get_fontstyle()) for t in handles[0].texts]
+        self.assertEqual(
+            [("a = high", "normal"), ("b = high", "normal"), ("c = high", "italic")],
+            styles,
+        )
+
+    def test_background_style_is_configurable(self):
+        handles, _, fig, ax = plot_annotation(
+            [self.enriched(self.v_c)],
+            optimize_labels=False,
+            return_ax=True,
+            background_label_kwargs={},
+        )
+        self.assertEqual({"normal"}, {t.get_fontstyle() for t in handles[0].texts})
 
 
 if __name__ == "__main__":
