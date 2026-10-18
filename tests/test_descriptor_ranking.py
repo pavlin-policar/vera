@@ -520,3 +520,150 @@ class TestMissingValues(unittest.TestCase):
         ra = make_region_annotation([make_indicator("a", values)], n_in_region=4)
 
         self.assertEqual({0, 3}, ra.all_members)
+
+
+def make_rule_indicator(base, value: str, values: np.ndarray) -> IndicatorVariable:
+    """An indicator of `base == value`; as in expanded data, indicators of one
+    feature share its base variable."""
+    return IndicatorVariable(base, EqualityRule(value, value_name=base.name), np.asarray(values, dtype=float))
+
+
+class TestTieOrdering(unittest.TestCase):
+    def setUp(self):
+        self.n_samples, self.n_in_region = 40, 10
+        self.v_a = make_indicator("a", make_values(40, 10, 10, 0))
+        self.v_b = make_indicator("b", make_values(40, 10, 10, 0))
+        self.v_c = make_indicator("c", make_values(40, 10, 10, 0))
+        self.v_d = make_indicator("d", make_values(40, 10, 6, 0))
+        self.variables = [self.v_a, self.v_b, self.v_c, self.v_d]
+
+    def test_ranked_group_keeps_its_scores(self):
+        ra = make_region_annotation(self.variables, self.n_in_region)
+        scores = metrics.descriptor_scores(ra)
+        for v in self.variables:
+            self.assertAlmostEqual(scores[v], ra.descriptor.scores[v])
+
+    def test_unranked_group_has_no_scores_and_is_not_reordered(self):
+        group = IndicatorVariableGroup(self.variables)
+        self.assertIsNone(group.scores)
+        self.assertIs(group, group.with_ties_ordered_by(lambda v: v is self.v_c))
+
+    def test_ties_are_ordered_by_preference_then_natural_order(self):
+        # a, b, c hold on exactly the region and tie; d scores lower
+        ra = make_region_annotation(self.variables, self.n_in_region)
+        self.assertEqual([self.v_a, self.v_b, self.v_c, self.v_d], ra.descriptor.variables)
+        ordered = ra.descriptor.with_ties_ordered_by(lambda v: 2 if v is self.v_c else 1 if v is self.v_b else 0)
+        self.assertEqual([self.v_c, self.v_b, self.v_a, self.v_d], ordered.variables)
+
+    def test_variables_of_different_score_are_never_reordered(self):
+        ra = make_region_annotation(self.variables, self.n_in_region)
+        ordered = ra.descriptor.with_ties_ordered_by(lambda v: 1 if v is self.v_d else 0)
+        self.assertEqual(self.v_d, ordered.variables[-1])
+
+    def test_reordering_copies_the_group(self):
+        ra = make_region_annotation(self.variables, self.n_in_region)
+        original = list(ra.descriptor.variables)
+        ordered = ra.descriptor.with_ties_ordered_by(lambda v: v is self.v_c)
+        self.assertIsNot(ra.descriptor, ordered)
+        self.assertEqual(original, ra.descriptor.variables)
+        self.assertEqual(ra.descriptor, ordered)
+
+    def test_unchanged_order_returns_the_same_group(self):
+        ra = make_region_annotation(self.variables, self.n_in_region)
+        self.assertIs(ra.descriptor, ra.descriptor.with_ties_ordered_by(lambda v: 0))
+
+    def test_nearly_equal_scores_tie(self):
+        def scores(ra):
+            return {self.v_a: 1.0, self.v_b: 1.0 + 1e-12, self.v_c: 0.5, self.v_d: 0.25}
+
+        with mock.patch.object(metrics, "descriptor_scores", side_effect=scores):
+            ra = make_region_annotation(self.variables, self.n_in_region)
+        ordered = ra.descriptor.with_ties_ordered_by(lambda v: v is self.v_a)
+        self.assertEqual([self.v_a, self.v_b, self.v_c, self.v_d], ordered.variables)
+
+
+class TestSharedFeatureTieBreak(unittest.TestCase):
+    """A panel of three regions over 30 samples, ten per region. The first two
+    are described by a `position` indicator ahead of a weaker one; in the third,
+    `position = keeper` ties with two other perfect descriptors that sort before
+    it alphabetically."""
+
+    def setUp(self):
+        # Three 5 x 2 grids of samples, one per region, far apart
+        n = 30
+        k = np.arange(10)
+        X = np.vstack([np.column_stack([20 * i + k % 5, 20 * (i % 2) + k // 5]) for i in range(3)]).astype(float)
+        embedding = Embedding(X)
+        self.regions = [
+            Region(embedding, geom.box(20 * i - 0.5, 20 * (i % 2) - 0.5, 20 * i + 4.5, 20 * (i % 2) + 1.5))
+            for i in range(3)
+        ]
+
+        def block(i, inside=10):
+            values = np.zeros(n)
+            values[10 * i:10 * i + inside] = 1
+            return values
+
+        def base(name):
+            return ContinuousVariable(name, np.zeros(n))
+
+        position = base("position")
+        self.pos = [make_rule_indicator(position, p, block(i)) for i, p in enumerate(["defender", "forward", "keeper"])]
+        self.weak_bases = [base(f"weak{i}") for i in range(2)]
+        self.weak = [make_rule_indicator(b, "high", block(i, 5)) for i, b in enumerate(self.weak_bases)]
+        self.alpha = make_rule_indicator(base("alpha"), "high", block(2))
+        self.beta = make_rule_indicator(base("beta"), "high", block(2))
+
+    def panel(self):
+        return [
+            RegionAnnotation(self.regions[0], IndicatorVariableGroup([self.pos[0], self.weak[0]])),
+            RegionAnnotation(self.regions[1], IndicatorVariableGroup([self.pos[1], self.weak[1]])),
+            RegionAnnotation(self.regions[2], IndicatorVariableGroup([self.alpha, self.beta, self.pos[2]])),
+        ]
+
+    def test_score_ranking_puts_the_shared_feature_last_among_ties(self):
+        self.assertEqual([self.alpha, self.beta, self.pos[2]], self.panel()[2].descriptor.variables)
+
+    def test_tied_descriptor_shown_by_other_labels_comes_first(self):
+        from vera.plotting import _order_ties_by_shared_features
+
+        panel = self.panel()
+        ordered = _order_ties_by_shared_features([ra.descriptor for ra in panel], max_descriptors=1)
+        self.assertEqual([self.pos[2], self.alpha, self.beta], ordered[2].variables)
+
+    def test_untied_labels_are_unchanged(self):
+        from vera.plotting import _order_ties_by_shared_features
+
+        panel = self.panel()
+        ordered = _order_ties_by_shared_features([ra.descriptor for ra in panel], max_descriptors=1)
+        for ra, descriptor in zip(panel[:2], ordered[:2]):
+            self.assertEqual(ra.descriptor.variables, descriptor.variables)
+
+    def test_region_annotations_keep_their_descriptors(self):
+        from vera.plotting import _order_ties_by_shared_features
+
+        panel = self.panel()
+        _order_ties_by_shared_features([ra.descriptor for ra in panel], max_descriptors=1)
+        self.assertEqual([self.alpha, self.beta, self.pos[2]], panel[2].descriptor.variables)
+
+    def test_only_features_that_other_labels_show_count(self):
+        from vera.plotting import _order_ties_by_shared_features
+
+        # With one descriptor shown, the weaker variables of the first two
+        # labels are hidden behind their markers and do not count (a label of
+        # two would show both: a marker never stands in for a single variable)
+        panel = self.panel()
+        for i in range(2):
+            weaker = make_rule_indicator(ContinuousVariable(f"weaker{i}", np.zeros(30)), "high",
+                                         np.r_[np.zeros(10 * i), np.ones(3), np.zeros(27 - 10 * i)])
+            panel[i] = RegionAnnotation(self.regions[i], IndicatorVariableGroup([self.pos[i], self.weak[i], weaker]))
+        panel[2] = RegionAnnotation(self.regions[2], IndicatorVariableGroup([
+            self.alpha, self.beta, make_rule_indicator(self.weak_bases[0], "low", np.r_[np.zeros(20), np.ones(10)])
+        ]))
+        ordered = _order_ties_by_shared_features([ra.descriptor for ra in panel], max_descriptors=1)
+        self.assertEqual(panel[2].descriptor.variables, ordered[2].variables)
+
+    def test_plot_annotation_draws_the_shared_feature_first(self):
+        handles, _, fig, ax = plot_annotation(self.panel(), optimize_labels=False, return_ax=True, max_descriptors=1)
+        texts = [h.get_text() for h in handles]
+        self.assertTrue(any(t.startswith(str(self.pos[2])) for t in texts), texts)
