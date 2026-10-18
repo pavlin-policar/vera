@@ -867,15 +867,15 @@ class Label(matplotlib.artist.Artist):
     """A multi-line text label drawn as one `Text` per line, so that each line
     can carry its own style.
 
-    The lines are laid out by the rules of a multi-line `Text`, and, like it,
-    anew whenever the label is drawn or measured, so the layout holds at any
-    output dpi: consecutive baselines lie `linespacing` times the lower line's
-    ascent (at least that of "lp" in the label's font) below the upper line's
-    descent, the block is anchored at the label's position by `ha` and `va`
-    ("baseline" being the last line's baseline), and each line is aligned
-    within the block by `ma` (by default `ha`). A label whose lines share one
-    style is therefore drawn exactly as a single `Text` would be; a line in
-    another style is measured in its own font.
+    The lines are placed where matplotlib places the lines of the same text
+    drawn as a single multi-line `Text` in the label's shared style: a hidden
+    layout text holds the whole label, and each line is drawn on its baseline,
+    aligned within the block as `ma` (by default `ha`) aligns it. The layout is
+    redone whenever the label is drawn or measured, so it holds at any output
+    dpi. A label whose lines share one style is therefore drawn exactly as a
+    single `Text` would be; a line in another style keeps its place and is
+    aligned by its own width. Line keyword arguments should change a line's
+    style, not its size.
 
     It provides the part of the `Text` interface that label placement uses.
     """
@@ -899,71 +899,46 @@ class Label(matplotlib.artist.Artist):
 
         # The defaults of `Axes.text`
         kwargs = {"clip_on": False, **kwargs}
-        self._ha = kwargs.pop("ha", kwargs.pop("horizontalalignment", "left"))
-        self._va = kwargs.pop("va", kwargs.pop("verticalalignment", "baseline"))
-        self._ma = kwargs.pop("ma", kwargs.pop("multialignment", None)) or self._ha
-        self._linespacing = kwargs.pop("linespacing", 1.2)
+        ha = kwargs.pop("ha", kwargs.pop("horizontalalignment", "left"))
+        va = kwargs.pop("va", kwargs.pop("verticalalignment", "baseline"))
+        self._ma = kwargs.pop("ma", kwargs.pop("multialignment", None)) or ha
         self._text_transform = kwargs.pop("transform", ax.transData)
-        self._font = matplotlib.text.Text(text="lp", **kwargs).get_fontproperties()
-
         self._xy = tuple(xy)
-        self.texts = []
-        for line, line_kwargs_ in zip(lines, line_kwargs):
-            text = matplotlib.text.Text(
-                *xy, line, ha=self._ma, va="baseline", **{**kwargs, **line_kwargs_}
-            )
-            # As `Axes.text` sets up its texts
-            text.set_figure(ax.figure)
-            text.axes = ax
-            text.set_clip_path(ax.patch)
-            self.texts.append(text)
 
-        self.set_zorder(self.texts[0].get_zorder() if self.texts else 3)
+        def text(s, **text_kwargs):
+            t = matplotlib.text.Text(*xy, s, **text_kwargs, transform=self._text_transform)
+            # As `Axes.text` sets up its texts
+            t.set_figure(ax.figure)
+            t.axes = ax
+            t.set_clip_path(ax.patch)
+            return t
+
+        self._layout_text = text("\n".join(lines), ha=ha, va=va, ma=self._ma, **kwargs)
+        # Single lines have no line spacing
+        kwargs.pop("linespacing", None)
+        self.texts = [
+            text(line, ha=self._ma, va="baseline", **{**kwargs, **line_kwargs_})
+            for line, line_kwargs_ in zip(lines, line_kwargs)
+        ]
+
+        self.set_zorder(self._layout_text.get_zorder())
         ax.add_artist(self)
 
     def _layout(self, renderer) -> None:
-        """Place each line in the block, in display coordinates of `renderer`,
-        as `Text._get_layout` places the lines of a multi-line text."""
-        for text in self.texts:
-            text.set_transform(self._text_transform)
-        _, lp_h, lp_d = renderer.get_text_width_height_descent("lp", self._font, ismath=False)
-        min_dy = (lp_h - lp_d) * self._linespacing
-
-        # Each line's ascent and descent, at least those of "lp" in its font,
-        # read off its extent around the baseline it is drawn on
-        anchor_y = self._text_transform.transform(self._xy)[1]
-        metrics = []
-        for text in self.texts:
-            if text.get_text():
-                extent = text.get_window_extent(renderer)
-                metrics.append((extent.y1 - anchor_y, anchor_y - extent.y0, extent.width))
-            else:
-                metrics.append((lp_h - lp_d, lp_d, 0.0))
-
-        baselines, y = [], 0.0
-        for i, (ascent, descent, _) in enumerate(metrics):
-            y = -ascent if i == 0 else y - max(min_dy, ascent * self._linespacing)
-            baselines.append(y)
-            y -= descent
-        last_descent = metrics[-1][1] if metrics else 0.0
-        bottom = baselines[-1] - last_descent if baselines else 0.0
-        # The offset of the anchor from the top of the block
-        anchor = {
-            "top": 0.0,
-            "bottom": bottom,
-            "baseline": bottom + last_descent,
-        }.get(self._va, bottom / 2)
-
-        # Aligning lines within the block other than as the block itself needs
-        # the block's width
-        dx = 0.0
-        if self._ma != self._ha:
-            width = max((w for _, _, w in metrics), default=0.0)
-            dx = width * (_ALIGNMENT_FRACTIONS[self._ma] - _ALIGNMENT_FRACTIONS[self._ha])
-        for text, baseline in zip(self.texts, baselines):
+        """Place each line where the layout text has it, in display
+        coordinates of `renderer`."""
+        # Each entry of `Text._get_layout`'s line list holds the line, its
+        # metrics starting with its width, and the display offset of its
+        # baseline's left end from the text's position: as a pair since
+        # matplotlib 3.11, as two separate coordinates before
+        _, line_layouts, *_ = self._layout_text._get_layout(renderer)
+        for text, (_, metrics, *offset) in zip(self.texts, line_layouts):
+            x, y = offset[0] if len(offset) == 1 else offset
+            # Anchor the line at the point `ma` aligns it by, so a line in
+            # another style stays aligned with the rest
+            x += metrics[0] * _ALIGNMENT_FRACTIONS[self._ma]
             text.set_transform(
-                self._text_transform
-                + matplotlib.transforms.Affine2D().translate(dx, baseline - anchor)
+                self._text_transform + matplotlib.transforms.Affine2D().translate(x, y)
             )
 
     def _renderer(self, renderer):
@@ -978,20 +953,20 @@ class Label(matplotlib.artist.Artist):
             text.draw(renderer)
         self.stale = False
 
-    def get_window_extent(self, renderer=None) -> matplotlib.transforms.Bbox:
-        """The box around the label's non-empty lines, in display coordinates."""
+    def _boxes(self, renderer, box) -> list[matplotlib.transforms.Bbox]:
         renderer = self._renderer(renderer)
         self._layout(renderer)
-        extents = [t.get_window_extent(renderer) for t in self.texts if t.get_text()]
-        if not extents:
-            return matplotlib.transforms.Bbox.null()
-        return matplotlib.transforms.Bbox.union(extents)
+        texts = [self._layout_text, *(t for t in self.texts if t.get_text())]
+        return [b for b in (box(t, renderer) for t in texts) if b is not None]
+
+    def get_window_extent(self, renderer=None) -> matplotlib.transforms.Bbox:
+        """The box around the label, in display coordinates: that of the
+        layout text, grown to take in lines wider in their own style."""
+        boxes = self._boxes(renderer, lambda t, r: t.get_window_extent(r))
+        return matplotlib.transforms.Bbox.union(boxes)
 
     def get_tightbbox(self, renderer=None) -> matplotlib.transforms.Bbox:
-        renderer = self._renderer(renderer)
-        self._layout(renderer)
-        boxes = [t.get_tightbbox(renderer) for t in self.texts if t.get_text()]
-        boxes = [b for b in boxes if b is not None]
+        boxes = self._boxes(renderer, lambda t, r: t.get_tightbbox(r))
         return matplotlib.transforms.Bbox.union(boxes) if boxes else None
 
     def get_text(self) -> str:
@@ -1002,12 +977,12 @@ class Label(matplotlib.artist.Artist):
 
     def set_position(self, xy: tuple[float, float]) -> None:
         self._xy = tuple(xy)
-        for text in self.texts:
+        for text in [self._layout_text, *self.texts]:
             text.set_position(xy)
         self.stale = True
 
     def get_fontproperties(self):
-        return self._font
+        return self._layout_text.get_fontproperties()
 
 
 def draw_label(
