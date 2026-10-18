@@ -3,7 +3,9 @@ import logging
 from typing import Callable
 
 import matplotlib
+import matplotlib.artist
 import matplotlib.text
+import matplotlib.transforms
 import numpy as np
 import shapely
 import shapely.affinity
@@ -858,17 +860,185 @@ def optimize_label_positions(
     return best_labels, history
 
 
+_ALIGNMENT_FRACTIONS = {"left": 0.0, "center": 0.5, "right": 1.0}
+
+
+class Label(matplotlib.artist.Artist):
+    """A multi-line text label drawn as one `Text` per line, so that each line
+    can carry its own style.
+
+    The lines are laid out by the rules of a multi-line `Text`, and, like it,
+    anew whenever the label is drawn or measured, so the layout holds at any
+    output dpi: consecutive baselines lie `linespacing` times the lower line's
+    ascent (at least that of "lp" in the label's font) below the upper line's
+    descent, the block is anchored at the label's position by `ha` and `va`
+    ("baseline" being the last line's baseline), and each line is aligned
+    within the block by `ma` (by default `ha`). A label whose lines share one
+    style is therefore drawn exactly as a single `Text` would be; a line in
+    another style is measured in its own font.
+
+    It provides the part of the `Text` interface that label placement uses.
+    """
+
+    def __init__(
+        self,
+        ax: matplotlib.axes.Axes,
+        xy: tuple[float, float],
+        lines: list[str],
+        line_kwargs: list[dict] = None,
+        **kwargs,
+    ):
+        super().__init__()
+        if line_kwargs is None:
+            line_kwargs = [{}] * len(lines)
+        if len(line_kwargs) != len(lines):
+            raise ValueError(
+                f"Got {len(line_kwargs)} sets of line keyword arguments for "
+                f"{len(lines)} lines."
+            )
+
+        # The defaults of `Axes.text`
+        kwargs = {"clip_on": False, **kwargs}
+        self._ha = kwargs.pop("ha", kwargs.pop("horizontalalignment", "left"))
+        self._va = kwargs.pop("va", kwargs.pop("verticalalignment", "baseline"))
+        self._ma = kwargs.pop("ma", kwargs.pop("multialignment", None)) or self._ha
+        self._linespacing = kwargs.pop("linespacing", 1.2)
+        self._text_transform = kwargs.pop("transform", ax.transData)
+        self._font = matplotlib.text.Text(text="lp", **kwargs).get_fontproperties()
+
+        self._xy = tuple(xy)
+        self.texts = []
+        for line, line_kwargs_ in zip(lines, line_kwargs):
+            text = matplotlib.text.Text(
+                *xy, line, ha=self._ma, va="baseline", **{**kwargs, **line_kwargs_}
+            )
+            # As `Axes.text` sets up its texts
+            text.set_figure(ax.figure)
+            text.axes = ax
+            text.set_clip_path(ax.patch)
+            self.texts.append(text)
+
+        self.set_zorder(self.texts[0].get_zorder() if self.texts else 3)
+        ax.add_artist(self)
+
+    def _layout(self, renderer) -> None:
+        """Place each line in the block, in display coordinates of `renderer`,
+        as `Text._get_layout` places the lines of a multi-line text."""
+        for text in self.texts:
+            text.set_transform(self._text_transform)
+        _, lp_h, lp_d = renderer.get_text_width_height_descent("lp", self._font, ismath=False)
+        min_dy = (lp_h - lp_d) * self._linespacing
+
+        # Each line's ascent and descent, at least those of "lp" in its font,
+        # read off its extent around the baseline it is drawn on
+        anchor_y = self._text_transform.transform(self._xy)[1]
+        metrics = []
+        for text in self.texts:
+            if text.get_text():
+                extent = text.get_window_extent(renderer)
+                metrics.append((extent.y1 - anchor_y, anchor_y - extent.y0, extent.width))
+            else:
+                metrics.append((lp_h - lp_d, lp_d, 0.0))
+
+        baselines, y = [], 0.0
+        for i, (ascent, descent, _) in enumerate(metrics):
+            y = -ascent if i == 0 else y - max(min_dy, ascent * self._linespacing)
+            baselines.append(y)
+            y -= descent
+        last_descent = metrics[-1][1] if metrics else 0.0
+        bottom = baselines[-1] - last_descent if baselines else 0.0
+        # The offset of the anchor from the top of the block
+        anchor = {
+            "top": 0.0,
+            "bottom": bottom,
+            "baseline": bottom + last_descent,
+        }.get(self._va, bottom / 2)
+
+        # Aligning lines within the block other than as the block itself needs
+        # the block's width
+        dx = 0.0
+        if self._ma != self._ha:
+            width = max((w for _, _, w in metrics), default=0.0)
+            dx = width * (_ALIGNMENT_FRACTIONS[self._ma] - _ALIGNMENT_FRACTIONS[self._ha])
+        for text, baseline in zip(self.texts, baselines):
+            text.set_transform(
+                self._text_transform
+                + matplotlib.transforms.Affine2D().translate(dx, baseline - anchor)
+            )
+
+    def _renderer(self, renderer):
+        return renderer if renderer is not None else get_renderer(self.figure)
+
+    @matplotlib.artist.allow_rasterization
+    def draw(self, renderer) -> None:
+        if not self.get_visible():
+            return
+        self._layout(renderer)
+        for text in self.texts:
+            text.draw(renderer)
+        self.stale = False
+
+    def get_window_extent(self, renderer=None) -> matplotlib.transforms.Bbox:
+        """The box around the label's non-empty lines, in display coordinates."""
+        renderer = self._renderer(renderer)
+        self._layout(renderer)
+        extents = [t.get_window_extent(renderer) for t in self.texts if t.get_text()]
+        if not extents:
+            return matplotlib.transforms.Bbox.null()
+        return matplotlib.transforms.Bbox.union(extents)
+
+    def get_tightbbox(self, renderer=None) -> matplotlib.transforms.Bbox:
+        renderer = self._renderer(renderer)
+        self._layout(renderer)
+        boxes = [t.get_tightbbox(renderer) for t in self.texts if t.get_text()]
+        boxes = [b for b in boxes if b is not None]
+        return matplotlib.transforms.Bbox.union(boxes) if boxes else None
+
+    def get_text(self) -> str:
+        return "\n".join(t.get_text() for t in self.texts)
+
+    def get_position(self) -> tuple[float, float]:
+        return self._xy
+
+    def set_position(self, xy: tuple[float, float]) -> None:
+        self._xy = tuple(xy)
+        for text in self.texts:
+            text.set_position(xy)
+        self.stale = True
+
+    def get_fontproperties(self):
+        return self._font
+
+
+def draw_label(
+    ax: matplotlib.axes.Axes,
+    xy: tuple[float, float],
+    label,
+    **kwargs,
+) -> Label:
+    """Draw `label` at `xy` with the `Text` keyword arguments `kwargs`.
+
+    `label` is either a string, whose lines share one style, or a sequence of
+    ``(line, line_kwargs)`` pairs, whose keyword arguments override `kwargs`
+    for that line alone.
+    """
+    if isinstance(label, str):
+        return Label(ax, xy, label.split("\n"), **kwargs)
+    lines, line_kwargs = zip(*label) if len(label) else ((), ())
+    return Label(ax, xy, list(lines), list(line_kwargs), **kwargs)
+
+
 def get_label_bounding_boxes_on_ax(
     ax: matplotlib.axes.Axes,
-    label_strs: list[str],
+    labels: list,
     label_positions: list[tuple[float, float]],
     label_kwargs: dict = None,
 ) -> list[shapely.Polygon]:
     """Determine label outlines after rendered on the given axis.
 
     This function renders the label on the axis, measures it, and removes it
-    from the axis. A label's outline is the union of the boxes of its lines
-    (see :func:`label_outline`).
+    from the axis. Labels take the forms :func:`draw_label` accepts. A label's
+    outline is the union of the boxes of its lines (see :func:`label_outline`).
 
     This is useful since labels can have very different sizes based on the axis
     size, dpi, and various font settings, e.g., font family, font size, etc.
@@ -877,20 +1047,28 @@ def get_label_bounding_boxes_on_ax(
         label_kwargs = {}
 
     label_bboxes = []
-    for label, label_pos in zip(label_strs, label_positions):
+    for label, label_pos in zip(labels, label_positions):
         # Render the label on the current axis, measure its outline, then
         # remove the rendered label
-        handle = ax.text(*label_pos, label, **label_kwargs)
+        handle = draw_label(ax, label_pos, label, **label_kwargs)
         label_bboxes.append(label_outline(handle, ax))
         handle.remove()
 
     return label_bboxes
 
 
-def label_outline(handle: matplotlib.text.Text, ax: matplotlib.axes.Axes) -> shapely.Polygon:
-    """The outline of a rendered label, in data coordinates: the union of the
-    boxes of its lines (see :func:`label_line_shape`)."""
+def label_outline(handle, ax: matplotlib.axes.Axes) -> shapely.Polygon:
+    """The outline of a rendered label, a `Text` or a :class:`Label`, in data
+    coordinates: the union of the boxes of its lines (see
+    :func:`label_line_shape`)."""
     bbox = bbox_to_polygon(get_artist_bounding_box(handle, ax))
+    if isinstance(handle, Label):
+        widths = []
+        for text in handle.texts:
+            x0, _, x1, _ = get_artist_bounding_box(text, ax) if text.get_text() else (0, 0, 0, 0)
+            widths.append(x1 - x0)
+        return label_line_shape(bbox, widths)
+
     lines = handle.get_text().split("\n")
     if len(lines) <= 1:
         return bbox

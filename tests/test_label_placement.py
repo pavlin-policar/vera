@@ -548,6 +548,102 @@ class TestLabelOutline(unittest.TestCase):
         handle = self.ax.text(0.5, 0.5, "one line", ha="center", va="center")
         self.assertTrue(label_outline(handle, self.ax).equals(self.bbox_of(handle)))
 
+    def test_label_outline_matches_the_text_outline(self):
+        text = "a long first line\nshort\nmiddling line"
+        handle = self.ax.text(0.5, 0.5, text, ha="center", va="center")
+        label = label_placement.draw_label(self.ax, (0.5, 0.5), text, ha="center", va="center")
+        self.assertAlmostEqual(
+            0, label_outline(handle, self.ax).symmetric_difference(label_outline(label, self.ax)).area
+        )
+
+
+class TestLabel(unittest.TestCase):
+    """A label drawn one `Text` per line lays out as a single multi-line
+    `Text` does."""
+
+    TEXT = "GKDiving > 39.01\nposition = goalkeeper\nheight > 190"
+
+    def setUp(self):
+        self.fig, self.ax = plt.subplots(figsize=(4, 4), dpi=150)
+        self.renderer = label_placement.get_renderer(self.fig)
+
+    def tearDown(self):
+        plt.close(self.fig)
+
+    def assert_same_extent(self, a, b):
+        np.testing.assert_allclose(
+            a.get_window_extent(self.renderer).get_points(),
+            b.get_window_extent(self.renderer).get_points(),
+            atol=1e-6,
+        )
+
+    def test_extent_matches_a_multiline_text_in_every_alignment(self):
+        for ha in ["left", "center", "right"]:
+            for va in ["top", "center", "bottom", "baseline"]:
+                with self.subTest(ha=ha, va=va):
+                    kwargs = dict(ha=ha, va=va, ma="center", fontsize=9)
+                    text = self.ax.text(0.3, 0.6, self.TEXT, **kwargs)
+                    label = label_placement.draw_label(self.ax, (0.3, 0.6), self.TEXT, **kwargs)
+                    self.assert_same_extent(text, label)
+
+    def test_lines_with_tall_glyphs_are_spaced_as_in_a_multiline_text(self):
+        text = "oscar (best\ndirecting), {Life\nSciences} \u00c5\n\nend"
+        kwargs = dict(ha="center", va="center", ma="center", fontsize=9)
+        plain = self.ax.text(0.3, 0.6, text, **kwargs)
+        label = label_placement.draw_label(self.ax, (0.3, 0.6), text, **kwargs)
+        self.assert_same_extent(plain, label)
+
+    def test_lines_are_aligned_within_the_block(self):
+        label = label_placement.draw_label(
+            self.ax, (0.5, 0.5), "short\na much longer line", ha="center", va="center", ma="left"
+        )
+        x0s = [t.get_window_extent(self.renderer).x0 for t in label.texts]
+        self.assertAlmostEqual(x0s[0], x0s[1])
+
+    def test_line_keyword_arguments_style_their_line_only(self):
+        label = label_placement.draw_label(
+            self.ax, (0.5, 0.5), [("core", {}), ("context", {"fontstyle": "italic"})], fontsize=9
+        )
+        self.assertEqual(["normal", "italic"], [t.get_fontstyle() for t in label.texts])
+        self.assertEqual("core\ncontext", label.get_text())
+
+    def test_styled_lines_keep_their_places(self):
+        plain = label_placement.draw_label(self.ax, (0.5, 0.5), "core\ncontext", va="center")
+        styled = label_placement.draw_label(
+            self.ax, (0.5, 0.5), [("core", {}), ("context", {"fontstyle": "italic"})], va="center"
+        )
+        for a, b in zip(plain.texts, styled.texts):
+            self.assertAlmostEqual(
+                a.get_window_extent(self.renderer).y0, b.get_window_extent(self.renderer).y0
+            )
+
+    def test_set_position_moves_every_line(self):
+        label = label_placement.draw_label(self.ax, (0.2, 0.2), self.TEXT, va="center")
+        label.set_position((0.7, 0.4))
+        moved = label_placement.draw_label(self.ax, (0.7, 0.4), self.TEXT, va="center")
+        self.assertEqual((0.7, 0.4), label.get_position())
+        self.assert_same_extent(moved, label)
+
+    def test_remove_takes_the_label_off_the_axis(self):
+        label = label_placement.draw_label(self.ax, (0.5, 0.5), self.TEXT)
+        self.assertIn(label, self.ax.get_children())
+        label.remove()
+        self.assertNotIn(label, self.ax.get_children())
+
+    def test_layout_follows_the_output_dpi(self):
+        """At another dpi, as when a figure is saved, the lines are laid out
+        as a multi-line text is at that dpi."""
+        kwargs = dict(ha="center", va="center", fontsize=4)
+        text = self.ax.text(0.3, 0.6, self.TEXT, **kwargs)
+        label = label_placement.draw_label(self.ax, (0.3, 0.6), self.TEXT, **kwargs)
+        self.fig.set_dpi(600)
+        renderer = self.fig.canvas.get_renderer()
+        np.testing.assert_allclose(
+            text.get_window_extent(renderer).get_points(),
+            label.get_window_extent(renderer).get_points(),
+            atol=1e-6,
+        )
+
 
 class TestLeaderAttachmentOnLineShapes(unittest.TestCase):
     """Leaders attach to the edges of a label's lines, not to the box around
