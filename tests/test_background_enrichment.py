@@ -1,5 +1,4 @@
 import unittest
-from unittest import mock
 
 import matplotlib
 
@@ -204,18 +203,12 @@ class TestBackgroundLabels(BackgroundEnrichmentTestBase):
         )
         self.assertEqual(frozenset([self.v_c]), enriched.descriptor.background_variables)
 
-    def plot_region(self, ra, **kwargs):
-        # `plot_region` titles the axis with the descriptor's name, which
-        # groups lack
-        with mock.patch.object(IndicatorVariableGroup, "name", "group", create=True):
-            return plot_region(ra, draw_label=True, **kwargs)
-
     def test_plot_region_distinguishes_background_by_default(self):
-        ax = self.plot_region(self.enriched(self.v_c))
+        ax = plot_region(self.enriched(self.v_c), draw_label=True)
         self.assertEqual(["normal", "normal", "italic"], [t.get_fontstyle() for t in ax.texts])
 
     def test_plot_region_can_show_background_like_the_rest(self):
-        ax = self.plot_region(self.enriched(self.v_c), distinguish_background=False)
+        ax = plot_region(self.enriched(self.v_c), draw_label=True, distinguish_background=False)
         self.assertEqual(["a = high", "c = high", "b = high"], [t.get_text() for t in ax.texts])
         self.assertEqual({"normal"}, {t.get_fontstyle() for t in ax.texts})
 
