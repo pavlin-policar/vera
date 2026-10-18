@@ -10,6 +10,7 @@ import numpy as np
 
 import vera
 from vera.plotting import get_cmap_colors, get_cmap_hues
+from vera.variables import IndicatorVariableGroup
 from tests.test_explain import load_iris
 
 # The three colormap shapes get_cmap_colors must handle. Note that viridis is
@@ -156,6 +157,33 @@ class TestPlotAnnotationsSmoke(unittest.TestCase):
 
                 fig.canvas.draw()
                 self.assertEqual(len(self.layout), len(ax))
+
+    def test_plot_region_on_group_descriptor(self):
+        # Layout panels hold merged region annotations, whose group
+        # descriptors carry no name, so the axis is left untitled
+        ra = self.layout[0][0]
+        self.assertIsInstance(ra.descriptor, IndicatorVariableGroup)
+
+        fig, ax = plt.subplots()
+        vera.pl.plot_region(ra, ax=ax, draw_label=True)
+        fig.canvas.draw()
+        self.assertEqual("", ax.get_title())
+
+    def test_plot_regions_on_group_descriptors(self):
+        fig, ax = vera.pl.plot_regions(
+            self.layout[0], per_row=2, draw_labels=True, return_ax=True
+        )
+        fig.canvas.draw()
+        self.assertEqual(
+            [""] * len(self.layout[0]),
+            [a.get_title() for a in ax[:len(self.layout[0])]],
+        )
+
+    def test_plot_region_with_subregions_on_group_descriptor(self):
+        fig, ax = plt.subplots()
+        vera.pl.plot_region_with_subregions(self.layout[0][0], ax=ax)
+        fig.canvas.draw()
+        self.assertEqual("", ax.get_title())
 
     def test_leader_kwargs_style_leader_lines(self):
         # Leader lines are the only Line2D artists plot_annotation draws

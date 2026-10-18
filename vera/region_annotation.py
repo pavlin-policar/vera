@@ -85,8 +85,9 @@ class RegionAnnotation:
         ]
 
     @property
-    def name(self) -> str:
-        return self.descriptor.name
+    def name(self) -> str | None:
+        # Group descriptors carry no `name` attribute
+        return getattr(self.descriptor, "name", None)
 
     @property
     def contained_region_annotations(self) -> list["RegionAnnotation"]:

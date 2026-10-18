@@ -110,6 +110,28 @@ class TestRegionAnnotationSplit(unittest.TestCase):
         self.assertEqual(len(shared_samples), 0)
 
 
+class TestRegionAnnotationName(unittest.TestCase):
+    def setUp(self) -> None:
+        np.random.seed(0)
+        x, features = generate_clusters([1, -1], [0.25, 0.25], n_samples=50)
+        features = pd.DataFrame(0, index=features.index, columns=["a", "b"])
+
+        region_annotations = vera.an.generate_region_annotations(
+            features, embedding=x, scale_factor=0.5, filter_constant=False, filter_uninformative=False,
+        )
+        assert len(region_annotations) == 2, "We should have two variables"
+        (self.ra_a,), (self.ra_b,) = region_annotations
+
+    def test_name_follows_variable_descriptor(self):
+        self.assertIsInstance(self.ra_a.descriptor, IndicatorVariable)
+        self.assertEqual(self.ra_a.descriptor.name, self.ra_a.name)
+
+    def test_group_descriptor_has_no_name(self):
+        merged = RegionAnnotation.merge([self.ra_a, self.ra_b])
+        self.assertIsInstance(merged.descriptor, IndicatorVariableGroup)
+        self.assertIsNone(merged.name)
+
+
 class TestIndicatorVariableMerge(unittest.TestCase):
     def test_merge_indicator_with_indicator_from_same_base_var_cont(self):
         np.random.seed(0)
