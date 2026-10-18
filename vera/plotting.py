@@ -685,7 +685,7 @@ def plot_region(
         ax.scatter(embedding[:, 0], embedding[:, 1], **scatter_kwargs_, rasterized=True)
 
     # Set title
-    ax.set_title(region_annotation.descriptor.name)
+    ax.set_title(region_annotation.name)
 
     # Hide ticks and axis
     ax.set_xticks([]), ax.set_yticks([])
