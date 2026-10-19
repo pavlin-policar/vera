@@ -40,10 +40,11 @@ from vera.label_placement import (
     convert_ax_to_data,
     get_label_bounding_boxes_on_ax,
     label_outline,
+    Label,
 )
 from vera.region import Density, Region
 from vera.region_annotation import RegionAnnotation
-from vera.variables import RegionDescriptor
+from vera.variables import IndicatorVariableGroup, RegionDescriptor
 
 
 class GoogleAPIUnreachable(Warning):
@@ -490,23 +491,50 @@ def plot_densities(
         return fig, ax
 
 
-def _format_descriptor(
+DEFAULT_BACKGROUND_LABEL_KWARGS = {"fontstyle": "italic"}
+
+
+def _format_descriptor_lines(
     descriptor: RegionDescriptor,
     max_descriptors: int = None,
     truncation_template: str = "(+{n} more)",
     sep: str = "\n",
     truncation_sep: str = None,
     max_width: int = 40,
-):
-    label_str = descriptor.format_label(
-        max_descriptors=max_descriptors,
-        truncation_template=truncation_template,
-        sep=sep,
-        truncation_sep=truncation_sep,
-    )
-    s_lines = label_str.split("\n")
-    s_lines = ["\n".join(wrap(l, width=max_width)) for l in s_lines]
-    return "\n".join(s_lines)
+) -> list[tuple[str, bool]]:
+    """The descriptor's label lines (see `RegionDescriptor.format_lines`),
+    each wrapped to `max_width` and paired with whether it shows background
+    variables."""
+    lines = descriptor.format_lines(max_descriptors, truncation_template, sep, truncation_sep)
+    return [
+        (wrapped, is_background)
+        for line, is_background in lines
+        for wrapped in wrap(line, width=max_width) or [""]
+    ]
+
+
+def _label_descriptor(
+    descriptor: RegionDescriptor, distinguish_background: bool
+) -> RegionDescriptor:
+    """The descriptor a label shows: as it is when background variables are
+    distinguished, otherwise one group of all its variables in score order,
+    so the label lists them in one style."""
+    if distinguish_background or not descriptor.background_variables:
+        return descriptor
+    return IndicatorVariableGroup(descriptor.all_variables).ranked_by(lambda: descriptor.scores)
+
+
+def _styled_label(
+    lines: list[tuple[str, bool]], background_label_kwargs: dict = None
+) -> list[tuple[str, dict]]:
+    """Label lines in the form `Label` takes, with background lines in
+    `background_label_kwargs` (None for `DEFAULT_BACKGROUND_LABEL_KWARGS`)."""
+    if background_label_kwargs is None:
+        background_label_kwargs = DEFAULT_BACKGROUND_LABEL_KWARGS
+    return [
+        (line, background_label_kwargs if is_background else {})
+        for line, is_background in lines
+    ]
 
 
 def _order_ties_by_shared_features(
@@ -523,7 +551,7 @@ def _order_ties_by_shared_features(
     their descriptors.
     """
     def shown(descriptor):
-        variables = getattr(descriptor, "variables", [descriptor])
+        variables = getattr(descriptor, "all_variables", [descriptor])
         # `format_label` shows the whole group when the marker would stand in
         # for a single variable
         if max_descriptors is not None and len(variables) > max_descriptors + 1:
@@ -617,6 +645,8 @@ def plot_region(
     max_width: int = 40,
     scatter_kwargs: dict = None,
     label_kwargs: dict = None,
+    distinguish_background: bool = True,
+    background_label_kwargs: dict = None,
     show: bool = False,
 ):
     if scatter_kwargs is None:
@@ -639,8 +669,8 @@ def plot_region(
     )
 
     if draw_label:
-        label_str = _format_descriptor(
-            region_annotation.descriptor,
+        label_lines = _format_descriptor_lines(
+            _label_descriptor(region_annotation.descriptor, distinguish_background),
             max_descriptors=max_descriptors,
             truncation_template=truncation_template,
             sep=sep,
@@ -661,7 +691,9 @@ def plot_region(
         label_kwargs_.update(label_kwargs)
         x, y = largest_polygon.centroid.coords[0]
 
-        label = ax.text(x, y, label_str, **label_kwargs_)
+        label = ax.add_artist(Label(
+            ax, (x, y), _styled_label(label_lines, background_label_kwargs), **label_kwargs_
+        ))
         # label.set_bbox(dict(facecolor="white", alpha=0.75, edgecolor="white"))
 
     # Plot embedding scatter plot
@@ -719,6 +751,8 @@ def plot_regions(
     max_width: int = 40,
     scatter_kwargs: dict = None,
     label_kwargs: dict = None,
+    distinguish_background: bool = True,
+    background_label_kwargs: dict = None,
     show: bool = False,
 ):
     if len(region_annotations) == 0:
@@ -755,6 +789,8 @@ def plot_regions(
             max_width=max_width,
             scatter_kwargs=scatter_kwargs,
             label_kwargs=label_kwargs,
+            distinguish_background=distinguish_background,
+            background_label_kwargs=background_label_kwargs,
         )
 
     enumerate_plots(ax[:idx + 1])
@@ -864,6 +900,8 @@ def plot_annotation(
     ra_colors: dict = None,
     scatter_kwargs: dict = None,
     label_kwargs: dict = None,
+    distinguish_background: bool = True,
+    background_label_kwargs: dict = None,
     leader_kwargs: dict = None,
     axis_limits: tuple = None,
     figwidth: int = 4,
@@ -978,10 +1016,14 @@ def plot_annotation(
     if draw_labels:
         label_data = []
         descriptors = _order_ties_by_shared_features(
-            [ra.descriptor for ra in region_annotations], max_descriptors
+            [
+                _label_descriptor(ra.descriptor, distinguish_background)
+                for ra in region_annotations
+            ],
+            max_descriptors,
         )
         for region_annotation, descriptor in zip(region_annotations, descriptors):
-            label_str = _format_descriptor(
+            label_lines = _format_descriptor_lines(
                 descriptor,
                 max_descriptors=max_descriptors,
                 truncation_template=truncation_template,
@@ -995,7 +1037,7 @@ def plot_annotation(
             x, y = largest_polygon.centroid.coords[0]
 
             label_data.append({
-                "text": label_str,
+                "text": _styled_label(label_lines, background_label_kwargs),
                 "pos": [x, y],
                 "pos_region": largest_polygon,
                 "color": ra_colors[region_annotation]
@@ -1118,12 +1160,13 @@ def plot_annotation(
         label_handles = []
         for lbl_data, label_text_pos in zip(label_data, best_label_positions):
             label_handles.append(
-                ax.text(
-                    *label_text_pos,
+                ax.add_artist(Label(
+                    ax,
+                    label_text_pos,
                     lbl_data["text"],
                     color=lbl_data["color"],
                     **label_kwargs_,
-                )
+                ))
             )
 
         # Plot line from region to the label's outline, as placed
@@ -1167,6 +1210,8 @@ def plot_annotations(
     variable_colors: dict = None,
     scatter_kwargs: dict = None,
     label_kwargs: dict = None,
+    distinguish_background: bool = True,
+    background_label_kwargs: dict = None,
     leader_kwargs: dict = None,
     axis_limits: tuple = None,
     show: bool = False,
@@ -1210,6 +1255,8 @@ def plot_annotations(
             ra_colors=variable_colors,
             scatter_kwargs=scatter_kwargs,
             label_kwargs=label_kwargs,
+            distinguish_background=distinguish_background,
+            background_label_kwargs=background_label_kwargs,
             leader_kwargs=leader_kwargs,
             axis_limits=axis_limits,
         )

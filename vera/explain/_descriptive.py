@@ -8,7 +8,7 @@ from vera import metrics as metrics, graph as g
 from vera.explain import _layout_scores
 from vera.utils import flatten
 from vera.region_annotation import RegionAnnotation
-from vera.variables import RegionDescriptor
+from vera.variables import IndicatorVariableGroup
 
 DEFAULT_RANKING_FUNCS = [
     (_layout_scores.variable_occurs_in_all_regions, 30),
@@ -80,11 +80,14 @@ def enrich_with_background(
         if pct_shared > threshold:
             to_add.append(background_ra.descriptor)
 
-    # If we found any background descriptors to add to the region annotation,
-    # create a new region annotation with all available descriptors
+    # Add the descriptors found to the region annotation as background:
+    # context kept apart from the core description
     if len(to_add) > 0:
+        core = region_annotation.descriptor
         region_annotation = RegionAnnotation(
-            descriptor=RegionDescriptor.merge([region_annotation.descriptor, *to_add]),
+            descriptor=IndicatorVariableGroup(
+                getattr(core, "variables", [core]), background_variables=to_add
+            ),
             region=region_annotation.region,
             source_region_annotations=region_annotation.source_region_annotations,
         )

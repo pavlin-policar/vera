@@ -3,6 +3,7 @@ import unittest
 from unittest import mock
 
 import matplotlib
+import matplotlib.transforms
 
 matplotlib.use("Agg")
 
@@ -538,15 +539,126 @@ class TestLabelOutline(unittest.TestCase):
     def bbox_of(self, handle):
         return shapely.box(*label_placement.get_artist_bounding_box(handle, self.ax))
 
+    def label(self, text):
+        return self.ax.add_artist(label_placement.Label(self.ax, (0.5, 0.5), text, ha="center"))
+
     def test_frees_the_space_beside_a_short_line(self):
-        handle = self.ax.text(0.5, 0.5, "a long first line\nshort", ha="center", va="center")
-        outline = label_outline(handle, self.ax)
-        self.assertLess(outline.area, 0.9 * self.bbox_of(handle).area)
-        np.testing.assert_allclose(self.bbox_of(handle).bounds, outline.bounds, atol=1e-3)
+        label = self.label("a long first line\nshort")
+        outline = label_outline(label, self.ax)
+        self.assertLess(outline.area, 0.9 * self.bbox_of(label).area)
+        np.testing.assert_allclose(self.bbox_of(label).bounds, outline.bounds, atol=1e-9)
 
     def test_single_line_is_its_bounding_box(self):
-        handle = self.ax.text(0.5, 0.5, "one line", ha="center", va="center")
-        self.assertTrue(label_outline(handle, self.ax).equals(self.bbox_of(handle)))
+        label = self.label("one line")
+        self.assertTrue(label_outline(label, self.ax).equals(self.bbox_of(label)))
+
+
+class TestLabel(unittest.TestCase):
+    """Labels drawn one `Text` per line and handled as one artist."""
+
+    TEXT = "GKDiving > 39.01\nposition = goalkeeper\nheight > 190"
+
+    def setUp(self):
+        self.fig, self.ax = plt.subplots(figsize=(4, 4), dpi=150)
+        self.renderer = label_placement.get_renderer(self.fig)
+
+    def tearDown(self):
+        plt.close(self.fig)
+
+    def label(self, xy, text, **kwargs):
+        return self.ax.add_artist(label_placement.Label(self.ax, xy, text, **kwargs))
+
+    def extents(self, label):
+        return [t.get_window_extent(self.renderer) for t in label.texts]
+
+    def test_draws_one_text_per_line(self):
+        label = self.label((0.5, 0.5), self.TEXT, fontsize=9)
+        self.assertEqual(self.TEXT.split("\n"), [t.get_text() for t in label.texts])
+        self.assertEqual(self.TEXT, label.get_text())
+
+    def test_lines_are_evenly_spaced_by_the_font_size(self):
+        label = self.label((0.5, 0.5), self.TEXT, fontsize=9)
+        y0s = [e.y0 for e in self.extents(label)]
+        step = 1.2 * 9 * self.fig.dpi / 72
+        np.testing.assert_allclose(np.diff(y0s), [-step, -step], rtol=0.02)
+
+    def test_block_is_centred_on_the_position(self):
+        label = self.label((0.5, 0.5), self.TEXT, fontsize=9, ha="center")
+        extents = self.extents(label)
+        x, y = self.ax.transData.transform((0.5, 0.5))
+        bottom, top = min(e.y0 for e in extents), max(e.y1 for e in extents)
+        line_height = extents[0].height
+        self.assertLess(abs((bottom + top) / 2 - y), line_height / 2)
+        for e in extents:
+            self.assertAlmostEqual(x, (e.x0 + e.x1) / 2, places=6)
+
+    def test_top_and_bottom_place_the_block_on_either_side(self):
+        y = self.ax.transData.transform((0.5, 0.5))[1]
+        top = self.label((0.5, 0.5), self.TEXT, va="top")
+        bottom = self.label((0.5, 0.5), self.TEXT, va="bottom")
+        self.assertLessEqual(max(e.y1 for e in self.extents(top)), y + 1)
+        self.assertGreaterEqual(min(e.y0 for e in self.extents(bottom)), y - 1)
+
+    def test_line_keyword_arguments_style_their_line_only(self):
+        label = self.label(
+            (0.5, 0.5), [("core", {}), ("context", {"fontstyle": "italic"})], fontsize=9
+        )
+        self.assertEqual(["normal", "italic"], [t.get_fontstyle() for t in label.texts])
+
+    def test_styled_lines_keep_their_places(self):
+        plain = self.label((0.5, 0.5), "core\ncontext")
+        styled = self.label(
+            (0.5, 0.5), [("core", {}), ("context", {"fontstyle": "italic"})]
+        )
+        for a, b in zip(self.extents(plain), self.extents(styled)):
+            self.assertAlmostEqual(a.y0, b.y0, delta=0.5)
+
+    def test_spacing_holds_at_another_dpi(self):
+        label = self.label((0.5, 0.5), self.TEXT, fontsize=9)
+        self.fig.set_dpi(600)
+        y0s = [e.y0 for e in self.extents(label)]
+        step = 1.2 * 9 * 600 / 72
+        np.testing.assert_allclose(np.diff(y0s), [-step, -step], rtol=0.02)
+
+
+    def test_set_position_moves_every_line(self):
+        label = self.label((0.2, 0.2), self.TEXT)
+        label.set_position((0.7, 0.4))
+        moved = self.label((0.7, 0.4), self.TEXT)
+        self.assertEqual((0.7, 0.4), label.get_position())
+        for a, b in zip(self.extents(label), self.extents(moved)):
+            np.testing.assert_allclose(a.get_points(), b.get_points())
+
+    def test_alignment_and_color_apply_to_every_line(self):
+        label = self.label((0.5, 0.5), self.TEXT)
+        label.set_horizontalalignment("right")
+        label.set_color("red")
+        x = self.ax.transData.transform((0.5, 0.5))[0]
+        for text, extent in zip(label.texts, self.extents(label)):
+            self.assertAlmostEqual(x, extent.x1, places=6)
+            self.assertEqual("red", text.get_color())
+
+    def test_vertical_alignment_moves_the_block(self):
+        label = self.label((0.5, 0.5), self.TEXT, va="center")
+        before = label.get_window_extent(self.renderer)
+        label.set_verticalalignment("top")
+        y = self.ax.transData.transform((0.5, 0.5))[1]
+        self.assertLess(label.get_window_extent(self.renderer).y1, before.y1)
+        self.assertLessEqual(label.get_window_extent(self.renderer).y1, y + 1)
+
+    def test_extent_spans_every_line(self):
+        label = self.label((0.5, 0.5), self.TEXT)
+        extents = self.extents(label)
+        np.testing.assert_allclose(
+            label.get_window_extent(self.renderer).get_points(),
+            matplotlib.transforms.Bbox.union(extents).get_points(),
+        )
+
+    def test_remove_takes_the_label_off_the_axis(self):
+        label = self.label((0.5, 0.5), self.TEXT)
+        self.assertIn(label, self.ax.get_children())
+        label.remove()
+        self.assertNotIn(label, self.ax.get_children())
 
 
 class TestLeaderAttachmentOnLineShapes(unittest.TestCase):

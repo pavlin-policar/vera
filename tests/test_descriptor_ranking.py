@@ -10,7 +10,7 @@ from shapely import geometry as geom
 
 from vera import metrics
 from vera.embedding import Embedding
-from vera.plotting import _format_descriptor, plot_annotation
+from vera.plotting import _format_descriptor_lines, plot_annotation
 from vera.region import Region
 from vera.region_annotation import RegionAnnotation
 from vera.rules import EqualityRule
@@ -19,6 +19,11 @@ from vera.variables import (
     IndicatorVariable,
     IndicatorVariableGroup,
 )
+
+def _format_descriptor(descriptor, **kwargs) -> str:
+    """The label text plotting draws for `descriptor`."""
+    return "\n".join(line for line, _ in _format_descriptor_lines(descriptor, **kwargs))
+
 
 def make_indicator(name: str, values: np.ndarray) -> IndicatorVariable:
     values = np.asarray(values, dtype=float)

@@ -3,7 +3,9 @@ import logging
 from typing import Callable
 
 import matplotlib
+import matplotlib.artist
 import matplotlib.text
+import matplotlib.transforms
 import numpy as np
 import shapely
 import shapely.affinity
@@ -858,17 +860,117 @@ def optimize_label_positions(
     return best_labels, history
 
 
+class Label(matplotlib.artist.Artist):
+    """A multi-line text label drawn as one `Text` per line, so that each line
+    can carry its own style, and positioned, aligned and colored as a whole.
+
+    `label` is either a string, whose lines share one style, or a sequence of
+    ``(line, line_kwargs)`` pairs, whose keyword arguments override the shared
+    `Text` keyword arguments for that line alone. Lines are `linespacing`
+    (default 1.2) font sizes apart, which is close to matplotlib's own
+    spacing, offset in points so the layout holds at any dpi. Each line is
+    aligned on the position by `ha`; `va` places the block as a whole. Line
+    keyword arguments should change a line's style, not its size.
+    """
+
+    def __init__(self, ax: matplotlib.axes.Axes, xy: tuple[float, float], label, **kwargs):
+        super().__init__()
+        if isinstance(label, str):
+            label = [(line, {}) for line in label.split("\n")]
+
+        # The defaults of `Axes.text`, except for the vertical alignment
+        kwargs = {"clip_on": False, **kwargs}
+        kwargs.pop("ma", None)
+        kwargs.pop("multialignment", None)
+        self._va = kwargs.pop("va", kwargs.pop("verticalalignment", "center"))
+        ha = kwargs.pop("ha", kwargs.pop("horizontalalignment", "left"))
+        self._linespacing = kwargs.pop("linespacing", 1.2)
+        self._text_transform = kwargs.pop("transform", ax.transData)
+        self.set_zorder(kwargs.get("zorder", matplotlib.text.Text.zorder))
+
+        self.texts = []
+        for line, line_kwargs in label:
+            text = matplotlib.text.Text(
+                *xy, line, ha=ha, va="center_baseline", **{**kwargs, **line_kwargs}
+            )
+            # As `Axes.text` sets up its texts
+            text.set_figure(ax.figure)
+            text.axes = ax
+            text.set_clip_path(ax.patch)
+            self.texts.append(text)
+        self._update_offsets()
+
+    def _update_offsets(self) -> None:
+        if not self.texts:
+            return
+        step = self._linespacing * self.texts[0].get_fontsize()
+        half_height = len(self.texts) * step / 2
+        centre = {"top": -half_height, "bottom": half_height}.get(self._va, 0.0)
+        figure = self.texts[0].figure
+        for i, text in enumerate(self.texts):
+            dy = centre + ((len(self.texts) - 1) / 2 - i) * step
+            text.set_transform(
+                matplotlib.transforms.offset_copy(
+                    self._text_transform, fig=figure, y=dy, units="points"
+                )
+            )
+        self.stale = True
+
+    @matplotlib.artist.allow_rasterization
+    def draw(self, renderer) -> None:
+        if not self.get_visible():
+            return
+        for text in self.texts:
+            text.draw(renderer)
+        self.stale = False
+
+    def get_window_extent(self, renderer=None) -> matplotlib.transforms.Bbox:
+        """The box around the label's non-empty lines, in display coordinates."""
+        boxes = [t.get_window_extent(renderer) for t in self.texts if t.get_text()]
+        return matplotlib.transforms.Bbox.union(boxes) if boxes else matplotlib.transforms.Bbox.null()
+
+    def get_tightbbox(self, renderer=None) -> matplotlib.transforms.Bbox:
+        boxes = [t.get_tightbbox(renderer) for t in self.texts if t.get_text()]
+        boxes = [b for b in boxes if b is not None]
+        return matplotlib.transforms.Bbox.union(boxes) if boxes else None
+
+    def get_text(self) -> str:
+        return "\n".join(t.get_text() for t in self.texts)
+
+    def get_position(self) -> tuple[float, float]:
+        return self.texts[0].get_position()
+
+    def set_position(self, xy: tuple[float, float]) -> None:
+        for text in self.texts:
+            text.set_position(xy)
+        self.stale = True
+
+    def set_horizontalalignment(self, align: str) -> None:
+        for text in self.texts:
+            text.set_horizontalalignment(align)
+        self.stale = True
+
+    def set_verticalalignment(self, align: str) -> None:
+        self._va = align
+        self._update_offsets()
+
+    def set_color(self, color) -> None:
+        for text in self.texts:
+            text.set_color(color)
+        self.stale = True
+
+
 def get_label_bounding_boxes_on_ax(
     ax: matplotlib.axes.Axes,
-    label_strs: list[str],
+    labels: list,
     label_positions: list[tuple[float, float]],
     label_kwargs: dict = None,
 ) -> list[shapely.Polygon]:
     """Determine label outlines after rendered on the given axis.
 
     This function renders the label on the axis, measures it, and removes it
-    from the axis. A label's outline is the union of the boxes of its lines
-    (see :func:`label_outline`).
+    from the axis. Labels take the forms :class:`Label` accepts. A label's
+    outline is the union of the boxes of its lines (see :func:`label_outline`).
 
     This is useful since labels can have very different sizes based on the axis
     size, dpi, and various font settings, e.g., font family, font size, etc.
@@ -877,31 +979,24 @@ def get_label_bounding_boxes_on_ax(
         label_kwargs = {}
 
     label_bboxes = []
-    for label, label_pos in zip(label_strs, label_positions):
+    for label, label_pos in zip(labels, label_positions):
         # Render the label on the current axis, measure its outline, then
         # remove the rendered label
-        handle = ax.text(*label_pos, label, **label_kwargs)
+        handle = ax.add_artist(Label(ax, label_pos, label, **label_kwargs))
         label_bboxes.append(label_outline(handle, ax))
         handle.remove()
 
     return label_bboxes
 
 
-def label_outline(handle: matplotlib.text.Text, ax: matplotlib.axes.Axes) -> shapely.Polygon:
+def label_outline(label: Label, ax: matplotlib.axes.Axes) -> shapely.Polygon:
     """The outline of a rendered label, in data coordinates: the union of the
     boxes of its lines (see :func:`label_line_shape`)."""
-    bbox = bbox_to_polygon(get_artist_bounding_box(handle, ax))
-    lines = handle.get_text().split("\n")
-    if len(lines) <= 1:
-        return bbox
     widths = []
-    for line in lines:
-        # Each line is measured alone, with the label's font properties
-        probe = ax.text(0, 0, line or " ", fontproperties=handle.get_fontproperties())
-        x0, _, x1, _ = get_artist_bounding_box(probe, ax)
-        probe.remove()
+    for text in label.texts:
+        x0, _, x1, _ = get_artist_bounding_box(text, ax) if text.get_text() else (0, 0, 0, 0)
         widths.append(x1 - x0)
-    return label_line_shape(bbox, widths)
+    return label_line_shape(bbox_to_polygon(get_artist_bounding_box(label, ax)), widths)
 
 
 def label_line_shape(bbox: shapely.Polygon, line_widths: list[float]) -> shapely.Polygon:
