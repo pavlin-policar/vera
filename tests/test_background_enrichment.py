@@ -10,7 +10,7 @@ from shapely import geometry as geom
 from vera.embedding import Embedding
 from vera.explain._descriptive import enrich_with_background
 from vera.label_placement import Label
-from vera.plotting import _format_descriptor, _format_descriptor_lines, plot_annotation, plot_region
+from vera.plotting import _format_descriptor_lines, plot_annotation, plot_region
 from vera.region import Region
 from vera.region_annotation import RegionAnnotation
 from vera.variables import IndicatorVariableGroup
@@ -169,9 +169,9 @@ class TestBackgroundLabels(BackgroundEnrichmentTestBase):
             lines,
         )
 
-    def test_plain_label_text_matches_the_lines(self):
+    def test_format_label_joins_the_lines_background_last(self):
         descriptor = self.enriched(self.v_c).descriptor
-        self.assertEqual("a = high\nb = high\nc = high", _format_descriptor(descriptor))
+        self.assertEqual("a = high\nb = high\nc = high", descriptor.format_label())
 
     def test_plot_annotation_draws_background_in_italics(self):
         handles, _, fig, ax = plot_annotation(

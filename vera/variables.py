@@ -141,17 +141,30 @@ class RegionDescriptor(metaclass=abc.ABCMeta):
         sep: str = "\n",
         truncation_sep: str = None,
     ) -> str:
-        """The descriptor's display text.
+        """The descriptor's display text: its :meth:`format_lines` joined by
+        newlines."""
+        lines = self.format_lines(max_descriptors, truncation_template, sep, truncation_sep)
+        return "\n".join(line for line, _ in lines)
 
-        Equal to ``str(self)``; descriptors composed of multiple variables
-        join them with `sep` and truncate to the first `max_descriptors` of
-        them. A single-variable descriptor has nothing to join, but the
-        arguments are validated all the same.
+    def format_lines(
+        self,
+        max_descriptors: int = None,
+        truncation_template: str = "(+{n} more)",
+        sep: str = "\n",
+        truncation_sep: str = None,
+    ) -> list[tuple[str, bool]]:
+        """The descriptor's display text as lines, each paired with whether
+        it shows background variables.
+
+        Equal to the lines of ``str(self)``; descriptors composed of multiple
+        variables join them with `sep` and truncate to the first
+        `max_descriptors` of them. A single-variable descriptor has nothing to
+        join, but the arguments are validated all the same.
         """
         _validate_format_label_args(
             max_descriptors, truncation_template, sep, truncation_sep
         )
-        return str(self)
+        return [(line, False) for line in str(self).split("\n")]
 
     def ranked_by(
         self, compute_scores: Callable[[], dict]
@@ -505,19 +518,24 @@ class IndicatorVariableGroup(RegionDescriptor):
         ordered_group.variables = ordered
         return ordered_group
 
-    def format_label(
+    def format_lines(
         self,
         max_descriptors: int = None,
         truncation_template: str = "(+{n} more)",
         sep: str = "\n",
         truncation_sep: str = None,
-    ) -> str:
-        """The group's display text: the variables joined with `sep`,
+    ) -> list[tuple[str, bool]]:
+        """The group's display text as lines, each paired with whether it
+        shows background variables: the variables joined with `sep`,
         truncated to the first `max_descriptors` of them.
 
-        Truncation is display-only: `values` and everything computed from the
-        full variable set are unaffected. A truncated label always ends with a
-        marker showing the number of hidden variables.
+        Background variables follow the others and start a line of their own
+        whatever `sep` is, so that no line mixes the two; truncation keeps the
+        first variables in that order, so it hides background variables
+        first. Truncation is display-only: `values` and everything computed
+        from the full variable set are unaffected. A truncated label always
+        ends with a marker showing the number of hidden variables; it is not
+        background, unless it shares a line with background variables.
 
         Parameters
         ----------
@@ -543,12 +561,28 @@ class IndicatorVariableGroup(RegionDescriptor):
         )
         if truncation_sep is None:
             truncation_sep = sep
-        if max_descriptors is None or max_descriptors >= len(self.variables) - 1:
-            return sep.join(str(v) for v in self.variables)
+        background = self.background_variables
+        variables = self.with_background_last().variables
+        marker = ""
+        if max_descriptors is not None and max_descriptors < len(variables) - 1:
+            marker = truncation_sep + truncation_template.format(n=len(variables) - max_descriptors)
+            variables = variables[:max_descriptors]
 
-        label = sep.join(str(v) for v in self.variables[:max_descriptors])
-        marker = truncation_template.format(n=len(self.variables) - max_descriptors)
-        return label + truncation_sep + marker
+        parts = [
+            ([v for v in variables if v not in background], False),
+            ([v for v in variables if v in background], True),
+        ]
+        blocks = [(sep.join(str(v) for v in part), is_background) for part, is_background in parts if part]
+        lines = []
+        for i, (text, is_background) in enumerate(blocks):
+            # The marker follows the last block; lines it adds are not background
+            suffix = marker if i == len(blocks) - 1 else ""
+            n_variable_lines = text.count("\n") + 1
+            lines.extend(
+                (line, is_background and j < n_variable_lines)
+                for j, line in enumerate((text + suffix).split("\n"))
+            )
+        return lines
 
     def __str__(self) -> str:
         return "\n".join(str(d) for d in self.variables)
