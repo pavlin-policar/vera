@@ -207,11 +207,11 @@ class TestBackgroundLabels(BackgroundEnrichmentTestBase):
 
 
 
-def resolved_style(text) -> str:
-    """The style of the face matplotlib draws `text` in, which is "normal"
-    when it substitutes the regular face for a missing italic one."""
+def drawn_slanted(text) -> bool:
+    """Whether matplotlib draws `text` in an italic or oblique face, which it
+    does not when it substitutes the regular face for a missing italic one."""
     path = font_manager.findfont(text.get_fontproperties())
-    return next(e.style for e in font_manager.fontManager.ttflist if e.fname == path)
+    return next(e.style for e in font_manager.fontManager.ttflist if e.fname == path) != "normal"
 
 
 class TestBackgroundItalicFaces(BackgroundEnrichmentTestBase):
@@ -235,7 +235,7 @@ class TestBackgroundItalicFaces(BackgroundEnrichmentTestBase):
             [self.enriched(self.v_c)], optimize_labels=False, return_ax=True
         )
         self.assertEqual(
-            ["normal", "normal", "italic"], [resolved_style(t) for t in handles[0].texts]
+            [False, False, True], [drawn_slanted(t) for t in handles[0].texts]
         )
 
     def test_warns_when_background_italics_have_no_face(self):
