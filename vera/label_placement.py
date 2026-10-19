@@ -960,12 +960,6 @@ class Label(matplotlib.artist.Artist):
         self.stale = True
 
 
-def draw_label(ax: matplotlib.axes.Axes, xy: tuple[float, float], label, **kwargs) -> Label:
-    """Add a :class:`Label` of `label` at `xy` to `ax`; `kwargs` are the
-    `Text` keyword arguments."""
-    return ax.add_artist(Label(ax, xy, label, **kwargs))
-
-
 def get_label_bounding_boxes_on_ax(
     ax: matplotlib.axes.Axes,
     labels: list,
@@ -975,7 +969,7 @@ def get_label_bounding_boxes_on_ax(
     """Determine label outlines after rendered on the given axis.
 
     This function renders the label on the axis, measures it, and removes it
-    from the axis. Labels take the forms :func:`draw_label` accepts. A label's
+    from the axis. Labels take the forms :class:`Label` accepts. A label's
     outline is the union of the boxes of its lines (see :func:`label_outline`).
 
     This is useful since labels can have very different sizes based on the axis
@@ -988,36 +982,21 @@ def get_label_bounding_boxes_on_ax(
     for label, label_pos in zip(labels, label_positions):
         # Render the label on the current axis, measure its outline, then
         # remove the rendered label
-        handle = draw_label(ax, label_pos, label, **label_kwargs)
+        handle = ax.add_artist(Label(ax, label_pos, label, **label_kwargs))
         label_bboxes.append(label_outline(handle, ax))
         handle.remove()
 
     return label_bboxes
 
 
-def label_outline(handle, ax: matplotlib.axes.Axes) -> shapely.Polygon:
+def label_outline(label: Label, ax: matplotlib.axes.Axes) -> shapely.Polygon:
     """The outline of a rendered label, in data coordinates: the union of the
-    boxes of its lines (see :func:`label_line_shape`). The label is a
-    :class:`Label` or a multi-line `Text`."""
-    bbox = bbox_to_polygon(get_artist_bounding_box(handle, ax))
-    if isinstance(handle, Label):
-        widths = []
-        for text in handle.texts:
-            x0, _, x1, _ = get_artist_bounding_box(text, ax) if text.get_text() else (0, 0, 0, 0)
-            widths.append(x1 - x0)
-        return label_line_shape(bbox, widths)
-
-    lines = handle.get_text().split("\n")
-    if len(lines) <= 1:
-        return bbox
+    boxes of its lines (see :func:`label_line_shape`)."""
     widths = []
-    for line in lines:
-        # Each line is measured alone, with the label's font properties
-        probe = ax.text(0, 0, line or " ", fontproperties=handle.get_fontproperties())
-        x0, _, x1, _ = get_artist_bounding_box(probe, ax)
-        probe.remove()
+    for text in label.texts:
+        x0, _, x1, _ = get_artist_bounding_box(text, ax) if text.get_text() else (0, 0, 0, 0)
         widths.append(x1 - x0)
-    return label_line_shape(bbox, widths)
+    return label_line_shape(bbox_to_polygon(get_artist_bounding_box(label, ax)), widths)
 
 
 def label_line_shape(bbox: shapely.Polygon, line_widths: list[float]) -> shapely.Polygon:

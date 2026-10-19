@@ -41,9 +41,8 @@ from vera.label_placement import (
     convert_ax_to_data,
     get_label_bounding_boxes_on_ax,
     label_outline,
+    Label,
 )
-# Aliased because `plot_region` takes a `draw_label` argument
-from vera.label_placement import draw_label as _draw_label
 from vera.region import Density, Region
 from vera.region_annotation import RegionAnnotation
 from vera.variables import RegionDescriptor, _validate_format_label_args
@@ -593,7 +592,7 @@ def _label_descriptor(
 def _styled_label(
     lines: list[tuple[str, bool]], background_label_kwargs: dict = None
 ) -> list[tuple[str, dict]]:
-    """Label lines in the form `draw_label` takes, with background lines in
+    """Label lines in the form `Label` takes, with background lines in
     `background_label_kwargs` (None for `DEFAULT_BACKGROUND_LABEL_KWARGS`)."""
     if background_label_kwargs is None:
         background_label_kwargs = DEFAULT_BACKGROUND_LABEL_KWARGS
@@ -757,9 +756,9 @@ def plot_region(
         label_kwargs_.update(label_kwargs)
         x, y = largest_polygon.centroid.coords[0]
 
-        label = _draw_label(
+        label = ax.add_artist(Label(
             ax, (x, y), _styled_label(label_lines, background_label_kwargs), **label_kwargs_
-        )
+        ))
         # label.set_bbox(dict(facecolor="white", alpha=0.75, edgecolor="white"))
 
     # Plot embedding scatter plot
@@ -1226,13 +1225,13 @@ def plot_annotation(
         label_handles = []
         for lbl_data, label_text_pos in zip(label_data, best_label_positions):
             label_handles.append(
-                _draw_label(
+                ax.add_artist(Label(
                     ax,
                     label_text_pos,
                     lbl_data["text"],
                     color=lbl_data["color"],
                     **label_kwargs_,
-                )
+                ))
             )
 
         # Plot line from region to the label's outline, as placed
