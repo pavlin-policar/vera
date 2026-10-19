@@ -70,13 +70,14 @@ def _validate_format_label_args(max_descriptors, truncation_template, sep, trunc
 class RegionDescriptor(metaclass=abc.ABCMeta):
     """Abstract interface that provides a textual description of regions.
 
-    `background_variables` holds the constituent variables that background
-    enrichment (`explain.descriptive`) added as context to the region's core
-    description. They take part in `values` like any other member; plotting
-    shows them after the core members and in their own style. Merging
-    descriptors does not carry the marking over.
+    `background_variables` holds the variables that background enrichment
+    (`explain.descriptive`) added as context to the region's core
+    description; only a group has any, kept apart from its core `variables`.
+    They take part in `values` like the core variables; plotting shows them
+    after the core variables and in their own style. Merging descriptors does
+    not carry them over.
     """
-    background_variables: frozenset = frozenset()
+    background_variables: tuple = ()
 
     def __init__(self, values: np.ndarray):
         self.values = values
@@ -184,15 +185,6 @@ class RegionDescriptor(metaclass=abc.ABCMeta):
     ) -> "RegionDescriptor":
         """This descriptor with its constituent variables of equal score
         ordered by descending `preference`.
-
-        A descriptor without constituent parts has nothing to reorder and
-        returns itself.
-        """
-        return self
-
-    def with_background_last(self) -> "RegionDescriptor":
-        """This descriptor with its background variables moved after the
-        others, each part keeping its order.
 
         A descriptor without constituent parts has nothing to reorder and
         returns itself.
@@ -393,18 +385,31 @@ class IndicatorVariableGroup(RegionDescriptor):
     """A group of potentially unrelated indicator variables.
 
     The values of an indicator variable group indicate which samples belong to
-    ALL the contained indicator variables.
+    ALL the contained indicator variables, the core `variables` and the
+    `background_variables` alike.
 
     """
-    def __init__(self, variables: list[IndicatorVariable]):
+    def __init__(
+        self,
+        variables: list[IndicatorVariable],
+        background_variables: list[IndicatorVariable] = (),
+    ):
         self.variables = sorted(merge_indicator_variables(variables))
+        # Background enrichment only adds variables whose base variable the
+        # core lacks, so background variables merge among themselves only
+        self.background_variables = sorted(merge_indicator_variables(background_variables))
         # The score of each variable, set by `ranked_by`; None for a group
         # in its own (alphabetical) order
         self.scores = None
         # The merged values indicate which samples belong to ALL contained variables
-        merged_values = conjunction([v.values for v in self.variables])
+        merged_values = conjunction([v.values for v in self.all_variables])
 
         super().__init__(values=merged_values)
+
+    @property
+    def all_variables(self) -> list[IndicatorVariable]:
+        """The core variables followed by the background variables."""
+        return [*self.variables, *self.background_variables]
 
     def merge_with(self, other: RegionDescriptor) -> "IndicatorVariableGroup":
         if not isinstance(other, RegionDescriptor):
@@ -426,26 +431,35 @@ class IndicatorVariableGroup(RegionDescriptor):
     def contained_variables(self) -> tuple[Variable]:
         # Canonical order: the tuple is used as an identity key (e.g. in
         # `utils.group_by_descriptor`), so it must not depend on the display
-        # order of `self.variables`
+        # order of `self.variables`. Background variables are context, not
+        # part of what describes the region
         return tuple(sorted(v.base_variable for v in self.variables))
 
     @property
     def partial_values(self) -> np.ndarray:
         """For each sample, the fraction of the group's variables it satisfies."""
-        return np.mean(np.vstack([v.values for v in self.variables]), axis=0)
+        return np.mean(np.vstack([v.values for v in self.all_variables]), axis=0)
 
     def __hash__(self) -> int:
-        return hash((self.__class__.__name__, frozenset(self.variables)))
+        return hash((
+            self.__class__.__name__,
+            frozenset(self.variables),
+            frozenset(self.background_variables),
+        ))
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, self.__class__):
             return False
-        return frozenset(self.variables) == frozenset(other.variables)
+        return (
+            frozenset(self.variables) == frozenset(other.variables)
+            and frozenset(self.background_variables) == frozenset(other.background_variables)
+        )
 
     def ranked_by(
         self, compute_scores: Callable[[], dict]
     ) -> "IndicatorVariableGroup":
-        """A copy of the group with its variables ordered by descending score.
+        """A copy of the group with its core and its background variables
+        each ordered by descending score.
 
         Ties are broken by the variables' natural order, which makes the
         ranking deterministic, and a NaN score is treated as the lowest
@@ -458,11 +472,13 @@ class IndicatorVariableGroup(RegionDescriptor):
         def sort_key(v):
             return -np.inf if np.isnan(scores[v]) else scores[v]
 
-        ranked = sorted(sorted(self.variables), key=sort_key, reverse=True)
+        def ranked(variables):
+            return sorted(sorted(variables), key=sort_key, reverse=True)
 
         ranked_group = copy.copy(self)
-        ranked_group.variables = ranked
-        ranked_group.scores = {v: sort_key(v) for v in ranked}
+        ranked_group.variables = ranked(self.variables)
+        ranked_group.background_variables = ranked(self.background_variables)
+        ranked_group.scores = {v: sort_key(v) for v in self.all_variables}
         return ranked_group
 
     def with_ties_ordered_by(
@@ -474,48 +490,31 @@ class IndicatorVariableGroup(RegionDescriptor):
         Only a group ranked by `ranked_by` knows its scores; any other group
         is returned unchanged. Scores are equal when they agree to within
         floating-point tolerance, so variables of different score are never
-        reordered; nor are a background variable and a core one.
+        reordered, and core and background variables are ordered apart.
         """
         # Groups unpickled from before scores were stored lack the attribute
         if getattr(self, "scores", None) is None:
             return self
 
-        # Consecutive runs of equal score, each compared with its first
-        # member so that a run cannot creep across slowly decreasing scores
-        background = self.background_variables
-        runs = []
-        for v in self.variables:
-            if (
-                runs
-                and _equal_scores(self.scores[v], self.scores[runs[-1][0]])
-                and (v in background) == (runs[-1][0] in background)
-            ):
-                runs[-1].append(v)
-            else:
-                runs.append([v])
-        ordered = [
-            v for run in runs for v in sorted(sorted(run), key=preference, reverse=True)
-        ]
-        if ordered == self.variables:
+        def ordered(variables):
+            # Consecutive runs of equal score, each compared with its first
+            # member so that a run cannot creep across slowly decreasing scores
+            runs = []
+            for v in variables:
+                if runs and _equal_scores(self.scores[v], self.scores[runs[-1][0]]):
+                    runs[-1].append(v)
+                else:
+                    runs.append([v])
+            return [v for run in runs for v in sorted(sorted(run), key=preference, reverse=True)]
+
+        variables = ordered(self.variables)
+        background_variables = ordered(self.background_variables)
+        if variables == self.variables and background_variables == self.background_variables:
             return self
 
         ordered_group = copy.copy(self)
-        ordered_group.variables = ordered
-        return ordered_group
-
-    def with_background_last(self) -> "IndicatorVariableGroup":
-        """A copy of the group with its background variables moved after the
-        others, each part keeping its order; the group itself when nothing
-        moves."""
-        background = self.background_variables
-        ordered = [v for v in self.variables if v not in background] + [
-            v for v in self.variables if v in background
-        ]
-        if ordered == self.variables:
-            return self
-
-        ordered_group = copy.copy(self)
-        ordered_group.variables = ordered
+        ordered_group.variables = variables
+        ordered_group.background_variables = background_variables
         return ordered_group
 
     def format_lines(
@@ -529,9 +528,9 @@ class IndicatorVariableGroup(RegionDescriptor):
         shows background variables: the variables joined with `sep`,
         truncated to the first `max_descriptors` of them.
 
-        Background variables follow the others and start a line of their own
-        whatever `sep` is, so that no line mixes the two; truncation keeps the
-        first variables in that order, so it hides background variables
+        Background variables follow the core ones and start a line of their
+        own whatever `sep` is, so that no line mixes the two; truncation keeps
+        the first variables in that order, so it hides background variables
         first. Truncation is display-only: `values` and everything computed
         from the full variable set are unaffected. A truncated label always
         ends with a marker showing the number of hidden variables; it is not
@@ -561,17 +560,15 @@ class IndicatorVariableGroup(RegionDescriptor):
         )
         if truncation_sep is None:
             truncation_sep = sep
-        background = self.background_variables
-        variables = self.with_background_last().variables
+        variables, background = self.variables, self.background_variables
+        n_variables = len(variables) + len(background)
         marker = ""
-        if max_descriptors is not None and max_descriptors < len(variables) - 1:
-            marker = truncation_sep + truncation_template.format(n=len(variables) - max_descriptors)
+        if max_descriptors is not None and max_descriptors < n_variables - 1:
+            marker = truncation_sep + truncation_template.format(n=n_variables - max_descriptors)
+            background = background[:max(0, max_descriptors - len(variables))]
             variables = variables[:max_descriptors]
 
-        parts = [
-            ([v for v in variables if v not in background], False),
-            ([v for v in variables if v in background], True),
-        ]
+        parts = [(variables, False), (background, True)]
         blocks = [(sep.join(str(v) for v in part), is_background) for part, is_background in parts if part]
         lines = []
         for i, (text, is_background) in enumerate(blocks):
@@ -585,7 +582,10 @@ class IndicatorVariableGroup(RegionDescriptor):
         return lines
 
     def __str__(self) -> str:
-        return "\n".join(str(d) for d in self.variables)
+        return "\n".join(str(d) for d in self.all_variables)
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}([{', '.join([str(v) for v in self.variables])}])"
+        variables = ", ".join(str(v) for v in self.variables)
+        background = ", ".join(str(v) for v in self.background_variables)
+        background = f", background_variables=[{background}]" if background else ""
+        return f"{self.__class__.__name__}([{variables}]{background})"

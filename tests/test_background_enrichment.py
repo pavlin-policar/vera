@@ -46,24 +46,25 @@ class BackgroundEnrichmentTestBase(unittest.TestCase):
 
 
 class TestBackgroundProvenance(BackgroundEnrichmentTestBase):
-    def test_added_variables_are_marked_as_background(self):
+    def test_added_variables_are_kept_apart_from_the_core(self):
         background = [RegionAnnotation(self.region(0, 30), self.v_c)]
-        enriched = enrich_with_background(self.core(), background)
-        self.assertEqual({self.v_a, self.v_b, self.v_c}, set(enriched.descriptor.variables))
-        self.assertEqual(frozenset([self.v_c]), enriched.descriptor.background_variables)
+        enriched = enrich_with_background(self.core(), background).descriptor
+        self.assertEqual({self.v_a, self.v_b}, set(enriched.variables))
+        self.assertEqual([self.v_c], enriched.background_variables)
 
     def test_unenriched_descriptors_have_no_background(self):
         # The background region covers only half of the core region
         background = [RegionAnnotation(self.region(5, 30), self.v_c)]
         enriched = enrich_with_background(self.core(), background)
-        self.assertEqual(frozenset(), enriched.descriptor.background_variables)
-        self.assertEqual(frozenset(), self.v_a.background_variables)
+        self.assertEqual([], enriched.descriptor.background_variables)
+        self.assertEqual((), self.v_a.background_variables)
 
-    def test_single_indicator_core_becomes_a_marked_group(self):
+    def test_single_indicator_core_becomes_a_group(self):
         background = [RegionAnnotation(self.region(0, 30), self.v_c)]
-        enriched = enrich_with_background(self.core(self.v_a), background)
-        self.assertIsInstance(enriched.descriptor, IndicatorVariableGroup)
-        self.assertEqual(frozenset([self.v_c]), enriched.descriptor.background_variables)
+        enriched = enrich_with_background(self.core(self.v_a), background).descriptor
+        self.assertIsInstance(enriched, IndicatorVariableGroup)
+        self.assertEqual([self.v_a], enriched.variables)
+        self.assertEqual([self.v_c], enriched.background_variables)
 
     def test_background_members_take_part_in_membership(self):
         background = [RegionAnnotation(self.region(0, 30), self.v_c)]
@@ -71,15 +72,12 @@ class TestBackgroundProvenance(BackgroundEnrichmentTestBase):
         expected = self.v_a.values * self.v_b.values * self.v_c.values
         np.testing.assert_array_equal(expected, enriched.descriptor.values)
 
-    def test_repeated_enrichment_keeps_earlier_background(self):
-        once = enrich_with_background(
-            self.core(), [RegionAnnotation(self.region(0, 30), self.v_c)]
-        )
-        twice = enrich_with_background(
-            once, [RegionAnnotation(self.region(0, 35), self.v_e)]
-        )
+    def test_background_takes_part_in_identity(self):
+        core = IndicatorVariableGroup([self.v_a, self.v_b])
+        enriched = IndicatorVariableGroup([self.v_a, self.v_b], background_variables=[self.v_c])
+        self.assertNotEqual(core, enriched)
         self.assertEqual(
-            frozenset([self.v_c, self.v_e]), twice.descriptor.background_variables
+            enriched, IndicatorVariableGroup([self.v_b, self.v_a], background_variables=[self.v_c])
         )
 
 
@@ -89,34 +87,18 @@ class TestBackgroundOrdering(BackgroundEnrichmentTestBase):
         background = [RegionAnnotation(self.region(0, 30), self.v_c)]
         return enrich_with_background(self.core(), background).descriptor
 
-    def test_ranking_is_by_score_alone(self):
-        # c ties with a and sorts after it
-        self.assertEqual([self.v_a, self.v_c, self.v_b], self.enriched().variables)
-
-    def test_background_moves_after_the_core(self):
+    def test_core_and_background_are_ranked_apart(self):
+        # c ties with a, the top core variable, yet stays in the background
         descriptor = self.enriched()
-        ordered = descriptor.with_background_last()
-        self.assertEqual([self.v_a, self.v_b, self.v_c], ordered.variables)
-        self.assertIsNot(descriptor, ordered)
-        self.assertEqual([self.v_a, self.v_c, self.v_b], descriptor.variables)
-
-    def test_ordered_group_keeps_its_marking_and_scores(self):
-        descriptor = self.enriched()
-        ordered = descriptor.with_background_last()
-        self.assertEqual(descriptor.background_variables, ordered.background_variables)
-        self.assertEqual(descriptor.scores, ordered.scores)
-
-    def test_group_without_background_is_returned_unchanged(self):
-        group = self.core().descriptor
-        self.assertIs(group, group.with_background_last())
+        self.assertEqual([self.v_a, self.v_b], descriptor.variables)
+        self.assertEqual([self.v_c], descriptor.background_variables)
+        self.assertEqual({self.v_a, self.v_b, self.v_c}, set(descriptor.scores))
 
     def test_ties_are_not_reordered_across_the_background_boundary(self):
-        # a and c tie; preferring c must not lift it above the core member
-        descriptor = self.enriched().with_background_last()
-        partitioned = descriptor.with_ties_ordered_by(lambda v: v is self.v_c)
-        self.assertEqual([self.v_a, self.v_b, self.v_c], partitioned.variables)
+        # a and c tie; preferring c must not lift it into the core
         ordered = self.enriched().with_ties_ordered_by(lambda v: v is self.v_c)
-        self.assertEqual([self.v_a, self.v_c, self.v_b], ordered.variables)
+        self.assertEqual([self.v_a, self.v_b], ordered.variables)
+        self.assertEqual([self.v_c], ordered.background_variables)
 
 
 class TestBackgroundLabels(BackgroundEnrichmentTestBase):
@@ -202,7 +184,7 @@ class TestBackgroundLabels(BackgroundEnrichmentTestBase):
             [("a = high", "normal"), ("c = high", "normal"), ("b = high", "normal")],
             styles,
         )
-        self.assertEqual(frozenset([self.v_c]), enriched.descriptor.background_variables)
+        self.assertEqual([self.v_c], enriched.descriptor.background_variables)
 
     def test_plot_region_distinguishes_background_by_default(self):
         ax = plot_region(self.enriched(self.v_c), draw_label=True)

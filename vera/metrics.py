@@ -91,7 +91,7 @@ def descriptor_scores(
     """
     descriptor = ra.descriptor
     if isinstance(descriptor, IndicatorVariableGroup):
-        variables = list(descriptor.variables)
+        variables = list(descriptor.all_variables)
     elif isinstance(descriptor, IndicatorVariable):
         variables = [descriptor]
     else:

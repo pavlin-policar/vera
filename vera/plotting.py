@@ -1,4 +1,3 @@
-import copy
 import re
 import string
 import warnings
@@ -45,7 +44,7 @@ from vera.label_placement import (
 )
 from vera.region import Density, Region
 from vera.region_annotation import RegionAnnotation
-from vera.variables import RegionDescriptor
+from vera.variables import IndicatorVariableGroup, RegionDescriptor
 
 
 class GoogleAPIUnreachable(Warning):
@@ -517,14 +516,12 @@ def _format_descriptor_lines(
 def _label_descriptor(
     descriptor: RegionDescriptor, distinguish_background: bool
 ) -> RegionDescriptor:
-    """The descriptor a label shows: as it is when background members are
-    distinguished, otherwise a copy with none marked, so the label lists every
-    member in score order and in one style."""
+    """The descriptor a label shows: as it is when background variables are
+    distinguished, otherwise one group of all its variables in score order,
+    so the label lists them in one style."""
     if distinguish_background or not descriptor.background_variables:
         return descriptor
-    plain = copy.copy(descriptor)
-    plain.background_variables = frozenset()
-    return plain
+    return IndicatorVariableGroup(descriptor.all_variables).ranked_by(lambda: descriptor.scores)
 
 
 def _styled_label(
@@ -554,7 +551,7 @@ def _order_ties_by_shared_features(
     their descriptors.
     """
     def shown(descriptor):
-        variables = getattr(descriptor, "variables", [descriptor])
+        variables = getattr(descriptor, "all_variables", [descriptor])
         # `format_label` shows the whole group when the marker would stand in
         # for a single variable
         if max_descriptors is not None and len(variables) > max_descriptors + 1:
@@ -1020,7 +1017,7 @@ def plot_annotation(
         label_data = []
         descriptors = _order_ties_by_shared_features(
             [
-                _label_descriptor(ra.descriptor, distinguish_background).with_background_last()
+                _label_descriptor(ra.descriptor, distinguish_background)
                 for ra in region_annotations
             ],
             max_descriptors,
