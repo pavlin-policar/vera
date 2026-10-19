@@ -493,6 +493,39 @@ def plot_densities(
 
 DEFAULT_BACKGROUND_LABEL_KWARGS = {"fontstyle": "italic"}
 
+# The families `plot_annotation` tries for its labels, in order; it uses the
+# first with an italic face, so background lines can be set apart in italics.
+# On macOS, Helvetica Neue and Helvetica ship as .ttc collections, of which
+# matplotlib sees only the regular face; DejaVu Sans ships with matplotlib.
+LABEL_FONTFAMILIES = ("Helvetica Neue", "Helvetica", "Arial", "DejaVu Sans")
+
+
+def _has_italic_face(fontfamily) -> bool:
+    """Whether matplotlib finds an italic or oblique face of `fontfamily` (as
+    `Text` takes it; None for the rcParams font), rather than substituting the
+    regular face or another family."""
+    try:
+        path = font_manager.findfont(
+            font_manager.FontProperties(family=fontfamily, style="italic"),
+            fallback_to_default=False,
+        )
+    except ValueError:
+        return False
+    # The path identifies the face because matplotlib registers only the first
+    # face of a .ttc collection; if it ever registers them all, faces of one
+    # collection share a path and this would also accept a regular face whose
+    # collection holds an italic one. `style` is independent of `weight`, so
+    # bold faces are "normal" here and bold italic ones are not.
+    return any(
+        entry.fname == path and entry.style != "normal"
+        for entry in font_manager.fontManager.ttflist
+    )
+
+
+def _label_fontfamily(candidates=LABEL_FONTFAMILIES) -> str:
+    """The first of `candidates` with an italic face, else the last."""
+    return next((family for family in candidates if _has_italic_face(family)), candidates[-1])
+
 
 def _format_descriptor_lines(
     descriptor: RegionDescriptor,
@@ -525,12 +558,22 @@ def _label_descriptor(
 
 
 def _styled_label(
-    lines: list[tuple[str, bool]], background_label_kwargs: dict = None
+    lines: list[tuple[str, bool]], background_label_kwargs: dict = None, fontfamily=None
 ) -> list[tuple[str, dict]]:
     """Label lines in the form `Label` takes, with background lines in
-    `background_label_kwargs` (None for `DEFAULT_BACKGROUND_LABEL_KWARGS`)."""
+    `background_label_kwargs` (None for `DEFAULT_BACKGROUND_LABEL_KWARGS`).
+    Warns when the default italics would fall back to the regular face of the
+    label's `fontfamily` (None for the rcParams font)."""
     if background_label_kwargs is None:
         background_label_kwargs = DEFAULT_BACKGROUND_LABEL_KWARGS
+        has_background = any(is_background for _, is_background in lines)
+        if has_background and not _has_italic_face(fontfamily):
+            family = fontfamily or matplotlib.rcParams["font.family"]
+            warn(
+                f"Font family {family!r} has no italic face, so background "
+                f"lines look like the rest of the label; pass "
+                f"`background_label_kwargs` to set them apart."
+            )
     return [
         (line, background_label_kwargs if is_background else {})
         for line, is_background in lines
@@ -691,8 +734,12 @@ def plot_region(
         label_kwargs_.update(label_kwargs)
         x, y = largest_polygon.centroid.coords[0]
 
+        fontfamily = label_kwargs_.get("fontfamily", label_kwargs_.get("family"))
         label = ax.add_artist(Label(
-            ax, (x, y), _styled_label(label_lines, background_label_kwargs), **label_kwargs_
+            ax,
+            (x, y),
+            _styled_label(label_lines, background_label_kwargs, fontfamily),
+            **label_kwargs_,
         ))
         # label.set_bbox(dict(facecolor="white", alpha=0.75, edgecolor="white"))
 
@@ -1014,6 +1061,9 @@ def plot_annotation(
     )
 
     if draw_labels:
+        fontfamily = label_kwargs.get(
+            "fontfamily", label_kwargs.get("family", _label_fontfamily())
+        )
         label_data = []
         descriptors = _order_ties_by_shared_features(
             [
@@ -1037,7 +1087,7 @@ def plot_annotation(
             x, y = largest_polygon.centroid.coords[0]
 
             label_data.append({
-                "text": _styled_label(label_lines, background_label_kwargs),
+                "text": _styled_label(label_lines, background_label_kwargs, fontfamily),
                 "pos": [x, y],
                 "pos_region": largest_polygon,
                 "color": ra_colors[region_annotation]
@@ -1058,7 +1108,7 @@ def plot_annotation(
             fontsize=9,
             # fontstretch="condensed",
             # fontweight="light",
-            fontfamily="Helvetica Neue",
+            fontfamily=fontfamily,
             zorder=99,
         )
         label_kwargs_.update(label_kwargs)

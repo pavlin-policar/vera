@@ -1,16 +1,24 @@
 import unittest
+import warnings
 
 import matplotlib
 
 matplotlib.use("Agg")
 
 import numpy as np
+from matplotlib import font_manager
 from shapely import geometry as geom
 
 from vera.embedding import Embedding
 from vera.explain._descriptive import enrich_with_background
 from vera.label_placement import Label
-from vera.plotting import _format_descriptor_lines, plot_annotation, plot_region
+from vera.plotting import (
+    _format_descriptor_lines,
+    _has_italic_face,
+    _label_fontfamily,
+    plot_annotation,
+    plot_region,
+)
 from vera.region import Region
 from vera.region_annotation import RegionAnnotation
 from vera.variables import IndicatorVariableGroup
@@ -196,6 +204,66 @@ class TestBackgroundLabels(BackgroundEnrichmentTestBase):
         (label,) = [a for a in ax.artists if isinstance(a, Label)]
         self.assertEqual("a = high\nc = high\nb = high", label.get_text())
         self.assertEqual({"normal"}, {t.get_fontstyle() for t in label.texts})
+
+
+
+def drawn_slanted(text) -> bool:
+    """Whether matplotlib draws `text` in an italic or oblique face, which it
+    does not when it substitutes the regular face for a missing italic one.
+    Finds the face by path, as `_has_italic_face` does, and relies on the same
+    assumption that one path holds one registered face."""
+    path = font_manager.findfont(text.get_fontproperties())
+    return next(e.style for e in font_manager.fontManager.ttflist if e.fname == path) != "normal"
+
+
+class TestBackgroundItalicFaces(BackgroundEnrichmentTestBase):
+    """Labels default to a family with an italic face, and warn when their
+    family has none. cmr10 ships with matplotlib and has no italic face."""
+
+    enriched = TestBackgroundLabels.enriched
+
+    def test_has_italic_face(self):
+        self.assertTrue(_has_italic_face("DejaVu Sans"))
+        self.assertFalse(_has_italic_face("cmr10"))
+        self.assertFalse(_has_italic_face("No Such Font"))
+
+    def test_label_fontfamily_skips_families_without_an_italic_face(self):
+        self.assertEqual(
+            "DejaVu Sans", _label_fontfamily(("No Such Font", "cmr10", "DejaVu Sans"))
+        )
+
+    def test_plot_annotation_draws_background_in_a_real_italic_face(self):
+        handles, _, fig, ax = plot_annotation(
+            [self.enriched(self.v_c)], optimize_labels=False, return_ax=True
+        )
+        self.assertEqual(
+            [False, False, True], [drawn_slanted(t) for t in handles[0].texts]
+        )
+
+    def test_warns_when_background_italics_have_no_face(self):
+        with self.assertWarnsRegex(UserWarning, "no italic face"):
+            plot_annotation(
+                [self.enriched(self.v_c)],
+                optimize_labels=False,
+                label_kwargs={"fontfamily": "cmr10"},
+            )
+        with self.assertWarnsRegex(UserWarning, "no italic face"):
+            plot_region(
+                self.enriched(self.v_c), draw_label=True, label_kwargs={"fontfamily": "cmr10"}
+            )
+
+    def test_no_warning_without_background_lines_or_with_explicit_style(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            plot_annotation(
+                [self.core()], optimize_labels=False, label_kwargs={"fontfamily": "cmr10"}
+            )
+            plot_annotation(
+                [self.enriched(self.v_c)],
+                optimize_labels=False,
+                label_kwargs={"fontfamily": "cmr10"},
+                background_label_kwargs={"fontweight": "light"},
+            )
 
 
 if __name__ == "__main__":
