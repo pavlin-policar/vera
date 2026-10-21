@@ -126,6 +126,11 @@ class Region:
         pruned.  Use ``scale_factor`` on the :class:`Embedding` to control
         this threshold.
 
+        Members that form no triangle (fewer than three, or all triangles
+        pruned) are covered by disks of radius ``embedding.scale`` instead,
+        so that such a group still has a region. Two disks touch exactly
+        when their points are close enough to share a triangle edge.
+
         Parameters
         ----------
         embedding : Embedding
@@ -136,13 +141,13 @@ class Region:
         """
         active_idx = np.flatnonzero(member_mask == 1)
 
-        if len(active_idx) < 3:
+        if len(active_idx) == 0:
             return cls(embedding, geom.MultiPolygon())
 
         threshold = embedding.scale * 2
 
         points = geom.MultiPoint(embedding.X[active_idx])
-        triangles = triangulate(points)
+        triangles = triangulate(points) if len(active_idx) >= 3 else []
 
         surviving = [
             t for t in triangles
@@ -150,7 +155,7 @@ class Region:
         ]
 
         if not surviving:
-            return cls(embedding, geom.MultiPolygon())
+            return cls(embedding, points.buffer(embedding.scale))
 
         polygon = unary_union(surviving)
         return cls(embedding, polygon)
