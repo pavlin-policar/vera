@@ -544,8 +544,8 @@ def extract_region_annotations(
             ra_group = []
             for v in var_group:
                 ra = _generate_single(v)
-                # Drop regions with empty polygons (e.g. when all Delaunay
-                # triangles are pruned by the rangeset threshold)
+                # Drop regions with empty polygons (e.g. a variable without
+                # members, or one whose samples all carry zero weight)
                 if not ra.region.polygon.is_empty:
                     ra_group.append(ra)
                 pbar.update(1)
