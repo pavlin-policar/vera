@@ -323,14 +323,53 @@ def _edge_precision(edges: np.ndarray, value_range: float, tol: float = 0.1) -> 
     return min(max(_decimals(e) for e in edges), width_precision)
 
 
+def _round_edges(x: np.ndarray, edges: np.ndarray, tolerance: float) -> np.ndarray:
+    """Round the inner bin edges of `x`, given all edges including the outer.
+
+    Each inner edge moves to the roundest number that either splits the
+    samples exactly as it does (the gap between the largest value below it
+    and the smallest value at or above it) or lies within `tolerance` times
+    the narrower of its two bins. The tolerance lets edges of densely
+    measured variables, whose gaps are tiny, reach round numbers, at the cost
+    of moving the few samples between the old and the new edge to the
+    neighbouring bin. An edge whose rounding would leave a bin without
+    samples keeps its exact rounding, which never does.
+    """
+    inner = edges[1:-1]
+    gaps = [(x[x < e].max(), x[x >= e].min()) for e in inner]
+    exact = np.array([_round_edge(e, lo=lo, hi=hi) for e, (lo, hi) in zip(inner, gaps)])
+
+    widths = np.diff(edges)
+    tols = tolerance * np.minimum(widths[:-1], widths[1:])
+    rounded = np.array([
+        _round_edge(e, lo=min(lo, e - t), hi=max(hi, e + t))
+        for e, (lo, hi), t in zip(inner, gaps, tols)
+    ])
+
+    # The edges of an empty bin are restored to their exact rounding until no
+    # bin is empty, or until every such edge is exact and the bin was already
+    # empty under k-means
+    while True:
+        counts = np.bincount(np.searchsorted(rounded, x, side="right"), minlength=len(inner) + 1)
+        restore = [i for b in np.flatnonzero(counts == 0) for i in (b - 1, b)
+                   if 0 <= i < len(inner) and rounded[i] != exact[i]]
+        if not restore:
+            return rounded
+        rounded[restore] = exact[restore]
+
+
 def __discretize_nonconst(
-    variable: ContinuousVariable, n_bins: int, random_state: Any = 0
+    variable: ContinuousVariable,
+    n_bins: int,
+    random_state: Any = 0,
+    edge_tolerance: float = 0.1,
 ) -> list[IndicatorVariable]:
     """Discretize non-constant continuous variables.
 
     Bins are half-open, `lower <= x < upper`. k-means places the edges, and
-    each inner edge is then moved to the roundest number that splits the
-    samples the same way, so the labels read `x < 4` rather than `x < 4.52`.
+    each inner edge is then moved to a round number, so the labels read
+    `x < 4` rather than `x < 4.52`. An edge may move by up to `edge_tolerance`
+    times the narrower of its two bins (see `_round_edges`).
     """
     from sklearn.preprocessing import KBinsDiscretizer
     from sklearn.exceptions import ConvergenceWarning
@@ -351,10 +390,7 @@ def __discretize_nonconst(
         warnings.simplefilter("ignore", category=ConvergenceWarning)
         discretizer.fit(x[:, None])
 
-    inner_edges = np.array([
-        _round_edge(edge, lo=x[x < edge].max(), hi=x[x >= edge].min())
-        for edge in discretizer.bin_edges_[0][1:-1]
-    ])
+    inner_edges = _round_edges(x, discretizer.bin_edges_[0], tolerance=edge_tolerance)
     precision = _edge_precision(inner_edges, value_range=x.max() - x.min())
 
     # Bins are assigned from the rounded edges, which are what the rules
@@ -379,11 +415,22 @@ def __discretize_nonconst(
 
 
 def discretize(
-    variable: ContinuousVariable, n_bins: int = 5, random_state: Any = 0
+    variable: ContinuousVariable,
+    n_bins: int = 5,
+    random_state: Any = 0,
+    edge_tolerance: float = 0.1,
 ) -> list[IndicatorVariable]:
-    """Discretize a continuous variable."""
+    """Discretize a continuous variable.
+
+    `edge_tolerance` is how far, as a fraction of the narrower adjacent bin,
+    a k-means bin edge may move to reach a round number; 0 keeps every
+    sample in its k-means bin."""
     if not isinstance(variable, ContinuousVariable):
         raise TypeError("Can only discretize continuous variables!")
+    # Adjacent edges move towards each other by at most this fraction of the
+    # bin between them each, so below one half they cannot cross
+    if not 0 <= edge_tolerance < 0.5:
+        raise ValueError(f"`edge_tolerance` must lie in [0, 0.5), got {edge_tolerance}")
 
     # Bins are derived from the measured values, and a NaN is not one of them:
     # counted as a value of its own it makes a constant variable look like it
@@ -396,7 +443,9 @@ def discretize(
     elif len(np.unique(measured_values)) == 1:
         disc_vars = __discretize_const(variable)
     else:
-        disc_vars = __discretize_nonconst(variable, n_bins, random_state=random_state)
+        disc_vars = __discretize_nonconst(
+            variable, n_bins, random_state=random_state, edge_tolerance=edge_tolerance
+        )
 
     return disc_vars
 

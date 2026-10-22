@@ -452,8 +452,9 @@ class TestDiscretize(unittest.TestCase):
 
 
 class TestDiscretizationEdges(unittest.TestCase):
-    """k-means places the bin edges, which are then moved to round numbers
-    without moving any sample to another bin."""
+    """k-means places the bin edges, which are then moved to round numbers,
+    either within the gap between neighbouring samples or by at most a
+    tolerance of the adjacent bins' widths."""
 
     def test_round_edge_takes_the_roundest_number_in_the_gap(self):
         self.assertEqual(3, pp._round_edge(2.5, lo=2, hi=3))
@@ -468,7 +469,7 @@ class TestDiscretizationEdges(unittest.TestCase):
         self.assertEqual(6, pp._round_edge(6.2, lo=5, hi=9.9))
         self.assertEqual(8, pp._round_edge(8.1, lo=5, hi=9.9))
 
-    def test_bins_match_kmeans(self):
+    def test_bins_match_kmeans_without_tolerance(self):
         from sklearn.preprocessing import KBinsDiscretizer
 
         rng = np.random.default_rng(0)
@@ -476,7 +477,7 @@ class TestDiscretizationEdges(unittest.TestCase):
             x = rng.lognormal(size=500) * scale
             variable = pp.ingest(pd.Series(x, name="x"))
 
-            result = pp.discretize(variable, n_bins=5)
+            result = pp.discretize(variable, n_bins=5, edge_tolerance=0)
 
             kmeans = KBinsDiscretizer(
                 n_bins=5, strategy="kmeans", encode="ordinal", random_state=0,
@@ -484,6 +485,61 @@ class TestDiscretizationEdges(unittest.TestCase):
             expected = kmeans.fit_transform(x[:, None])[:, 0]
             actual = np.argmax(np.column_stack([v.values for v in result]), axis=1)
             np.testing.assert_equal(expected, actual)
+
+    def test_edges_move_by_at_most_the_tolerance(self):
+        from sklearn.preprocessing import KBinsDiscretizer
+
+        rng = np.random.default_rng(5)
+        x = np.round(rng.lognormal(size=2000), 4)
+        variable = pp.ingest(pd.Series(x, name="x"))
+
+        result = pp.discretize(variable, n_bins=5, edge_tolerance=0.1)
+
+        edges = KBinsDiscretizer(
+            n_bins=5, strategy="kmeans", encode="ordinal", random_state=0,
+        ).fit(x[:, None]).bin_edges_[0]
+        widths = np.diff(edges)
+        for i, v in enumerate(result[1:], start=1):
+            lo, hi = x[x < edges[i]].max(), x[x >= edges[i]].min()
+            in_gap = lo < v.rule.lower <= hi
+            tol = 0.1 * min(widths[i - 1], widths[i])
+            self.assertTrue(in_gap or abs(v.rule.lower - edges[i]) <= tol, v.rule.lower)
+
+    def test_densely_measured_data_gets_round_edges(self):
+        # Values four decimals apart leave gaps too narrow for any number
+        # rounder than the values themselves
+        rng = np.random.default_rng(6)
+        x = np.round(rng.uniform(0, 1, size=4000), 4)
+        variable = pp.ingest(pd.Series(x, name="x"))
+
+        exact = pp.discretize(variable, n_bins=5, edge_tolerance=0)
+        tolerant = pp.discretize(variable, n_bins=5, edge_tolerance=0.1)
+
+        self.assertGreater(exact[0].rule.precision, 1)
+        self.assertEqual(1, tolerant[0].rule.precision)
+        for v in tolerant[1:]:
+            self.assertEqual(round(v.rule.lower, 1), v.rule.lower)
+
+    def test_rounding_never_empties_a_bin(self):
+        # The middle bin holds only 2.02. Its lower edge rounds to 2 within
+        # the gap, and its upper edge, 2.04, would round to 2 as well within
+        # the tolerance, leaving the bin empty; that edge keeps its exact
+        # rounding, 2.5, instead
+        x = np.array([0.2, 0.5, 2.02, 2.5, 2.9])
+        edges = np.array([0.2, 1.0, 2.04, 2.9])
+
+        rounded = pp._round_edges(x, edges, tolerance=0.1)
+
+        np.testing.assert_equal(rounded, [2.0, 2.5])
+        counts = np.bincount(np.searchsorted(rounded, x, side="right"), minlength=3)
+        self.assertTrue((counts > 0).all())
+
+    def test_edge_tolerance_must_keep_edges_apart(self):
+        variable = pp.ingest(pd.Series([1.0, 2.0, 3.0, 4.0], name="cont"))
+
+        for tolerance in [-0.1, 0.5, 1]:
+            with self.assertRaises(ValueError):
+                pp.discretize(variable, n_bins=2, edge_tolerance=tolerance)
 
     def test_rules_describe_their_bins(self):
         rng = np.random.default_rng(1)
