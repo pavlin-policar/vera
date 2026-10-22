@@ -84,8 +84,6 @@ vera.pl.plot_annotations(contrastive_explanations)
 vera.pl.plot_annotations(descriptive_explanations)
 ```
 
-Labels write numbers with a comma between groups of thousands, e.g. `MonthlyIncome ≥ 11,400`. Set `vera.rules.THOUSANDS_SEPARATOR` to another separator, such as a thin space, or to `""` to print the digits ungrouped.
-
 ## Binary and presence features
 
 Before regions are extracted, every column is expanded into indicator variables: continuous columns are discretized into bins, categorical and boolean columns are one-hot encoded. For a binary feature -- a gene that is either expressed or not, a flag that is either set or not -- this yields two indicators, `gene is True` and `gene is False`, and the negative one is annotated as a region of its own. A region labelled "gene is absent" is rarely something you want on a plot.
