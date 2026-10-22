@@ -311,18 +311,18 @@ class TestIntervalRuleStringFormatting(unittest.TestCase):
         r2 = vera.rules.IntervalRule(13024, 13348, precision=0)
         r3 = vera.rules.IntervalRule(13349, 14012, precision=0)
 
-        self.assertEqual(str(r1), "12123 ≤ x < 13023")
-        self.assertEqual(str(r2), "13024 ≤ x < 13348")
-        self.assertEqual(str(r3), "13349 ≤ x < 14012")
+        self.assertEqual(str(r1), "12,123 ≤ x < 13,023")
+        self.assertEqual(str(r2), "13,024 ≤ x < 13,348")
+        self.assertEqual(str(r3), "13,349 ≤ x < 14,012")
 
     def test_rounding(self):
         r1 = vera.rules.IntervalRule(12123, 13023, precision=-3)
         r2 = vera.rules.IntervalRule(13024, 13348, precision=-3)
         r3 = vera.rules.IntervalRule(13349, 14012, precision=-3)
 
-        self.assertEqual(str(r1), "12000 ≤ x < 13000")
-        self.assertEqual(str(r2), "13000 ≤ x < 13000")
-        self.assertEqual(str(r3), "13000 ≤ x < 14000")
+        self.assertEqual(str(r1), "12,000 ≤ x < 13,000")
+        self.assertEqual(str(r2), "13,000 ≤ x < 13,000")
+        self.assertEqual(str(r3), "13,000 ≤ x < 14,000")
 
 
     def test_open_ended_intervals(self):
@@ -331,7 +331,39 @@ class TestIntervalRuleStringFormatting(unittest.TestCase):
 
     def test_rounding_to_tens_of_floats_drops_the_decimal_point(self):
         r = vera.rules.IntervalRule(12123.4, 13023.9, precision=-3)
-        self.assertEqual("12000 ≤ x < 13000", str(r))
+        self.assertEqual("12,000 ≤ x < 13,000", str(r))
+
+
+class TestIntervalRuleThousandsSeparator(unittest.TestCase):
+    def setUp(self):
+        self._separator = vera.rules.THOUSANDS_SEPARATOR
+
+    def tearDown(self):
+        vera.rules.THOUSANDS_SEPARATOR = self._separator
+
+    def test_groups_thousands_by_default(self):
+        self.assertEqual("x ≥ 11,400", str(vera.rules.IntervalRule(lower=11400, precision=0)))
+        self.assertEqual("4,110 ≤ x < 11,400", str(vera.rules.IntervalRule(4110, 11400, precision=0)))
+
+    def test_leaves_numbers_below_a_thousand_alone(self):
+        self.assertEqual("950.0 ≤ x < 999.5", str(vera.rules.IntervalRule(950, 999.5, precision=1)))
+
+    def test_groups_only_the_integer_part(self):
+        r = vera.rules.IntervalRule(1234.5678, 1234567.25, precision=4)
+        self.assertEqual("1,234.5678 ≤ x < 1,234,567.2500", str(r))
+
+    def test_groups_negative_numbers(self):
+        self.assertEqual("-12,500 ≤ x < -1,500", str(vera.rules.IntervalRule(-12500, -1500, precision=0)))
+
+    def test_custom_separator(self):
+        vera.rules.THOUSANDS_SEPARATOR = "\u2009"
+        r = vera.rules.IntervalRule(4110.5, 11400, precision=1)
+        self.assertEqual("4\u2009110.5 ≤ x < 11\u2009400.0", str(r))
+
+    def test_empty_separator_leaves_digits_ungrouped(self):
+        vera.rules.THOUSANDS_SEPARATOR = ""
+        self.assertEqual("4110 ≤ x < 11400", str(vera.rules.IntervalRule(4110, 11400, precision=0)))
+        self.assertEqual("x ≥ 12000", str(vera.rules.IntervalRule(lower=12123, precision=-3)))
 
 
 class TestIndicatorRule(unittest.TestCase):

@@ -2,6 +2,11 @@ from typing import Iterable, Union
 
 import numpy as np
 
+# The separator between groups of three digits in the integer part of the
+# numbers that interval rules print, e.g. "12,000 ≤ x < 13,000". An empty
+# string prints the digits ungrouped
+THOUSANDS_SEPARATOR = ","
+
 
 class IncompatibleRuleError(ValueError):
     def __init__(self, r1, r2):
@@ -80,10 +85,12 @@ class IntervalRule(Rule):
         # The interval is half-open, `lower <= x < upper`, which is how
         # `discretize` assigns samples to bins
         def _format_num(x):
+            group = "," if THOUSANDS_SEPARATOR else ""
             if self.precision < 0:
-                return f"{round(x, self.precision):.0f}"
+                s = f"{round(x, self.precision):{group}.0f}"
             else:
-                return f"{x:.{self.precision}f}"
+                s = f"{x:{group}.{self.precision}f}"
+            return s.replace(",", THOUSANDS_SEPARATOR)
 
         # Special handling for `x ≥ 5`. Easier to read
         if np.isfinite(self.lower) and not np.isfinite(self.upper):
