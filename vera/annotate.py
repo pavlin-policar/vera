@@ -6,6 +6,7 @@ from sklearn.utils import check_random_state
 from tqdm import tqdm
 
 import vera.preprocessing as pp
+from vera.embedding import _check_sample_weights
 from vera.region_annotation import RegionAnnotation
 from vera.variables import Variable
 
@@ -57,6 +58,7 @@ def generate_region_annotations(
     filter_uninformative: bool = True,
     uninformative_max_sample_coverage: float = 0.95,
     indicator_columns: pp.IndicatorColumns = None,
+    sample_weights: np.ndarray = None,
     random_state: Any = None,
 ) -> list[list[RegionAnnotation]]:
     """
@@ -100,7 +102,8 @@ def generate_region_annotations(
         If True, variables that describe nothing are filtered out. These are
         variables whose indicators all merged into a single region annotation,
         and variables left with a single region annotation that singles out
-        almost none of the data.
+        almost none of the data. With `sample_weights`, a variable is filtered
+        out if either its weighted or its unweighted regions describe nothing.
     uninformative_max_sample_coverage : float, default=0.95
         Fraction of the data that a single region annotation's rule may match,
         or that its region may contain, before its variable is considered
@@ -118,6 +121,22 @@ def generate_region_annotations(
         left out of the variable's rates. Pass ``"all"`` for a table of nothing
         but indicators, a collection of column names to select them out of a
         mixed table, or a mapping from column name to the text annotating it.
+    sample_weights : np.ndarray, default=None
+        One weight in [0, 1] per sample, telling how well the embedding
+        preserves it, e.g., its k-nearest-neighbor recall: the fraction of its
+        k nearest neighbors in the input space that are also among its k
+        nearest neighbors in the embedding (the accompanying paper uses
+        k = 100). VERA never sees the input space, so the weights are computed
+        by the caller, and are used as given, without rescaling. Each weight
+        multiplies the sample's indicator values where they act as KDE
+        weights, and each density is contoured relative to the peak of its
+        unweighted counterpart, so weights of one reproduce the unweighted
+        regions, poorly embedded samples shape the regions less, and a
+        variable whose samples are all poorly embedded yields smaller regions
+        or none. Purity and coverage count every sample in a region once,
+        whatever its weight, and informativeness is also judged on the
+        unweighted regions, so weighting can drop a variable but never add
+        one. Only supported with ``region_method="kde"``.
     random_state : Any, default=None
         Random state for reproducibility of sampling and of the k-means
         discretization of continuous variables.
@@ -129,6 +148,9 @@ def generate_region_annotations(
         :class:`RegionAnnotation` objects describing the regions associated with
         one variable or variable group.
     """
+    if sample_weights is not None:
+        sample_weights = _check_sample_weights(sample_weights, features.shape[0])
+
     # Sample the data if necessary. Running on large data sets can be very slow
     random_state = check_random_state(random_state)
     if sample_size is not None and features.shape[0] > sample_size:
@@ -145,6 +167,8 @@ def generate_region_annotations(
         ]
         features = features.iloc[sample_idx].set_axis(columns, axis="columns")
         embedding = embedding[sample_idx]
+        if sample_weights is not None:
+            sample_weights = np.asarray(sample_weights)[sample_idx]
 
     # Convert the data frame to VERA feature objects
     variables = pp.expand_df(
@@ -155,30 +179,46 @@ def generate_region_annotations(
         random_state=random_state,
     )
 
-    # Generate explanatory region annotations from each of the derived features
-    region_annotations = pp.extract_region_annotations(
-        variables,
-        embedding,
-        scale_factor=scale_factor,
-        region_method=region_method,
-        kernel=kernel,
-        contour_level=contour_level,
-    )
-
-    # Perform iterative merging on every single region annotation group
-    region_annotations = [
-        pp.merge_overfragmented(
-            ra_group, min_sample_overlap=merge_min_sample_overlap
+    def _annotate(weights):
+        # Generate explanatory region annotations from each derived feature,
+        # then merge over-fragmented regions within each annotation group
+        ra_groups = pp.extract_region_annotations(
+            variables,
+            embedding,
+            scale_factor=scale_factor,
+            region_method=region_method,
+            kernel=kernel,
+            contour_level=contour_level,
+            sample_weights=weights,
         )
-        for ra_group in tqdm(region_annotations)
-    ]
+        return [
+            pp.merge_overfragmented(
+                ra_group, min_sample_overlap=merge_min_sample_overlap
+            )
+            for ra_group in tqdm(ra_groups)
+        ]
+
+    region_annotations = _annotate(sample_weights)
 
     # Filter out annotation groups whose variable describes nothing
     if filter_uninformative:
+        def _uninformative(ra_groups):
+            return {
+                ra_group[0].descriptor.base_variable
+                for ra_group in ra_groups
+                if _is_uninformative(ra_group, uninformative_max_sample_coverage)
+            }
+
+        uninformative = _uninformative(region_annotations)
+        # Sample weights only shrink regions, which can bring a region spanning
+        # nearly all the data under the coverage limit. Variables are also
+        # judged on their unweighted regions, so weighting never adds one.
+        if sample_weights is not None:
+            uninformative |= _uninformative(_annotate(None))
         region_annotations = [
             ra_group
             for ra_group in region_annotations
-            if not _is_uninformative(ra_group, uninformative_max_sample_coverage)
+            if ra_group[0].descriptor.base_variable not in uninformative
         ]
 
     return region_annotations

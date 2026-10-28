@@ -19,10 +19,22 @@ def _max_edge_length(polygon: geom.Polygon) -> float:
 
 
 class Density:
-    def __init__(self, grid: np.ndarray, values: np.ndarray):
+    """Density values on a grid.
+
+    ``values_scaled``, which contour levels apply to, divides the values by
+    *peak*, by default their own maximum. A larger reference peak, e.g., that of
+    the unweighted density when samples are down-weighted, keeps the values
+    below one, and the regions contoured from them smaller.
+    """
+
+    def __init__(self, grid: np.ndarray, values: np.ndarray, peak: float = None):
         self.grid = grid
-        self.values = values / values.sum()
-        self.values_scaled = values / values.max()
+        # A density with no mass, e.g., of a variable whose samples all carry
+        # zero sample weight, stays zero and yields no region
+        total = values.sum()
+        peak = values.max() if peak is None else peak
+        self.values = values / total if total > 0 else values
+        self.values_scaled = values / peak if peak > 0 else values
 
     def _get_xyz(
         self, scaled: bool = False
