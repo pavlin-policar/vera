@@ -210,10 +210,15 @@ class TestBackgroundLabels(BackgroundEnrichmentTestBase):
 def drawn_slanted(text) -> bool:
     """Whether matplotlib draws `text` in an italic or oblique face, which it
     does not when it substitutes the regular face for a missing italic one.
-    Finds the face by path, as `_has_italic_face` does, and relies on the same
-    assumption that one path holds one registered face."""
+    Finds the face by path and face index, as `_has_italic_face` does, since
+    the faces of a .ttc collection share a path."""
     path = font_manager.findfont(text.get_fontproperties())
-    return next(e.style for e in font_manager.fontManager.ttflist if e.fname == path) != "normal"
+    index = getattr(path, "face_index", 0)
+    return next(
+        e.style
+        for e in font_manager.fontManager.ttflist
+        if e.fname == path and getattr(e, "index", 0) == index
+    ) != "normal"
 
 
 class TestBackgroundItalicFaces(BackgroundEnrichmentTestBase):

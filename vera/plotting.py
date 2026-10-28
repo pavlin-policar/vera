@@ -511,13 +511,16 @@ def _has_italic_face(fontfamily) -> bool:
         )
     except ValueError:
         return False
-    # The path identifies the face because matplotlib registers only the first
-    # face of a .ttc collection; if it ever registers them all, faces of one
-    # collection share a path and this would also accept a regular face whose
-    # collection holds an italic one. `style` is independent of `weight`, so
-    # bold faces are "normal" here and bold italic ones are not.
+    # Faces of a .ttc collection share a path. matplotlib >= 3.11 registers
+    # every face and returns a `FontPath` carrying the face index; earlier
+    # versions register only the first face and return a plain path, which the
+    # default index of 0 matches. `style` is independent of `weight`, so bold
+    # faces are "normal" here and bold italic ones are not.
+    index = getattr(path, "face_index", 0)
     return any(
-        entry.fname == path and entry.style != "normal"
+        entry.fname == path
+        and getattr(entry, "index", 0) == index
+        and entry.style != "normal"
         for entry in font_manager.fontManager.ttflist
     )
 
