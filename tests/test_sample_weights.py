@@ -60,6 +60,18 @@ class TestSampleWeights(unittest.TestCase):
             self.assertLess(p2.area, p1.area)
             self.assertTrue(p1.buffer(1e-9).contains(p2))
 
+    def test_weights_scale_the_density_as_given(self):
+        # Uniform weights scale the contoured density by exactly the weight,
+        # so they are neither normalized nor rescaled
+        plain = Embedding(self.embedding).estimate_density(self.features["middle"])
+        for w in [0.3, 0.7]:
+            weighted = Embedding(
+                self.embedding, sample_weights=np.full(self.n_samples, w)
+            ).estimate_density(self.features["middle"])
+            np.testing.assert_allclose(
+                weighted.values_scaled, w * plain.values_scaled, atol=1e-12
+            )
+
     def test_uniform_weights_below_contour_level_remove_regions(self):
         weighted = self._regions(
             sample_weights=np.full(self.n_samples, 0.2), contour_level=0.25
