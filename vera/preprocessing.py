@@ -510,8 +510,8 @@ def extract_region_annotations(
     contour_level : float
         Density contour level (only used when *method* is ``"kde"``).
     sample_weights : np.ndarray, optional
-        Non-negative per-sample weights multiplying the KDE weights; see
-        :class:`~vera.embedding.Embedding`. Only supported when *method* is
+        Per-sample weights in [0, 1], used as given to multiply the KDE
+        weights; see :class:`~vera.embedding.Embedding`. Only supported when *method* is
         ``"kde"``, and only when *embedding* is an array; an
         :class:`~vera.embedding.Embedding` carries its own weights.
     """

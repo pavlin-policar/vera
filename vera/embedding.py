@@ -52,15 +52,20 @@ class Embedding:
     n_density_grid_points : int, default=100
         Number of grid points per axis on which densities are evaluated.
     sample_weights : np.ndarray, optional
-        Per-sample weights in [0, 1], e.g., derived from a sample-wise
-        distortion measure of the embedding. A weight is the fraction of the
-        sample's contribution that is kept: it multiplies the indicator values
-        that act as KDE weights. Each weighted density is scaled by the peak of
-        its unweighted counterpart, so the contour level applies to the
-        unweighted density. A variable whose samples are all down-weighted
-        therefore yields a smaller region, and none once its density stays
-        below the contour level. Region membership and the rates computed on it
-        are unaffected.
+        One weight in [0, 1] per sample, telling how well the embedding
+        preserves it, e.g., its k-nearest-neighbor recall: the fraction of its
+        k nearest neighbors in the input space that are also among its k
+        nearest neighbors in the embedding (the accompanying paper uses
+        k = 100). The weights are used as given, without rescaling: a weight is
+        the fraction of the sample's contribution that is kept, and multiplies
+        the indicator values that act as KDE weights. Each weighted density is
+        scaled by the peak of its unweighted counterpart, so the contour level
+        applies to the unweighted density, weights of one reproduce the
+        unweighted regions, and lower weights shrink them. A variable whose
+        samples are all down-weighted yields a smaller region, and none once
+        its density stays below the contour level. Weights shape only the
+        regions: the samples a region contains, and the rates computed on them,
+        count every sample once.
     """
 
     def __init__(

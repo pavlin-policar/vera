@@ -102,7 +102,8 @@ def generate_region_annotations(
         If True, variables that describe nothing are filtered out. These are
         variables whose indicators all merged into a single region annotation,
         and variables left with a single region annotation that singles out
-        almost none of the data.
+        almost none of the data. With `sample_weights`, a variable is filtered
+        out if either its weighted or its unweighted regions describe nothing.
     uninformative_max_sample_coverage : float, default=0.95
         Fraction of the data that a single region annotation's rule may match,
         or that its region may contain, before its variable is considered
@@ -121,15 +122,21 @@ def generate_region_annotations(
         but indicators, a collection of column names to select them out of a
         mixed table, or a mapping from column name to the text annotating it.
     sample_weights : np.ndarray, default=None
-        Weight in [0, 1] per sample, e.g., derived from a sample-wise
-        distortion measure of the embedding, such as the fraction of a sample's
-        nearest neighbors in the input space that remain its neighbors in the
-        embedding. Each weight multiplies the sample's indicator values where
-        they act as KDE weights, and each density is contoured relative to the
-        peak of its unweighted counterpart, so poorly embedded samples shape
-        the regions less, and a variable whose samples are all poorly embedded
-        yields smaller regions or none. Region membership, and hence purity and
-        coverage, is unaffected. Only supported with ``region_method="kde"``.
+        One weight in [0, 1] per sample, telling how well the embedding
+        preserves it, e.g., its k-nearest-neighbor recall: the fraction of its
+        k nearest neighbors in the input space that are also among its k
+        nearest neighbors in the embedding (the accompanying paper uses
+        k = 100). VERA never sees the input space, so the weights are computed
+        by the caller, and are used as given, without rescaling. Each weight
+        multiplies the sample's indicator values where they act as KDE
+        weights, and each density is contoured relative to the peak of its
+        unweighted counterpart, so weights of one reproduce the unweighted
+        regions, poorly embedded samples shape the regions less, and a
+        variable whose samples are all poorly embedded yields smaller regions
+        or none. Purity and coverage count every sample in a region once,
+        whatever its weight, and informativeness is also judged on the
+        unweighted regions, so weighting can drop a variable but never add
+        one. Only supported with ``region_method="kde"``.
     random_state : Any, default=None
         Random state for reproducibility of sampling and of the k-means
         discretization of continuous variables.
